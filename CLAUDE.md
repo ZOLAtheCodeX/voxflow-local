@@ -8,10 +8,15 @@ VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Pytho
 
 ```
 Sources/VoxFlowApp/        Swift frontend (SwiftUI, MenuBarExtra)
-  AppCoordinator.swift      Central coordinator (~1250 lines, @MainActor)
-  Services/                 Backend API, accessibility, audio capture, process manager
+  AppCoordinator.swift      Central orchestrator (~636 lines, @MainActor)
+  Services/                 Extracted coordinators + backend services
+    SettingsCoordinator.swift           Provider, STT, translation settings + persistence
+    OnboardingCoordinator.swift         Calibration flow lifecycle
+    TextInsertionCoordinator.swift      AX insert, clipboard copy, per-app stats
+    TranslationBenchmarkCoordinator.swift  Profile benchmarking + history
+    PrivacyConsentCoordinator.swift     Privacy preview + closure-based continuation
   Models/AppModels.swift    All domain types (enums, structs)
-  State/AppState.swift      Published app state
+  State/AppState.swift      Published app state (~45 @Published properties)
   Views/                    SwiftUI views
 backend/app/
   server.py                 FastAPI server (~1624 lines, all endpoints)
@@ -68,7 +73,7 @@ swift run VoxFlowLocal
 
 ### Swift
 
-- **`@MainActor` coordinator pattern**: `AppCoordinator` is the central state manager; views observe it
+- **`@MainActor` coordinator pattern**: `AppCoordinator` orchestrates audio capture and workflow routing; 5 extracted coordinators handle settings, onboarding, text insertion, benchmarking, and privacy consent via protocol-typed properties. Views observe `AppCoordinator.state` unchanged.
 - **Keychain for secrets**: API keys stored via `KeychainService` (not UserDefaults)
 - **CF type bridging**: Use `CFGetTypeID()` guard + `as!` for AXUIElement/AXValue casts (Swift 6.2 rejects `as?` on CF types)
 - **os.Logger**: Use `Logger(subsystem: "local.voxflow.app", category: "...")` for logging
@@ -84,7 +89,7 @@ swift run VoxFlowLocal
 
 ## Testing
 
-- Test coverage expanded: 157+ tests (66 Swift + 91 Python) covering models, parsing, backend utilities
+- Test coverage: 193+ tests (102 Swift + 91 Python) covering models, parsing, coordinators, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests: `cd backend && python -m pytest`
@@ -107,7 +112,8 @@ swift run VoxFlowLocal
 
 ## Do Not
 
-- Decompose `AppCoordinator.swift` without running the full test suite first — decomposition is in progress (5 coordinators being extracted with tests for each)
+- Modify extracted coordinator protocols without updating both the coordinator and AppCoordinator forwarding methods
+- Move workflow routing logic (`processDictation`, `processTranslation`, `processMeeting`) out of AppCoordinator — it belongs with the audio capture orchestration
 - Use `URLSession.shared` — use the configured session in `BackendAPIClient` (has timeouts)
 - Store secrets in UserDefaults — use `KeychainService`
 - Use bare `except Exception: pass` in Python — always log
