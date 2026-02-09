@@ -84,8 +84,9 @@ swift run VoxFlowLocal
 
 ## Testing
 
-- Test coverage is currently low (~5%)
+- Test coverage expanded: 157+ tests (66 Swift + 91 Python) covering models, parsing, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
+- Run Swift tests: `swift test`
 - Run backend tests: `cd backend && python -m pytest`
 
 ## Common Issues
@@ -106,7 +107,7 @@ swift run VoxFlowLocal
 
 ## Do Not
 
-- Decompose `AppCoordinator.swift` without test coverage — too risky at current ~5% coverage
+- Decompose `AppCoordinator.swift` without running the full test suite first — decomposition is in progress (5 coordinators being extracted with tests for each)
 - Use `URLSession.shared` — use the configured session in `BackendAPIClient` (has timeouts)
 - Store secrets in UserDefaults — use `KeychainService`
 - Use bare `except Exception: pass` in Python — always log
