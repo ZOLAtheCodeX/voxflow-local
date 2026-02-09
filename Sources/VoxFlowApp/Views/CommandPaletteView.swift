@@ -9,6 +9,7 @@ struct CommandPaletteView: View {
     private enum ActivePanel: String, CaseIterable, Identifiable {
         case dashboard
         case capture
+        case recent
 
         var id: String { rawValue }
 
@@ -18,6 +19,8 @@ struct CommandPaletteView: View {
                 return "Dashboard"
             case .capture:
                 return "Capture"
+            case .recent:
+                return "Recent"
             }
         }
     }
@@ -108,6 +111,8 @@ struct CommandPaletteView: View {
                 } onOpenFullDashboard: {
                     onOpenDashboardWindow()
                 }
+            } else if activePanel == .recent {
+                recentDictationsPanel
             } else {
                 Picker("Provider", selection: Binding(
                     get: { state.providerMode },
@@ -411,6 +416,74 @@ struct CommandPaletteView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
+    }
+
+    private var recentDictationsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if state.recentDictations.isEmpty {
+                Text("No recent dictations this session.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 24)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(state.recentDictations) { candidate in
+                            recentRow(candidate)
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+            }
+        }
+    }
+
+    private func recentRow(_ candidate: TranscriptCandidate) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(String(candidate.rawText.prefix(80)) + (candidate.rawText.count > 80 ? "..." : ""))
+                    .font(.system(size: 12))
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    Text(candidate.selectedMode.displayName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text(relativeTime(candidate.timestamp))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer()
+
+            VStack(spacing: 4) {
+                Button("Insert") {
+                    coordinator.insertRecentDictation(candidate)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(candidate.text(for: candidate.selectedMode), forType: .string)
+                    state.statusLine = "Copied to clipboard"
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(8)
+        .background(Color.gray.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        return "\(Int(interval / 3600))h ago"
     }
 
     private var insertDisabled: Bool {

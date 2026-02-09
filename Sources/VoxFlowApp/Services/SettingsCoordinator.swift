@@ -11,6 +11,8 @@ import os.log
     func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String, ttsModel: String, ttsVoice: String)
     func selectTranslationProfile(_ profile: TranslationProfile)
     func setTranslationModeEnabled(_ isEnabled: Bool)
+    func selectInsertBehavior(_ behavior: InsertBehavior)
+    func updateAppToneOverride(bundleID: String, tone: ToneStyle?)
     func restartBackendWithCurrentConfiguration(status: String)
     func currentBackendLaunchConfiguration() -> BackendLaunchConfiguration
     func backendLaunchConfiguration(for profile: TranslationProfile) -> BackendLaunchConfiguration
@@ -29,6 +31,8 @@ final class SettingsCoordinator: SettingsCoordinating {
     private let sttModelKey = "voxflow.stt.model"
     private let whisperModelKey = "voxflow.whisper.model"
     private let voxtralSafeModeKey = "voxflow.voxtral.safeMode"
+    private let insertBehaviorKey = "voxflow.dictation.insertBehavior"
+    private let appToneOverridesKey = "voxflow.dictation.appToneOverrides"
     private let providerModeKey = "voxflow.provider.mode"
     private let privateAPIBaseURLKey = "voxflow.privateapi.baseURL"
     private let privateAPIModelKey = "voxflow.privateapi.model"
@@ -41,6 +45,14 @@ final class SettingsCoordinator: SettingsCoordinating {
 
     static let keychainPrivateAPIKeyAccount = "voxflow.privateapi.key"
     static let keychainOpenAIAPIKeyAccount = "voxflow.openai.apiKey"
+
+    static let defaultAppTones: [String: ToneStyle] = [
+        "com.tinyspeck.slackmacgap": .concise,
+        "com.apple.mail": .formal,
+        "com.microsoft.Outlook": .formal,
+        "com.google.Chrome": .neutral,
+        "com.apple.dt.Xcode": .neutral,
+    ]
 
     init(state: AppState, backendManager: BackendProcessManager) {
         self.state = state
@@ -96,6 +108,16 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.openAITTSModel = defaults.string(forKey: openAITTSModelKey) ?? "gpt-4o-mini-tts"
         state.openAITTSVoice = defaults.string(forKey: openAITTSVoiceKey) ?? "alloy"
         state.translationModeEnabled = defaults.bool(forKey: translationModeEnabledKey)
+
+        if let insertBehaviorRaw = defaults.string(forKey: insertBehaviorKey),
+           let behavior = InsertBehavior(rawValue: insertBehaviorRaw) {
+            state.insertBehavior = behavior
+        }
+
+        if let overridesData = defaults.data(forKey: appToneOverridesKey),
+           let decoded = try? JSONDecoder().decode([String: String].self, from: overridesData) {
+            state.appToneOverrides = decoded.compactMapValues { ToneStyle(rawValue: $0) }
+        }
 
         let completed = defaults.bool(forKey: onboardingKey)
         if completed {
@@ -197,6 +219,25 @@ final class SettingsCoordinator: SettingsCoordinating {
         UserDefaults.standard.set(state.openAITTSVoice, forKey: openAITTSVoiceKey)
 
         restartBackendWithCurrentConfiguration(status: "OpenAI speech configuration updated")
+    }
+
+    func selectInsertBehavior(_ behavior: InsertBehavior) {
+        guard state.insertBehavior != behavior else { return }
+        state.insertBehavior = behavior
+        UserDefaults.standard.set(behavior.rawValue, forKey: insertBehaviorKey)
+        state.statusLine = "Insert behavior: \(behavior.displayName)"
+    }
+
+    func updateAppToneOverride(bundleID: String, tone: ToneStyle?) {
+        if let tone {
+            state.appToneOverrides[bundleID] = tone
+        } else {
+            state.appToneOverrides.removeValue(forKey: bundleID)
+        }
+        let encoded = state.appToneOverrides.mapValues { $0.rawValue }
+        if let data = try? JSONEncoder().encode(encoded) {
+            UserDefaults.standard.set(data, forKey: appToneOverridesKey)
+        }
     }
 
     func selectTranslationProfile(_ profile: TranslationProfile) {

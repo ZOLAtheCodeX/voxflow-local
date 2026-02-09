@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor protocol TextInsertionCoordinating {
     func insertCurrentText()
+    func insertText(_ text: String, statusSuffix: String) -> Bool
     func copyCurrentText()
     func copyMeetingMarkdownTemplate()
     func copyMeetingNotionTemplate()
@@ -47,6 +48,10 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             if result.fallbackUsed {
                 state.fallbackInsertCount += 1
             }
+            if result.method != .simulatedPaste {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(state.displayText, forType: .string)
+            }
             state.statusLine = "Inserted"
             state.lastInsertedText = state.displayText
             state.sessionState = .idle
@@ -55,6 +60,36 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             state.statusLine = "Insert failed. Copied to clipboard."
             copyCurrentText()
             state.sessionState = .review
+        }
+    }
+
+    @discardableResult
+    func insertText(_ text: String, statusSuffix: String) -> Bool {
+        guard !text.isEmpty else { return false }
+
+        let appName = state.focusTarget.appName ?? "Unknown App"
+        let result = insertService.insert(text: text)
+        state.lastInsertResult = result
+        recordInsertStats(forApp: appName, result: result)
+
+        if result.success {
+            state.successfulInsertCount += 1
+            if result.fallbackUsed {
+                state.fallbackInsertCount += 1
+            }
+            if result.method != .simulatedPaste {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+            state.statusLine = statusSuffix
+            state.lastInsertedText = text
+            return true
+        } else {
+            state.failedInsertCount += 1
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            state.statusLine = "Auto-insert failed — copied to clipboard"
+            return false
         }
     }
 

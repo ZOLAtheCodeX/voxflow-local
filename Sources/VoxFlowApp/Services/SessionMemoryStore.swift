@@ -15,9 +15,15 @@ final class SessionMemoryStore {
         }
     }
 
+    func recent(limit: Int = 10) -> [TranscriptCandidate] {
+        Array(items.suffix(limit).reversed())
+    }
+
     func latest() -> TranscriptCandidate? {
         items.last
     }
+
+    var count: Int { items.count }
 
     func clear() {
         items.removeAll()

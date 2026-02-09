@@ -18,6 +18,9 @@ final class AppState: ObservableObject {
     @Published var activeCalibrationIndex: Int = 0
     @Published var workflowMode: WorkflowMode = .dictation
     @Published var toneStyle: ToneStyle = .neutral
+    @Published var insertBehavior: InsertBehavior = .alwaysReview
+    @Published var appToneOverrides: [String: ToneStyle] = [:]
+    @Published var recentDictations: [TranscriptCandidate] = []
     @Published var translationCandidate: TranslationCandidate?
     @Published var meetingCandidate: MeetingCandidate?
     @Published var translationModeEnabled = false

@@ -219,6 +219,46 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(candidate.markdownTemplate, candidate.formattedNotes)
     }
 
+    // MARK: - InsertBehavior
+
+    func testInsertBehaviorCleanupModes() {
+        XCTAssertNil(InsertBehavior.alwaysReview.cleanupMode)
+        XCTAssertEqual(InsertBehavior.autoInsertRaw.cleanupMode, .raw)
+        XCTAssertEqual(InsertBehavior.autoInsertLight.cleanupMode, .light)
+        XCTAssertEqual(InsertBehavior.autoInsertPolish.cleanupMode, .polish)
+    }
+
+    func testInsertBehaviorDisplayNamesUnique() {
+        let labels = Set(InsertBehavior.allCases.map(\.displayName))
+        XCTAssertEqual(labels.count, InsertBehavior.allCases.count)
+    }
+
+    // MARK: - FocusTargetSnapshot.bundleID
+
+    func testFocusTargetSnapshotIncludesBundleID() {
+        let snapshot = FocusTargetSnapshot(
+            hasFocusedTextInput: true, hasInsertionCursor: true,
+            appName: "Slack", bundleID: "com.tinyspeck.slackmacgap", role: "AXTextField"
+        )
+        XCTAssertEqual(snapshot.bundleID, "com.tinyspeck.slackmacgap")
+    }
+
+    func testFocusTargetUnavailableHasNilBundleID() {
+        XCTAssertNil(FocusTargetSnapshot.unavailable.bundleID)
+    }
+
+    // MARK: - TranscriptCandidate.timestamp
+
+    func testTranscriptCandidateHasTimestamp() {
+        let before = Date()
+        let candidate = TranscriptCandidate(
+            rawText: "test", lightText: "test", polishText: "test", selectedMode: .raw
+        )
+        let after = Date()
+        XCTAssertGreaterThanOrEqual(candidate.timestamp, before)
+        XCTAssertLessThanOrEqual(candidate.timestamp, after)
+    }
+
     // MARK: - MeetingCandidate.init(from:)
 
     func testMeetingCandidateFromResponse() {

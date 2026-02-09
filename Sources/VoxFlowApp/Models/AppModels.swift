@@ -106,6 +106,33 @@ enum STTBackend: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+enum InsertBehavior: String, CaseIterable, Identifiable, Codable {
+    case alwaysReview
+    case autoInsertRaw
+    case autoInsertLight
+    case autoInsertPolish
+
+    var id: String { rawValue }
+
+    var cleanupMode: CleanupMode? {
+        switch self {
+        case .alwaysReview: return nil
+        case .autoInsertRaw: return .raw
+        case .autoInsertLight: return .light
+        case .autoInsertPolish: return .polish
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .alwaysReview: return "Always Review"
+        case .autoInsertRaw: return "Auto-Insert Raw"
+        case .autoInsertLight: return "Auto-Insert Light"
+        case .autoInsertPolish: return "Auto-Insert Polish"
+        }
+    }
+}
+
 enum PrivacyOperationKind: String, Codable {
     case cleanup
     case translate
@@ -296,11 +323,13 @@ enum OnboardingPhase: String {
     case complete
 }
 
-struct TranscriptCandidate {
+struct TranscriptCandidate: Identifiable {
+    let id = UUID()
     var rawText: String
     var lightText: String
     var polishText: String
     var selectedMode: CleanupMode
+    var timestamp: Date = Date()
 
     func text(for mode: CleanupMode) -> String {
         switch mode {
@@ -373,12 +402,14 @@ struct FocusTargetSnapshot {
     let hasFocusedTextInput: Bool
     let hasInsertionCursor: Bool
     let appName: String?
+    let bundleID: String?
     let role: String?
 
     static let unavailable = FocusTargetSnapshot(
         hasFocusedTextInput: false,
         hasInsertionCursor: false,
         appName: nil,
+        bundleID: nil,
         role: nil
     )
 }

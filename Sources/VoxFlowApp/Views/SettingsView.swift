@@ -159,6 +159,59 @@ struct SettingsView: View {
                 .padding(.top, 4)
             }
 
+            Section("Dictation") {
+                Picker(
+                    "Insert behavior",
+                    selection: Binding(
+                        get: { state.insertBehavior },
+                        set: { coordinator.selectInsertBehavior($0) }
+                    )
+                ) {
+                    ForEach(InsertBehavior.allCases) { behavior in
+                        Text(behavior.displayName).tag(behavior)
+                    }
+                }
+
+                Text(insertBehaviorNote)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                Text("App Tone Overrides")
+                    .font(.system(size: 12, weight: .semibold))
+
+                if state.appToneOverrides.isEmpty {
+                    Text("No custom overrides. Apps use your selected tone or built-in defaults (Slack → Concise, Mail → Formal, etc).")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(state.appToneOverrides.keys.sorted()), id: \.self) { bundleID in
+                        if let tone = state.appToneOverrides[bundleID] {
+                            HStack {
+                                Text(bundleID.components(separatedBy: ".").last ?? bundleID)
+                                    .font(.system(size: 12))
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { tone },
+                                    set: { coordinator.updateAppToneOverride(bundleID: bundleID, tone: $0) }
+                                )) {
+                                    ForEach(ToneStyle.allCases) { t in
+                                        Text(t.displayName).tag(t)
+                                    }
+                                }
+                                .frame(width: 120)
+                                Button("Remove") {
+                                    coordinator.updateAppToneOverride(bundleID: bundleID, tone: nil)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+            }
+
             Section("Activation Targeting") {
                 Picker("Dictation target", selection: $state.targetingMode) {
                     ForEach(TargetingMode.allCases) { mode in
@@ -287,6 +340,19 @@ struct SettingsView: View {
             openAITTSVoiceDraft = state.openAITTSVoice
             localVoxtralModelDraft = state.localVoxtralModel
             localWhisperModelDraft = state.localWhisperModel
+        }
+    }
+
+    private var insertBehaviorNote: String {
+        switch state.insertBehavior {
+        case .alwaysReview:
+            return "Transcribed text is shown for review before insertion. Default behavior."
+        case .autoInsertRaw:
+            return "Raw transcription is inserted immediately with no cleanup. Fastest path."
+        case .autoInsertLight:
+            return "Light cleanup is applied then text is inserted automatically."
+        case .autoInsertPolish:
+            return "Full polish cleanup is applied then text is inserted automatically."
         }
     }
 

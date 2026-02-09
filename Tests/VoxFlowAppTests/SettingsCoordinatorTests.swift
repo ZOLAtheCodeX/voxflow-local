@@ -94,6 +94,26 @@ final class SettingsCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectInsertBehaviorPersists() {
+        let (sut, state, _) = makeSUT()
+        sut.selectInsertBehavior(.autoInsertPolish)
+        XCTAssertEqual(state.insertBehavior, .autoInsertPolish)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "voxflow.dictation.insertBehavior"), "autoInsertPolish")
+        UserDefaults.standard.removeObject(forKey: "voxflow.dictation.insertBehavior")
+    }
+
+    @MainActor
+    func testUpdateAppToneOverridePersistsAndRemoves() {
+        let (sut, state, _) = makeSUT()
+        sut.updateAppToneOverride(bundleID: "com.test.app", tone: .formal)
+        XCTAssertEqual(state.appToneOverrides["com.test.app"], .formal)
+
+        sut.updateAppToneOverride(bundleID: "com.test.app", tone: nil)
+        XCTAssertNil(state.appToneOverrides["com.test.app"])
+        UserDefaults.standard.removeObject(forKey: "voxflow.dictation.appToneOverrides")
+    }
+
+    @MainActor
     func testCurrentBackendLaunchConfigurationReflectsState() {
         let (sut, state, _) = makeSUT()
         state.sttBackend = .voxtral

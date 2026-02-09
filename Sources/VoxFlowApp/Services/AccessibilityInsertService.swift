@@ -11,7 +11,7 @@ final class AccessibilityInsertService {
         }
 
         let role = copyStringAttribute(kAXRoleAttribute as CFString, on: focusedElement)
-        let appName = focusedAppName(for: focusedElement)
+        let (appName, bundleID) = focusedAppInfo(for: focusedElement)
 
         let textRoles = [
             kAXTextFieldRole as String,
@@ -28,6 +28,7 @@ final class AccessibilityInsertService {
             hasFocusedTextInput: isTextInput,
             hasInsertionCursor: hasCursor,
             appName: appName,
+            bundleID: bundleID,
             role: role
         )
     }
@@ -144,12 +145,15 @@ final class AccessibilityInsertService {
         return range.length == 0 && range.location >= 0
     }
 
-    private func focusedAppName(for element: AXUIElement) -> String? {
+    private func focusedAppInfo(for element: AXUIElement) -> (name: String?, bundleID: String?) {
         var pid: pid_t = 0
         let pidResult = AXUIElementGetPid(element, &pid)
-        guard pidResult == .success else {
-            return NSWorkspace.shared.frontmostApplication?.localizedName
+        let app: NSRunningApplication?
+        if pidResult == .success {
+            app = NSRunningApplication(processIdentifier: pid)
+        } else {
+            app = NSWorkspace.shared.frontmostApplication
         }
-        return NSRunningApplication(processIdentifier: pid)?.localizedName
+        return (app?.localizedName, app?.bundleIdentifier)
     }
 }
