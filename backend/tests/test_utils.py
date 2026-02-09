@@ -1,0 +1,239 @@
+"""Unit tests for pure utility functions in server.py."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Insert the app package so we can import server functions directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+
+from server import (
+    apply_tone,
+    coerce_string_list,
+    extract_json_object,
+    is_placeholder_text,
+    light_cleanup,
+    normalize_provider_mode,
+    normalize_stt_backend,
+    normalize_whitespace,
+    redact_sensitive_text,
+    split_sentences,
+)
+
+
+# ── normalize_whitespace ─────────────────────────────────────────────
+
+class TestNormalizeWhitespace:
+    def test_collapses_multiple_spaces(self):
+        assert normalize_whitespace("hello   world") == "hello world"
+
+    def test_strips_leading_trailing(self):
+        assert normalize_whitespace("  hi there  ") == "hi there"
+
+    def test_empty_string(self):
+        assert normalize_whitespace("") == ""
+
+    def test_tabs_and_newlines(self):
+        assert normalize_whitespace("hello\t\nworld") == "hello world"
+
+
+# ── redact_sensitive_text ─────────────────────────────────────────────
+
+class TestRedactSensitiveText:
+    def test_redacts_email(self):
+        result = redact_sensitive_text("Contact alice@example.com for info")
+        assert "[EMAIL]" in result
+        assert "alice@example.com" not in result
+
+    def test_redacts_url(self):
+        result = redact_sensitive_text("Visit https://example.com/path")
+        assert "[URL]" in result
+        assert "https://example.com" not in result
+
+    def test_redacts_phone(self):
+        result = redact_sensitive_text("Call 206-555-1234 today")
+        assert "[PHONE]" in result
+        assert "206-555-1234" not in result
+
+    def test_redacts_ssn(self):
+        result = redact_sensitive_text("SSN is 123-45-6789")
+        assert "[SSN]" in result
+        assert "123-45-6789" not in result
+
+    def test_redacts_long_id(self):
+        result = redact_sensitive_text("ID number 123456789")
+        assert "[ID]" in result
+
+    def test_preserves_normal_text(self):
+        text = "Just a normal sentence with no PII"
+        result = redact_sensitive_text(text)
+        assert result == text
+
+
+# ── apply_tone ────────────────────────────────────────────────────────
+
+class TestApplyTone:
+    def test_neutral_returns_normalized(self):
+        assert apply_tone("  hello  world  ", "neutral") == "hello world"
+
+    def test_concise_removes_filler_words(self):
+        result = apply_tone("please just do this really quickly", "concise")
+        assert "please" not in result.lower()
+        assert "just" not in result.lower()
+        assert "really" not in result.lower()
+
+    def test_formal_capitalizes_and_adds_period(self):
+        result = apply_tone("hello world", "formal")
+        assert result[0] == "H"
+        assert result.endswith(".")
+
+    def test_formal_preserves_existing_punctuation(self):
+        result = apply_tone("Hello world!", "formal")
+        assert result.endswith("!")
+        assert not result.endswith(".!")
+
+    def test_friendly_adds_exclamation(self):
+        result = apply_tone("great job", "friendly")
+        assert result.endswith("!")
+
+    def test_unknown_tone_returns_normalized(self):
+        assert apply_tone("  test  input  ", "unknown") == "test input"
+
+
+# ── light_cleanup ─────────────────────────────────────────────────────
+
+class TestLightCleanup:
+    def test_removes_fillers(self):
+        result = light_cleanup("um I think uh it works")
+        assert "um" not in result.lower().split()
+        assert "uh" not in result.lower().split()
+
+    def test_capitalizes_first_letter(self):
+        result = light_cleanup("hello world")
+        assert result[0] == "H"
+
+    def test_adds_period_if_missing(self):
+        result = light_cleanup("hello world")
+        assert result.endswith(".")
+
+    def test_preserves_existing_punctuation(self):
+        result = light_cleanup("Hello world!")
+        assert result.endswith("!")
+
+
+# ── normalize_provider_mode ───────────────────────────────────────────
+
+class TestNormalizeProviderMode:
+    def test_private_api_variants(self):
+        assert normalize_provider_mode("privateapi") == "private_api"
+        assert normalize_provider_mode("private_api") == "private_api"
+        assert normalize_provider_mode("private-api") == "private_api"
+        assert normalize_provider_mode("  PrivateAPI  ") == "private_api"
+
+    def test_default_to_local_only(self):
+        assert normalize_provider_mode("localOnly") == "local_only"
+        assert normalize_provider_mode("anything") == "local_only"
+        assert normalize_provider_mode("") == "local_only"
+
+
+# ── normalize_stt_backend ────────────────────────────────────────────
+
+class TestNormalizeSttBackend:
+    def test_valid_backends(self):
+        assert normalize_stt_backend("voxtral") == "voxtral"
+        assert normalize_stt_backend("whisper") == "whisper"
+        assert normalize_stt_backend("openai") == "openai"
+        assert normalize_stt_backend("  Voxtral  ") == "voxtral"
+
+    def test_default_to_voxtral(self):
+        assert normalize_stt_backend("unknown") == "voxtral"
+        assert normalize_stt_backend("") == "voxtral"
+
+
+# ── extract_json_object ──────────────────────────────────────────────
+
+class TestExtractJsonObject:
+    def test_plain_json(self):
+        result = extract_json_object('{"key": "value"}')
+        assert result == {"key": "value"}
+
+    def test_markdown_wrapped(self):
+        result = extract_json_object('```json\n{"key": "value"}\n```')
+        assert result == {"key": "value"}
+
+    def test_invalid_json(self):
+        result = extract_json_object("not json at all")
+        assert result == {}
+
+    def test_array_returns_empty(self):
+        result = extract_json_object('[1, 2, 3]')
+        assert result == {}
+
+    def test_empty_string(self):
+        result = extract_json_object("")
+        assert result == {}
+
+    def test_json_with_surrounding_text(self):
+        result = extract_json_object('Here is the result: {"a": 1} done.')
+        assert result == {"a": 1}
+
+
+# ── coerce_string_list ───────────────────────────────────────────────
+
+class TestCoerceStringList:
+    def test_list_input(self):
+        result = coerce_string_list(["a", "b", "c"], 10)
+        assert result == ["a", "b", "c"]
+
+    def test_single_value(self):
+        result = coerce_string_list("hello", 10)
+        assert result == ["hello"]
+
+    def test_none_input(self):
+        result = coerce_string_list(None, 10)
+        assert result == []
+
+    def test_limit_enforced(self):
+        result = coerce_string_list(["a", "b", "c", "d"], 2)
+        assert len(result) == 2
+
+    def test_empty_strings_removed(self):
+        result = coerce_string_list(["a", "", "  ", "b"], 10)
+        assert result == ["a", "b"]
+
+
+# ── is_placeholder_text ──────────────────────────────────────────────
+
+class TestIsPlaceholderText:
+    def test_transcription_placeholder(self):
+        assert is_placeholder_text("[transcription unavailable due to error]") is True
+
+    def test_translation_placeholder(self):
+        assert is_placeholder_text("[Translation unavailable for this segment]") is True
+
+    def test_normal_text(self):
+        assert is_placeholder_text("Hello, this is normal text") is False
+
+    def test_bracket_but_not_placeholder(self):
+        assert is_placeholder_text("[Note] This is fine") is False
+
+
+# ── split_sentences ──────────────────────────────────────────────────
+
+class TestSplitSentences:
+    def test_basic_split(self):
+        result = split_sentences("Hello world. How are you? Fine!")
+        assert len(result) == 3
+
+    def test_no_punctuation_returns_whole(self):
+        result = split_sentences("hello world without punctuation")
+        assert result == ["hello world without punctuation"]
+
+    def test_empty_string(self):
+        result = split_sentences("")
+        assert result == []
+
+    def test_single_sentence(self):
+        result = split_sentences("Just one sentence.")
+        assert result == ["Just one sentence."]
