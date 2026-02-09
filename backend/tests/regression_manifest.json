@@ -1,0 +1,130 @@
+{
+  "iterations_per_clip": 2,
+  "clips": [
+    {
+      "id": "calibration_phrase",
+      "file": "backend/tests/fixtures/golden_clips/calibration_phrase.wav",
+      "language_hint": "en",
+      "expected": {
+        "min_words": 1,
+        "max_words": 12,
+        "must_include_any": [
+          "you",
+          "thank",
+          "beep"
+        ],
+        "forbidden_patterns": [
+          "^\\[transcription unavailable"
+        ]
+      },
+      "expected_by_backend": {
+        "openai": {
+          "allow_placeholder": true
+        }
+      }
+    },
+    {
+      "id": "schedule_phrase",
+      "file": "backend/tests/fixtures/golden_clips/schedule_phrase.wav",
+      "language_hint": "en",
+      "expected": {
+        "min_words": 1,
+        "max_words": 12,
+        "must_include_any": [
+          "you",
+          "thank",
+          "beep"
+        ],
+        "forbidden_patterns": [
+          "^\\[transcription unavailable"
+        ]
+      },
+      "expected_by_backend": {
+        "openai": {
+          "allow_placeholder": true
+        }
+      }
+    },
+    {
+      "id": "dashboard_phrase",
+      "file": "backend/tests/fixtures/golden_clips/dashboard_phrase.wav",
+      "language_hint": "en",
+      "expected": {
+        "min_words": 1,
+        "max_words": 12,
+        "must_include_any": [
+          "you",
+          "thank",
+          "beep"
+        ],
+        "forbidden_patterns": [
+          "^\\[transcription unavailable"
+        ]
+      },
+      "expected_by_backend": {
+        "openai": {
+          "allow_placeholder": true
+        }
+      }
+    }
+  ],
+  "cleanup_cases": [
+    {
+      "id": "filler_cleanup",
+      "input": "um i think we should finalize the release timeline by friday uh",
+      "tone": "neutral",
+      "light": {
+        "must_include_all": [
+          "finalize",
+          "release",
+          "friday"
+        ],
+        "must_not_include": [
+          " um ",
+          " uh "
+        ],
+        "min_similarity": 0.62,
+        "min_token_recall": 0.55,
+        "length_ratio_min": 0.65,
+        "length_ratio_max": 1.35
+      },
+      "polish": {
+        "must_include_all": [
+          "release",
+          "friday"
+        ],
+        "min_similarity": 0.55,
+        "min_token_recall": 0.45,
+        "length_ratio_min": 0.6,
+        "length_ratio_max": 1.8
+      }
+    },
+    {
+      "id": "number_preservation",
+      "input": "please send 3 follow ups to client 42 before 10 30 am tomorrow",
+      "tone": "formal",
+      "light": {
+        "must_include_all": [
+          "3",
+          "42",
+          "10",
+          "30"
+        ],
+        "min_similarity": 0.65,
+        "min_token_recall": 0.5,
+        "length_ratio_min": 0.65,
+        "length_ratio_max": 1.4
+      },
+      "polish": {
+        "must_include_all": [
+          "3",
+          "42"
+        ],
+        "min_similarity": 0.55,
+        "min_token_recall": 0.4,
+        "length_ratio_min": 0.55,
+        "length_ratio_max": 1.8
+      }
+    }
+  ]
+}

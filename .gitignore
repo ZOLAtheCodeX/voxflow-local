@@ -1,0 +1,16 @@
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+.venv/
+.runtime/
+models/
+dist/
+__pycache__/
+backend/tests/reports/
+backend/tests/fixtures/golden_clips/*.tmp.aiff
+backend/tests/fixtures/golden_clips/*.aiff

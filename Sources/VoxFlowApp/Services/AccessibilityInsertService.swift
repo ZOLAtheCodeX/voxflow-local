@@ -1,0 +1,155 @@
+import AppKit
+import ApplicationServices
+import Foundation
+
+final class AccessibilityInsertService {
+    private let systemWide = AXUIElementCreateSystemWide()
+
+    func focusedTargetSnapshot() -> FocusTargetSnapshot {
+        guard let focusedElement = copyFocusedElement() else {
+            return .unavailable
+        }
+
+        let role = copyStringAttribute(kAXRoleAttribute as CFString, on: focusedElement)
+        let appName = focusedAppName(for: focusedElement)
+
+        let textRoles = [
+            kAXTextFieldRole as String,
+            kAXTextAreaRole as String,
+            "AXSearchField",
+            kAXComboBoxRole as String,
+            "AXEditableTextArea"
+        ]
+
+        let isTextInput = role.map { textRoles.contains($0) } ?? false
+        let hasCursor = hasInsertionCursor(on: focusedElement)
+
+        return FocusTargetSnapshot(
+            hasFocusedTextInput: isTextInput,
+            hasInsertionCursor: hasCursor,
+            appName: appName,
+            role: role
+        )
+    }
+
+    func insert(text: String) -> InsertResult {
+        if insertDirectly(text: text) {
+            return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
+        }
+
+        if simulatePaste(text: text) {
+            return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
+        }
+
+        return InsertResult(method: .failed, success: false, fallbackUsed: true, errorCode: "INSERT_FAILED")
+    }
+
+    func triggerUndo() -> Bool {
+        simulateKeyPress(virtualKey: 0x06, flags: .maskCommand)
+    }
+
+    private func insertDirectly(text: String) -> Bool {
+        guard let focusedElement = copyFocusedElement() else {
+            return false
+        }
+
+        guard let currentValue = copyStringAttribute(kAXValueAttribute as CFString, on: focusedElement) else {
+            return false
+        }
+
+        guard let selectedRange = copySelectedRange(on: focusedElement) else {
+            return false
+        }
+
+        let nsString = currentValue as NSString
+        guard selectedRange.location <= nsString.length,
+              selectedRange.location + selectedRange.length <= nsString.length else {
+            return false
+        }
+
+        let updated = nsString.replacingCharacters(in: selectedRange, with: text)
+        let setResult = AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, updated as CFTypeRef)
+        guard setResult == .success else {
+            return false
+        }
+
+        var newRange = CFRange(location: selectedRange.location + (text as NSString).length, length: 0)
+        guard let axRange = AXValueCreate(.cfRange, &newRange) else {
+            return false
+        }
+
+        let cursorResult = AXUIElementSetAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, axRange)
+        return cursorResult == .success
+    }
+
+    private func simulatePaste(text: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else { return false }
+
+        return simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
+    }
+
+    private func simulateKeyPress(virtualKey: CGKeyCode, flags: CGEventFlags) -> Bool {
+        guard let source = CGEventSource(stateID: .combinedSessionState) else { return false }
+        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
+              let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false) else {
+            return false
+        }
+
+        cmdDown.flags = flags
+        cmdUp.flags = flags
+        cmdDown.post(tap: .cghidEventTap)
+        cmdUp.post(tap: .cghidEventTap)
+        return true
+    }
+
+    private func copyFocusedElement() -> AXUIElement? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &value)
+        guard result == .success, let value,
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        // CFGetTypeID check above guarantees this is an AXUIElement
+        return (value as! AXUIElement)
+    }
+
+    private func copyStringAttribute(_ attribute: CFString, on element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else { return nil }
+        return value as? String
+    }
+
+    private func copySelectedRange(on element: AXUIElement) -> NSRange? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value)
+        guard result == .success, let value, CFGetTypeID(value) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        var range = CFRange()
+        // CFGetTypeID check in the guard above guarantees this is an AXValue
+        let axValue = (value as! AXValue)
+        guard AXValueGetType(axValue) == .cfRange else { return nil }
+        guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
+
+        return NSRange(location: range.location, length: range.length)
+    }
+
+    private func hasInsertionCursor(on element: AXUIElement) -> Bool {
+        guard let range = copySelectedRange(on: element) else {
+            return false
+        }
+
+        return range.length == 0 && range.location >= 0
+    }
+
+    private func focusedAppName(for element: AXUIElement) -> String? {
+        var pid: pid_t = 0
+        let pidResult = AXUIElementGetPid(element, &pid)
+        guard pidResult == .success else {
+            return NSWorkspace.shared.frontmostApplication?.localizedName
+        }
+        return NSRunningApplication(processIdentifier: pid)?.localizedName
+    }
+}

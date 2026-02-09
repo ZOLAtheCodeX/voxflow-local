@@ -1,0 +1,290 @@
+# VoxFlow Local
+
+Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Voxtral-family STT with post-capture cleanup (`Raw`, `Light`, `Polish`) and an experimental EN->DE translate mode.
+
+## Implemented
+
+- Menu bar + command palette shell (`SwiftUI` + `AppKit` bridge)
+- Global hold-to-talk hotkey (`Control + Option + Space`)
+- System command lane hotkey (`Fn + Command + Space`) with alternate UI color state
+- Onboarding calibration flow (first run phrase capture)
+- Target-aware activation (focused text field / active cursor)
+- Cleanup mode chips (`Raw`, `Light`, `Polish`)
+- Tone/style controls (`Neutral`, `Concise`, `Formal`, `Friendly`)
+- Accessibility insertion with paste fallback
+- Session-only in-memory history
+- Local backend API (`FastAPI`) with:
+  - `POST /v1/transcribe`
+  - `POST /v1/tts`
+  - `POST /v1/cleanup`
+  - `POST /v1/translate` (EN->DE)
+  - `POST /v1/meeting_summarize`
+  - `POST /v1/privacy/preview`
+  - `WS /v1/events`
+  - `GET /v1/health`
+- Experimental Translate Mode UX:
+  - Captured English in a raised card
+  - German output card
+  - Required approve button before insertion
+  - Settings selector for translation profile:
+    - `TranslateGemma 4B`
+    - `TranslateGemma 12B`
+    - `Marian Fallback`
+  - RAM-aware latency/VRAM suitability badges for each profile
+  - In-app translation benchmark mode with median and p95 latency per profile
+- Meeting Mode UX:
+  - Structured notes generation from captured transcript
+  - Sections: summary, decisions, action items, follow-ups
+  - Speaker segmentation (heuristic, local)
+  - Task-owner extraction with confidence estimates
+  - One-click export templates (Markdown + Notion-style)
+  - Required approval before insertion
+- Dashboard landing panel in command palette:
+  - Session captures (local/API split), latency averages, insert success, approval counts
+  - Mode usage summary (Dictation/Translate/Meeting capture distribution)
+  - Recommended translation profile card from benchmark history
+  - Quick actions: switch to capture panel, reset session metrics
+- Dedicated dashboard window:
+  - Open from menu bar (`Open Dashboard`)
+  - Session telemetry cards + per-app compatibility matrix
+  - Benchmark recommendation section with profile history table
+  - Tracks insert success/fallback/failure by application
+- Configurable STT backend:
+  - `Voxtral (Local)`
+  - `Whisper (Local, open-source)`
+  - `OpenAI STT`
+- OpenAI speech configuration:
+  - STT model + TTS model + voice can be set in Settings
+- Provider mode picker:
+  - `Local Models` (default, local/offline)
+  - `Private API` (OpenAI-compatible external endpoint)
+- Privacy gateway for private API mode:
+  - Compare original vs redacted transcript before sending
+  - Explicit approve action (`Approve Redacted` or `Approve Raw`)
+  - Consent token required on backend for API execution
+  - Metadata-only audit logging (no transcript content in logs)
+
+## Repo Layout
+
+- `Sources/VoxFlowApp`: macOS app
+- `backend/app/server.py`: local inference service
+- `scripts/bootstrap_backend.sh`: create venv + install backend deps
+- `scripts/run_backend.sh`: run backend server
+- `scripts/download_models.py`: optional model pre-download
+- `scripts/launch_voxflow.sh`: one-command launcher (backend + app)
+- `scripts/stop_voxflow.sh`: stop app and backend
+- `scripts/build_app_bundle.sh`: build a native `.app` bundle with icon (`dist/VoxFlow.app`)
+- `scripts/install_app_bundle.sh`: install bundle into `~/Applications` with validation + LaunchServices registration
+- `scripts/open_app_bundle.sh`: open bundled app (builds first if missing, falls back to direct binary launch)
+- `scripts/reinstall_and_launch.sh`: build + install + launch in one command (auto-fallback to direct executable launch)
+- `scripts/check_runtime_readiness.sh`: verifies backend health + whether active STT model is loaded
+- `scripts/prepare_models_and_run_regression.sh`: downloads required STT models and runs regressions (`voxtral`, `whisper`)
+- `scripts/create_desktop_launcher.sh`: creates a Desktop launcher (`VoxFlow.command`)
+- `scripts/doctor.sh`: checks installed app bundle, executable, models dir, and backend health
+- `scripts/run_regression_suite.sh`: deterministic STT/cleanup regression + latency report
+- `backend/tests/regression_manifest.json`: golden clip + cleanup invariants spec
+
+## Local Setup
+
+1. Install backend deps:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/bootstrap_backend.sh
+```
+
+2. (Optional but recommended) pre-download models:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/download_models.py --cache-dir ./models
+```
+
+3. Run backend:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/run_backend.sh
+```
+
+4. Run app:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+swift run VoxFlowLocal
+```
+
+Optional native app bundle (Finder/Dock launch):
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/build_app_bundle.sh
+./scripts/install_app_bundle.sh
+open ~/Applications/VoxFlow.app
+```
+
+One-command repair + launch (recommended if bundle got corrupted/nested):
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/reinstall_and_launch.sh --skip-build
+```
+
+Create a one-click Desktop launcher:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/create_desktop_launcher.sh
+```
+
+Run install/runtime diagnostics:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/doctor.sh
+```
+
+Bundle runtime note:
+- `build_app_bundle.sh` now copies `.venv` into the app bundle by default (safer for macOS LaunchServices).
+- Use `--link-venv` only for faster local dev iteration.
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/build_app_bundle.sh --link-venv
+```
+
+To build an optimized release bundle:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/build_app_bundle.sh --release
+```
+
+If `open dist/VoxFlow.app` fails in your terminal environment, use:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/open_app_bundle.sh
+```
+
+This launcher automatically falls back to direct binary start and writes logs to:
+
+```bash
+/Users/zola/.codex/workspaces/default/voxflow-local/.runtime/app-direct.log
+```
+
+Or launch both backend + app in one command:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/launch_voxflow.sh
+```
+
+5. Run deterministic STT/cleanup regression suite:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/run_regression_suite.sh
+```
+
+Optional readiness preflight (recommended before regressions):
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/check_runtime_readiness.sh
+```
+
+One-command model prep + regression (recommended for first pass):
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+./scripts/prepare_models_and_run_regression.sh
+```
+
+If backend gets killed during Voxtral checkpoint load on 16GB RAM machines, use safe mode:
+
+```bash
+cd /Users/zola/.codex/workspaces/default/voxflow-local
+VOXFLOW_VOXTRAL_SKIP_PRIMARY=1 ./scripts/run_backend.sh
+```
+
+This keeps Voxtral backend routing enabled while forcing fallback STT model loading.
+Safe mode is now the default unless you explicitly set `VOXFLOW_VOXTRAL_SKIP_PRIMARY=0`.
+You can also toggle this in-app at `Settings -> Speech Models -> Voxtral Safe Mode`.
+
+Outputs:
+- Golden clips in `backend/tests/fixtures/golden_clips/*.wav`
+- Latency percentile report in `backend/tests/reports/stt_latency_report.json`
+- Per-backend latency tracking for `voxtral`, `whisper`, `openai` (OpenAI is skipped if not configured)
+- STT checks fail fast if a backend returns placeholder text (`[transcription unavailable ...]`), which indicates the model/runtime is not ready.
+
+## Runtime Notes
+
+- The backend is configured for offline runtime (`TRANSFORMERS_OFFLINE=1`, `HF_HUB_OFFLINE=1`) for local model mode.
+- If local model files are available, set:
+
+```bash
+export VOXFLOW_MODELS_DIR=/Users/zola/.codex/workspaces/default/voxflow-local/models
+```
+
+- Default model refs:
+  - STT: `mistralai/Voxtral-Mini-3B-2507`
+  - Voxtral fallback STT: `openai/whisper-small` (used only if Voxtral cannot load; controlled by `VOXFLOW_STT_ALLOW_FALLBACK`)
+  - Whisper STT: `openai/whisper-small`
+  - Polish: `google/flan-t5-small`
+  - Translate: `google/translategemma-4b-it`
+
+- Translate backend options:
+  - `VOXFLOW_TRANSLATE_BACKEND=auto` (default; uses `translategemma` for TranslateGemma models, otherwise `marian`)
+  - `VOXFLOW_TRANSLATE_BACKEND=translategemma`
+  - `VOXFLOW_TRANSLATE_BACKEND=marian`
+
+- Lower-memory fallback for translation:
+
+```bash
+export VOXFLOW_TRANSLATE_BACKEND=marian
+export VOXFLOW_TRANSLATE_MODEL=Helsinki-NLP/opus-mt-en-de
+```
+
+- Note:
+  - TranslateGemma models are access-controlled; make sure you have accepted model terms on Hugging Face before downloading.
+
+- Optional private API adapter settings:
+
+```bash
+export VOXFLOW_PRIVATE_API_BASE_URL=https://your-endpoint.example.com
+export VOXFLOW_PRIVATE_API_MODEL=your-model-id
+export VOXFLOW_PRIVATE_API_KEY=your-api-key
+```
+
+- Privacy policy guardrail flags (required for private API mode; backend fails closed if missing):
+
+```bash
+export VOXFLOW_PRIVACY_POLICY_VERSION=2026-02
+export VOXFLOW_PRIVACY_REQUIRE_CONSENT=1
+export VOXFLOW_PRIVACY_RAW_CONFIRMATION_REQUIRED=1
+```
+
+- Private API mode uses `POST /v1/chat/completions` compatibility and requires per-request privacy preview approval.
+- If private API mode is enabled, selected transcript content may leave your machine.
+
+- Optional OpenAI speech settings:
+
+```bash
+export VOXFLOW_OPENAI_BASE_URL=https://api.openai.com
+export VOXFLOW_OPENAI_API_KEY=your-openai-key
+export VOXFLOW_OPENAI_STT_MODEL=whisper-1
+export VOXFLOW_OPENAI_TTS_MODEL=gpt-4o-mini-tts
+export VOXFLOW_OPENAI_TTS_VOICE=alloy
+```
+
+## Current Constraints
+
+- If models are missing or fail to load, backend returns explicit placeholder text instead of crashing.
+- Translate Mode is intentionally behind an experimental toggle in settings.
+- v1 targets microphone dictation only (no system audio/file transcription).
+- Voxtral remains the default STT backend unless explicitly switched in settings.
+
+## Backlog (Deferred)
+
+- Launch at login (`SMAppService`) + settings toggle is intentionally deferred for now.
