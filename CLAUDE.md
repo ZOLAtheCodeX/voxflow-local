@@ -8,15 +8,17 @@ VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Pytho
 
 ```
 Sources/VoxFlowApp/        Swift frontend (SwiftUI, MenuBarExtra)
-  AppCoordinator.swift      Central orchestrator (~636 lines, @MainActor)
+  AppCoordinator.swift      Central orchestrator (~510 lines, @MainActor)
   Services/                 Extracted coordinators + backend services
-    SettingsCoordinator.swift           Provider, STT, translation settings + persistence
+    SettingsCoordinator.swift           Provider, STT, insert behavior, app tone overrides + persistence
     OnboardingCoordinator.swift         Calibration flow lifecycle
-    TextInsertionCoordinator.swift      AX insert, clipboard copy, per-app stats
+    TextInsertionCoordinator.swift      AX insert, clipboard copy/bridge, per-app stats
     TranslationBenchmarkCoordinator.swift  Profile benchmarking + history
     PrivacyConsentCoordinator.swift     Privacy preview + closure-based continuation
-  Models/AppModels.swift    All domain types (enums, structs)
-  State/AppState.swift      Published app state (~45 @Published properties)
+    AccessibilityInsertService.swift    AX text insertion + bundleID-aware app info
+    SessionMemoryStore.swift            Ring buffer for recent dictations (recent/push/count)
+  Models/AppModels.swift    All domain types (enums, structs, InsertBehavior, FocusTargetSnapshot)
+  State/AppState.swift      Published app state (~48 @Published properties)
   Views/                    SwiftUI views
 backend/app/
   server.py                 FastAPI server (~1624 lines, all endpoints)
@@ -74,10 +76,15 @@ swift run VoxFlowLocal
 ### Swift
 
 - **`@MainActor` coordinator pattern**: `AppCoordinator` orchestrates audio capture and workflow routing; 5 extracted coordinators handle settings, onboarding, text insertion, benchmarking, and privacy consent via protocol-typed properties. Views observe `AppCoordinator.state` unchanged.
+- **Privacy gate helper**: `processWithPrivacyGate` centralizes the `privateAPI` vs `localOnly` branch for all three workflow processors (`processDictation`, `processTranslation`, `processMeeting`)
+- **Auto-insert mode**: `InsertBehavior` enum (`.alwaysReview`, `.autoInsertRaw/Light/Polish`) controls whether dictation skips the review step. Persisted via `SettingsCoordinator`.
+- **App-context tone resolution**: `resolveEffectiveTone()` checks user overrides → `SettingsCoordinator.defaultAppTones` → global `toneStyle`, keyed by `FocusTargetSnapshot.bundleID`. Overrides persisted as JSON in UserDefaults.
+- **Clipboard bridge**: After successful AX direct insert, text is also copied to clipboard for recoverability. Skipped when paste fallback already uses clipboard.
+- **Session memory**: `SessionMemoryStore` ring buffer exposed via `AppState.recentDictations` with re-insert and copy actions in the "Recent" tab.
 - **Keychain for secrets**: API keys stored via `KeychainService` (not UserDefaults)
 - **CF type bridging**: Use `CFGetTypeID()` guard + `as!` for AXUIElement/AXValue casts (Swift 6.2 rejects `as?` on CF types)
 - **os.Logger**: Use `Logger(subsystem: "local.voxflow.app", category: "...")` for logging
-- **Accessibility API**: `AccessibilityInsertService` handles text insertion via AX direct write or simulated paste fallback
+- **Accessibility API**: `AccessibilityInsertService` handles text insertion via AX direct write or simulated paste fallback; returns `(name, bundleID)` tuple from `focusedAppInfo`
 
 ### Python
 
@@ -89,7 +96,7 @@ swift run VoxFlowLocal
 
 ## Testing
 
-- Test coverage: 193+ tests (102 Swift + 91 Python) covering models, parsing, coordinators, backend utilities
+- Test coverage: 201+ tests (110 Swift + 91 Python) covering models, parsing, coordinators, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests: `cd backend && python -m pytest`
@@ -114,6 +121,8 @@ swift run VoxFlowLocal
 
 - Modify extracted coordinator protocols without updating both the coordinator and AppCoordinator forwarding methods
 - Move workflow routing logic (`processDictation`, `processTranslation`, `processMeeting`) out of AppCoordinator — it belongs with the audio capture orchestration
+- Bypass `resolveEffectiveTone()` — always use it instead of reading `state.toneStyle` directly in workflow processors
+- Store app tone overrides as anything other than `[String: String]` JSON in UserDefaults (keyed by bundleID, values are `ToneStyle.rawValue`)
 - Use `URLSession.shared` — use the configured session in `BackendAPIClient` (has timeouts)
 - Store secrets in UserDefaults — use `KeychainService`
 - Use bare `except Exception: pass` in Python — always log
