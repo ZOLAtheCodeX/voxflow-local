@@ -321,208 +321,92 @@ final class AppCoordinator: ObservableObject {
     }
 
 
-    private func processDictation(sessionID: String, rawText: String) async throws {
+    private func processWithPrivacyGate(
+        sessionID: String,
+        operation: PrivacyOperationKind,
+        inputText: String,
+        process: @escaping @MainActor (ProviderMode, String?, Bool) async throws -> Void
+    ) async throws {
         if state.providerMode == .privateAPI {
             try await privacy.requestPrivacyPreview(
                 sessionID: sessionID,
-                operation: .cleanup,
-                inputText: rawText
-            ) { [weak self] consentToken, allowRaw in
-                guard let self else { return }
-                let lightText = try await BackendAPIClient.cleanup(
-                    sessionID: sessionID,
-                    mode: .light,
-                    inputText: rawText,
-                    toneStyle: self.state.toneStyle,
-                    providerMode: .privateAPI,
-                    consentToken: consentToken,
-                    allowRaw: allowRaw
-                ).outputText
-
-                let polish = try await BackendAPIClient.cleanup(
-                    sessionID: sessionID,
-                    mode: .polish,
-                    inputText: rawText,
-                    toneStyle: self.state.toneStyle,
-                    providerMode: .privateAPI,
-                    consentToken: consentToken,
-                    allowRaw: allowRaw
-                ).outputText
-
-                let candidate = TranscriptCandidate(
-                    rawText: rawText,
-                    lightText: lightText,
-                    polishText: polish,
-                    selectedMode: .raw
-                )
-
-                self.state.transcriptCandidate = candidate
-                self.state.sessionState = .review
-                self.state.selectedMode = .raw
-                self.state.statusLine = allowRaw ? "Private API cleanup complete" : "Private API cleanup complete (redacted)"
+                operation: operation,
+                inputText: inputText
+            ) { consentToken, allowRaw in
+                try await process(.privateAPI, consentToken, allowRaw)
             }
             return
         }
-
-        let lightText = try await BackendAPIClient.cleanup(
-            sessionID: sessionID,
-            mode: .light,
-            inputText: rawText,
-            toneStyle: state.toneStyle,
-            providerMode: .localOnly
-        ).outputText
-
-        let polishResponse = try await BackendAPIClient.cleanup(
-            sessionID: sessionID,
-            mode: .polish,
-            inputText: rawText,
-            toneStyle: state.toneStyle,
-            providerMode: .localOnly
-        )
-
-        let candidate = TranscriptCandidate(
-            rawText: rawText,
-            lightText: lightText,
-            polishText: polishResponse.outputText,
-            selectedMode: .raw
-        )
-
-        state.transcriptCandidate = candidate
-        state.selectedMode = .raw
-        state.sessionState = .review
-        state.statusLine = "Review and insert"
+        try await process(.localOnly, nil, false)
         state.recordingDuration = 0
-        sessionMemory.push(candidate: candidate)
+    }
+
+    private func processDictation(sessionID: String, rawText: String) async throws {
+        try await processWithPrivacyGate(
+            sessionID: sessionID, operation: .cleanup, inputText: rawText
+        ) { [weak self] providerMode, consentToken, allowRaw in
+            guard let self else { return }
+            let lightText = try await BackendAPIClient.cleanup(
+                sessionID: sessionID, mode: .light, inputText: rawText,
+                toneStyle: self.state.toneStyle, providerMode: providerMode,
+                consentToken: consentToken, allowRaw: allowRaw
+            ).outputText
+            let polishText = try await BackendAPIClient.cleanup(
+                sessionID: sessionID, mode: .polish, inputText: rawText,
+                toneStyle: self.state.toneStyle, providerMode: providerMode,
+                consentToken: consentToken, allowRaw: allowRaw
+            ).outputText
+            let candidate = TranscriptCandidate(
+                rawText: rawText, lightText: lightText,
+                polishText: polishText, selectedMode: .raw
+            )
+            self.state.transcriptCandidate = candidate
+            self.state.selectedMode = .raw
+            self.state.sessionState = .review
+            self.state.statusLine = providerMode == .privateAPI
+                ? (allowRaw ? "Private API cleanup complete" : "Private API cleanup complete (redacted)")
+                : "Review and insert"
+            if providerMode == .localOnly { self.sessionMemory.push(candidate: candidate) }
+        }
     }
 
     private func processTranslation(sessionID: String, rawText: String) async throws {
-        if state.providerMode == .privateAPI {
-            try await privacy.requestPrivacyPreview(
-                sessionID: sessionID,
-                operation: .translate,
-                inputText: rawText
-            ) { [weak self] consentToken, allowRaw in
-                guard let self else { return }
-                let translation = try await BackendAPIClient.translate(
-                    sessionID: sessionID,
-                    sourceText: rawText,
-                    sourceLanguage: "en",
-                    targetLanguage: "de",
-                    providerMode: .privateAPI,
-                    consentToken: consentToken,
-                    allowRaw: allowRaw
-                )
-
-                self.state.translationCandidate = TranslationCandidate(
-                    sourceEnglish: translation.sourceText,
-                    targetGerman: translation.translatedText,
-                    approved: false
-                )
-                self.state.sessionState = .review
-                self.state.statusLine = allowRaw ? "Review translation before insert" : "Review redacted translation before insert"
-            }
-            return
+        try await processWithPrivacyGate(
+            sessionID: sessionID, operation: .translate, inputText: rawText
+        ) { [weak self] providerMode, consentToken, allowRaw in
+            guard let self else { return }
+            let translation = try await BackendAPIClient.translate(
+                sessionID: sessionID, sourceText: rawText,
+                sourceLanguage: "en", targetLanguage: "de",
+                providerMode: providerMode, consentToken: consentToken, allowRaw: allowRaw
+            )
+            self.state.translationCandidate = TranslationCandidate(
+                sourceEnglish: translation.sourceText,
+                targetGerman: translation.translatedText, approved: false
+            )
+            self.state.sessionState = .review
+            self.state.statusLine = providerMode == .privateAPI
+                ? (allowRaw ? "Review translation before insert" : "Review redacted translation before insert")
+                : "Approve translation before insert"
         }
-
-        let translation = try await BackendAPIClient.translate(
-            sessionID: sessionID,
-            sourceText: rawText,
-            sourceLanguage: "en",
-            targetLanguage: "de",
-            providerMode: .localOnly
-        )
-
-        state.translationCandidate = TranslationCandidate(
-            sourceEnglish: translation.sourceText,
-            targetGerman: translation.translatedText,
-            approved: false
-        )
-        state.sessionState = .review
-        state.statusLine = "Approve translation before insert"
-        state.recordingDuration = 0
     }
 
     private func processMeeting(sessionID: String, rawText: String) async throws {
-        if state.providerMode == .privateAPI {
-            try await privacy.requestPrivacyPreview(
-                sessionID: sessionID,
-                operation: .meeting,
-                inputText: rawText
-            ) { [weak self] consentToken, allowRaw in
-                guard let self else { return }
-                let meeting = try await BackendAPIClient.meetingSummarize(
-                    sessionID: sessionID,
-                    transcript: rawText,
-                    toneStyle: self.state.toneStyle,
-                    providerMode: .privateAPI,
-                    consentToken: consentToken,
-                    allowRaw: allowRaw
-                )
-
-                self.state.meetingCandidate = MeetingCandidate(
-                    transcript: meeting.transcript,
-                    summary: meeting.summary,
-                    decisions: meeting.decisions,
-                    actionItems: meeting.actionItems,
-                    followUps: meeting.followUps,
-                    speakerSegments: meeting.speakerSegments.map {
-                        MeetingSpeakerSegment(
-                            speaker: $0.speaker,
-                            text: $0.text,
-                            utteranceCount: max(1, $0.utteranceCount)
-                        )
-                    },
-                    taskOwners: meeting.taskOwners.map {
-                        MeetingTaskOwner(
-                            task: $0.task,
-                            owner: $0.owner,
-                            confidence: min(1.0, max(0.0, $0.confidence))
-                        )
-                    },
-                    markdownExport: meeting.markdownExport,
-                    notionExport: meeting.notionExport,
-                    approved: false
-                )
-                self.state.sessionState = .review
-                self.state.statusLine = allowRaw ? "Review meeting notes" : "Review redacted meeting notes"
-            }
-            return
+        try await processWithPrivacyGate(
+            sessionID: sessionID, operation: .meeting, inputText: rawText
+        ) { [weak self] providerMode, consentToken, allowRaw in
+            guard let self else { return }
+            let response = try await BackendAPIClient.meetingSummarize(
+                sessionID: sessionID, transcript: rawText,
+                toneStyle: self.state.toneStyle, providerMode: providerMode,
+                consentToken: consentToken, allowRaw: allowRaw
+            )
+            self.state.meetingCandidate = MeetingCandidate(from: response)
+            self.state.sessionState = .review
+            self.state.statusLine = providerMode == .privateAPI
+                ? (allowRaw ? "Review meeting notes" : "Review redacted meeting notes")
+                : "Review and approve meeting notes"
         }
-
-        let meeting = try await BackendAPIClient.meetingSummarize(
-            sessionID: sessionID,
-            transcript: rawText,
-            toneStyle: state.toneStyle,
-            providerMode: .localOnly
-        )
-
-        state.meetingCandidate = MeetingCandidate(
-            transcript: meeting.transcript,
-            summary: meeting.summary,
-            decisions: meeting.decisions,
-            actionItems: meeting.actionItems,
-            followUps: meeting.followUps,
-            speakerSegments: meeting.speakerSegments.map {
-                MeetingSpeakerSegment(
-                    speaker: $0.speaker,
-                    text: $0.text,
-                    utteranceCount: max(1, $0.utteranceCount)
-                )
-            },
-            taskOwners: meeting.taskOwners.map {
-                MeetingTaskOwner(
-                    task: $0.task,
-                    owner: $0.owner,
-                    confidence: min(1.0, max(0.0, $0.confidence))
-                )
-            },
-            markdownExport: meeting.markdownExport,
-            notionExport: meeting.notionExport,
-            approved: false
-        )
-        state.sessionState = .review
-        state.statusLine = "Review and approve meeting notes"
-        state.recordingDuration = 0
     }
 
 

@@ -8,7 +8,7 @@ DerivedData/
 .netrc
 .venv/
 .runtime/
-models/
+/models/
 dist/
 __pycache__/
 backend/tests/reports/

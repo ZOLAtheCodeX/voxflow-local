@@ -218,4 +218,50 @@ final class AppModelTests: XCTestCase {
         )
         XCTAssertEqual(candidate.markdownTemplate, candidate.formattedNotes)
     }
+
+    // MARK: - MeetingCandidate.init(from:)
+
+    func testMeetingCandidateFromResponse() {
+        let response = MeetingSummaryResponse(
+            transcript: "Full transcript",
+            summary: "Meeting summary",
+            decisions: ["Ship v2"],
+            actionItems: ["Write tests"],
+            followUps: ["Check metrics"],
+            speakerSegments: [
+                MeetingSpeakerSegmentResponse(speaker: "Alice", text: "Hello", utteranceCount: 3),
+                MeetingSpeakerSegmentResponse(speaker: "Bob", text: "Hi", utteranceCount: 0)
+            ],
+            taskOwners: [
+                MeetingTaskOwnerResponse(task: "Write tests", owner: "Alice", confidence: 0.85),
+                MeetingTaskOwnerResponse(task: "Deploy", owner: "Bob", confidence: 1.5),
+                MeetingTaskOwnerResponse(task: "Review", owner: "Carol", confidence: -0.2)
+            ],
+            markdownExport: "# Export",
+            notionExport: "notion block"
+        )
+
+        let candidate = MeetingCandidate(from: response)
+
+        XCTAssertEqual(candidate.transcript, "Full transcript")
+        XCTAssertEqual(candidate.summary, "Meeting summary")
+        XCTAssertEqual(candidate.decisions, ["Ship v2"])
+        XCTAssertEqual(candidate.actionItems, ["Write tests"])
+        XCTAssertEqual(candidate.followUps, ["Check metrics"])
+        XCTAssertFalse(candidate.approved)
+
+        // Speaker segments: utteranceCount clamped to min 1
+        XCTAssertEqual(candidate.speakerSegments.count, 2)
+        XCTAssertEqual(candidate.speakerSegments[0].utteranceCount, 3)
+        XCTAssertEqual(candidate.speakerSegments[1].utteranceCount, 1, "utteranceCount 0 should clamp to 1")
+
+        // Task owners: confidence clamped to [0.0, 1.0]
+        XCTAssertEqual(candidate.taskOwners.count, 3)
+        XCTAssertEqual(candidate.taskOwners[0].confidence, 0.85, accuracy: 0.001)
+        XCTAssertEqual(candidate.taskOwners[1].confidence, 1.0, accuracy: 0.001, "confidence > 1.0 should clamp to 1.0")
+        XCTAssertEqual(candidate.taskOwners[2].confidence, 0.0, accuracy: 0.001, "confidence < 0.0 should clamp to 0.0")
+
+        XCTAssertEqual(candidate.markdownExport, "# Export")
+        XCTAssertEqual(candidate.notionExport, "notion block")
+    }
 }
