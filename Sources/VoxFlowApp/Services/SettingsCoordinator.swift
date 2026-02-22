@@ -128,7 +128,7 @@ final class SettingsCoordinator: SettingsCoordinating {
            let behavior = InsertBehavior(rawValue: insertBehaviorRaw) {
             state.insertBehavior = behavior
         } else {
-            state.insertBehavior = .autoInsertLight
+            state.insertBehavior = .autoInsertRaw
             defaults.set(state.insertBehavior.rawValue, forKey: insertBehaviorKey)
         }
 
