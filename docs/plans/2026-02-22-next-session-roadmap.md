@@ -29,24 +29,63 @@
 
 ---
 
-## Priority 2: Fix Long Text / Extended Dictation
+## Priority 2: App Stability & Focus Bug
 
-### Problem
-Extended dictation (>30 seconds) fails or produces incomplete text.
+### Problem: VoxFlow Window Steals Focus
+When VoxFlow's panel is open (watching transcription counter, recording indicator), it becomes the
+frontmost app. `simulatePaste` then sends Cmd+V to VoxFlow itself instead of the target app.
 
-### Root Causes to Investigate
-1. **Audio buffer cap:** `AudioCaptureService.maxBufferBytes` = 10 MB (~5 min at 16kHz). May silently stop capturing.
-2. **Whisper 30-second context window:** Audio beyond 30s needs chunking. Backend may not chunk properly.
-3. **HTTP payload size:** Large base64 audio may exceed request limits or timeout.
+### Root Cause
+VoxFlow's SwiftUI window/panel activates on click, becoming `NSWorkspace.shared.frontmostApplication`.
+The target app is captured at insertion time, not at recording start.
 
-### Proposed Fix
-- Implement server-side audio chunking (split into 25-30s segments, transcribe each, concatenate)
-- Add progress feedback to Swift frontend during long transcriptions
-- Increase or remove buffer cap with streaming upload
+### Proposed Fixes (pick one or combine)
+1. **Non-activating panel:** Use `NSPanel` with `.nonactivatingPanel` style mask so VoxFlow never
+   steals focus from the target app, even when the user interacts with its UI.
+2. **Capture target at recording start:** Store `targetApp` when Fn is pressed (before transcription),
+   not when insertion happens (after transcription). Already partially implemented but needs hardening.
+3. **Window-level focus bypass:** Set VoxFlow's window level to `.floating` with non-activating behavior
+   so it overlays without taking focus.
+
+### Goal
+User can watch VoxFlow's live transcription counter and recording indicator while dictating,
+and text still inserts into the correct target app.
 
 ---
 
-## Priority 3: Polish Mode — Better Cleanup Model
+## Priority 3: Fix Extended Dictation (>10 seconds)
+
+### Problem
+Dictation struggles after ~10 seconds. Target window is 30-45 seconds.
+
+### Root Causes to Investigate
+1. **Audio buffer or timing:** Something in the capture → transcribe pipeline drops or truncates
+   audio around 10s. Debug `AudioCaptureService` buffer accumulation and HTTP payload size.
+2. **Whisper 30-second context window:** Audio beyond 30s needs chunking. Backend may not chunk.
+3. **HTTP timeout:** `BackendAPIClient` timeout may be too short for larger payloads.
+
+### Proposed Fix
+- Debug the 10-second cutoff first (likely a buffer, timeout, or base64 payload issue)
+- Implement server-side audio chunking (25-30s segments) for the 30-45s target
+- Add progress feedback to Swift frontend during long transcriptions
+
+---
+
+## Priority 4: Clear History Feature
+
+### Problem
+No way to clear recorded dictation history from the app.
+
+### Implementation
+- Add "Clear History" to Settings or Recent tab
+- Options: Clear today / this week / this month / all time
+- Clears `recentDictations` in `SessionMemoryStore` (ring buffer)
+- Also reset dashboard metrics (`resetDashboardMetrics()` already exists)
+- Confirm before clearing (destructive action)
+
+---
+
+## Priority 6: UX Enhancements
 
 ### Problem
 FLAN-T5-Small (60M params) echoes input unchanged. Currently falls back to regex-based light_cleanup.
@@ -64,7 +103,7 @@ Evaluate SmolLM2-1.7B or Gemma-2B via MLX for polish mode. Both are small enough
 
 ---
 
-## Priority 4: UX Enhancements
+## Priority 5: Polish Mode — Better Cleanup Model
 
 ### Per-App Profiles
 - Auto-select tone/cleanup mode based on target app bundle ID
@@ -84,6 +123,20 @@ Evaluate SmolLM2-1.7B or Gemma-2B via MLX for polish mode. Both are small enough
 ### Streaming Partial Results
 - If using Moonshine v2 or WhisperKit streaming mode, show partial transcript while user is still speaking
 - Requires WebSocket or SSE connection instead of single HTTP POST
+
+---
+
+## Priority 7: App Publishing & Distribution
+
+### Goal
+Package VoxFlow for distribution — stable, signed, installable .app bundle.
+
+### Items
+- Code-sign with Apple Developer ID (not just ad-hoc)
+- Create DMG installer or use Sparkle for auto-updates
+- Notarize for Gatekeeper approval
+- Polish onboarding flow (accessibility permission prompt, mic permission)
+- Create landing page / GitHub release
 
 ---
 
