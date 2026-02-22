@@ -11,6 +11,9 @@ import os.log
     func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String, ttsModel: String, ttsVoice: String)
     func selectTranslationProfile(_ profile: TranslationProfile)
     func setTranslationModeEnabled(_ isEnabled: Bool)
+    func setMeetingModeEnabled(_ isEnabled: Bool)
+    func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset)
+    func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset)
     func selectInsertBehavior(_ behavior: InsertBehavior)
     func updateAppToneOverride(bundleID: String, tone: ToneStyle?)
     func restartBackendWithCurrentConfiguration(status: String)
@@ -27,6 +30,9 @@ final class SettingsCoordinator: SettingsCoordinating {
     let onboardingKey = "voxflow.onboarding.complete"
     private let translationProfileKey = "voxflow.translation.profile"
     private let translationModeEnabledKey = "voxflow.translation.modeEnabled"
+    private let meetingModeEnabledKey = "voxflow.meeting.modeEnabled"
+    private let dictationHotkeyPresetKey = "voxflow.hotkey.dictationPreset"
+    private let commandLaneHotkeyPresetKey = "voxflow.hotkey.commandLanePreset"
     private let sttBackendKey = "voxflow.stt.backend"
     private let sttModelKey = "voxflow.stt.model"
     private let whisperModelKey = "voxflow.whisper.model"
@@ -108,6 +114,15 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.openAITTSModel = defaults.string(forKey: openAITTSModelKey) ?? "gpt-4o-mini-tts"
         state.openAITTSVoice = defaults.string(forKey: openAITTSVoiceKey) ?? "alloy"
         state.translationModeEnabled = defaults.bool(forKey: translationModeEnabledKey)
+        state.meetingModeEnabled = defaults.bool(forKey: meetingModeEnabledKey)
+        if let dictationHotkeyRaw = defaults.string(forKey: dictationHotkeyPresetKey),
+           let preset = DictationHotkeyPreset(rawValue: dictationHotkeyRaw) {
+            state.dictationHotkeyPreset = preset
+        }
+        if let commandLaneHotkeyRaw = defaults.string(forKey: commandLaneHotkeyPresetKey),
+           let preset = CommandLaneHotkeyPreset(rawValue: commandLaneHotkeyRaw) {
+            state.commandLaneHotkeyPreset = preset
+        }
 
         if let insertBehaviorRaw = defaults.string(forKey: insertBehaviorKey),
            let behavior = InsertBehavior(rawValue: insertBehaviorRaw) {
@@ -258,16 +273,43 @@ final class SettingsCoordinator: SettingsCoordinating {
         }
 
         state.statusLine = isEnabled
-            ? "Translate mode enabled"
-            : "Translate mode disabled"
+            ? "Translate experimental mode enabled"
+            : "Translate experimental mode disabled"
+    }
+
+    func setMeetingModeEnabled(_ isEnabled: Bool) {
+        state.meetingModeEnabled = isEnabled
+        UserDefaults.standard.set(isEnabled, forKey: meetingModeEnabledKey)
+
+        if !isEnabled, state.workflowMode == .meeting {
+            state.workflowMode = .dictation
+        }
+
+        state.statusLine = isEnabled
+            ? "Meeting experimental mode enabled"
+            : "Meeting experimental mode disabled"
+    }
+
+    func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {
+        guard state.dictationHotkeyPreset != preset else { return }
+        state.dictationHotkeyPreset = preset
+        UserDefaults.standard.set(preset.rawValue, forKey: dictationHotkeyPresetKey)
+        state.statusLine = "Dictation hotkey: \(preset.displayName)"
+    }
+
+    func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset) {
+        guard state.commandLaneHotkeyPreset != preset else { return }
+        state.commandLaneHotkeyPreset = preset
+        UserDefaults.standard.set(preset.rawValue, forKey: commandLaneHotkeyPresetKey)
+        state.statusLine = "Command hotkey: \(preset.displayName)"
     }
 
     func restartBackendWithCurrentConfiguration(status: String) {
         let launchConfiguration = currentBackendLaunchConfiguration()
         if backendManager.isRunning {
-            backendManager.restart(configuration: launchConfiguration)
+            backendManager.restartAsync(configuration: launchConfiguration)
         } else {
-            backendManager.startIfNeeded(configuration: launchConfiguration)
+            backendManager.startIfNeededAsync(configuration: launchConfiguration)
         }
 
         state.statusLine = status

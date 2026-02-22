@@ -40,6 +40,7 @@ final class FocusContextMonitor {
         let changed = snapshot.hasFocusedTextInput != lastSnapshot.hasFocusedTextInput
             || snapshot.hasInsertionCursor != lastSnapshot.hasInsertionCursor
             || snapshot.appName != lastSnapshot.appName
+            || snapshot.bundleID != lastSnapshot.bundleID
             || snapshot.role != lastSnapshot.role
         lastSnapshot = snapshot
         if changed {

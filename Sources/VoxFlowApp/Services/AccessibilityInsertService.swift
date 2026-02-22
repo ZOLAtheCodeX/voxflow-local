@@ -110,8 +110,7 @@ final class AccessibilityInsertService {
         let result = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &value)
         guard result == .success, let value,
               CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        // CFGetTypeID check above guarantees this is an AXUIElement
-        return (value as! AXUIElement)
+        return unsafeDowncast(value, to: AXUIElement.self)
     }
 
     private func copyStringAttribute(_ attribute: CFString, on element: AXUIElement) -> String? {
@@ -129,8 +128,7 @@ final class AccessibilityInsertService {
         }
 
         var range = CFRange()
-        // CFGetTypeID check in the guard above guarantees this is an AXValue
-        let axValue = (value as! AXValue)
+        let axValue = unsafeDowncast(value, to: AXValue.self)
         guard AXValueGetType(axValue) == .cfRange else { return nil }
         guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
 

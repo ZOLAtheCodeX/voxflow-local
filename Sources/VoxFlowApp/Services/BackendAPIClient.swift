@@ -49,6 +49,25 @@ struct PrivacyPreviewResponse: Codable {
     let redactedText: String
 }
 
+struct BackendReadinessResponse: Codable {
+    let serviceStatus: String
+    let readyForDictation: Bool
+    let sttBackend: String
+    let activeSttModel: String
+    let activeSttModelLoaded: Bool
+    let sttFallbackActive: Bool
+    let offlineMode: Bool
+    let pythonExecutable: String
+    let pythonVersion: String
+    let modelsDir: String
+    let modelsDirExists: Bool
+    let openaiAudioConfigured: Bool
+    let privateApiConfigured: Bool
+    let privateApiPolicyVersion: String
+    let privateApiPolicyReady: Bool
+    let issues: [String]
+}
+
 enum BackendAPIClient {
     private static let baseURL: URL = {
         if let override = ProcessInfo.processInfo.environment["VOXFLOW_BACKEND_URL"],
@@ -77,6 +96,14 @@ enum BackendAPIClient {
 
         let (data, _) = try await session.data(for: request)
         return try decoder.decode([String: String].self, from: data)
+    }
+
+    static func ready() async throws -> BackendReadinessResponse {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/ready"))
+        request.httpMethod = "GET"
+
+        let (data, _) = try await session.data(for: request)
+        return try decoder.decode(BackendReadinessResponse.self, from: data)
     }
 
     static func transcribe(

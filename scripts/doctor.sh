@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="${HOME}/Applications/VoxFlow.app"
 APP_BIN="${APP_PATH}/Contents/MacOS/VoxFlowLocal"
-HEALTH_URL="${VOXFLOW_BACKEND_URL:-http://127.0.0.1:8765}/v1/health"
+HEALTH_URL="${VOXFLOW_BACKEND_URL:-http://127.0.0.1:8765}/v1/ready"
 MODELS_DIR_DEFAULT="${ROOT_DIR}/models"
 
 echo "[doctor] VoxFlow install check"
@@ -40,7 +40,7 @@ fi
 
 if command -v curl >/dev/null 2>&1; then
   if HEALTH_PAYLOAD="$(curl -fsS "${HEALTH_URL}" 2>/dev/null)"; then
-    echo "[ok] backend reachable: ${HEALTH_URL}"
+    echo "[ok] backend readiness reachable: ${HEALTH_URL}"
     echo "[info] ${HEALTH_PAYLOAD}"
   else
     echo "[warn] backend not reachable: ${HEALTH_URL}"

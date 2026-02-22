@@ -3,43 +3,67 @@ import SwiftUI
 
 @main
 struct VoxFlowLocalApp: App {
-    @StateObject private var coordinator = AppCoordinator.shared
+    @ObservedObject var coordinator = AppCoordinator.shared
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var openedMainWindowOnLaunch = false
 
     var body: some Scene {
+        WindowGroup("VoxFlow", id: "main") {
+            MainWindowView(coordinator: coordinator, state: coordinator.state)
+                .frame(minWidth: 900, minHeight: 680)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                coordinator.appDidBecomeActive()
+            }
+        }
+        .commands {
+            CommandMenu("VoxFlow") {
+                Button("Show Main Window") {
+                    coordinator.showMainWindow()
+                }
+                .keyboardShortcut("0", modifiers: [.command])
+
+                Divider()
+
+                Button("Open Dashboard Window") {
+                    activateAndOpenWindow(id: "dashboard")
+                }
+                .keyboardShortcut("2", modifiers: [.command])
+
+                Button("Open Setup Wizard") {
+                    activateAndOpenWindow(id: "setup")
+                }
+                .keyboardShortcut("1", modifiers: [.command])
+            }
+        }
+
         MenuBarExtra {
-            CommandPaletteView(coordinator: coordinator, state: coordinator.state) {
-                openWindow(id: "dashboard")
-            }
-                .frame(width: 430)
-
-            Divider()
-
-            Button("Open Setup Wizard") {
-                openWindow(id: "setup")
-            }
-            .keyboardShortcut("w")
-
-            Button("Open Dashboard") {
-                openWindow(id: "dashboard")
-            }
-            .keyboardShortcut("d")
-
-            SettingsLink {
-                Text("Settings")
-            }
-
-            Button("Quit") {
+            CommandPaletteView(
+                coordinator: coordinator,
+                state: coordinator.state
+            ) {
+                activateAndOpenWindow(id: "dashboard")
+            } onOpenSetup: {
+                activateAndOpenWindow(id: "setup")
+            } onQuit: {
                 NSApp.terminate(nil)
             }
-            .keyboardShortcut("q")
+            .frame(width: 430)
         } label: {
             Image(systemName: iconName(for: coordinator.state))
                 .symbolRenderingMode(.hierarchical)
                 .accessibilityLabel("VoxFlow")
                 .help("VoxFlow")
+                .onAppear {
+                    if !openedMainWindowOnLaunch {
+                        openedMainWindowOnLaunch = true
+                        coordinator.showMainWindow()
+                    }
+                }
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView(coordinator: coordinator, state: coordinator.state)
@@ -55,6 +79,7 @@ struct VoxFlowLocalApp: App {
             SetupWizardView(coordinator: coordinator, state: coordinator.state)
                 .frame(minWidth: 660, minHeight: 720)
         }
+
     }
 
     private func iconName(for state: AppState) -> String {
@@ -79,5 +104,10 @@ struct VoxFlowLocalApp: App {
         case .error:
             return "exclamationmark.triangle.fill"
         }
+    }
+
+    private func activateAndOpenWindow(id: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: id)
     }
 }

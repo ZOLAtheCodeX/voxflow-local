@@ -4,21 +4,24 @@ struct CommandPaletteView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
     var onOpenDashboardWindow: () -> Void = {}
-    @State private var activePanel: ActivePanel = .dashboard
+    var onOpenSetup: () -> Void = {}
+    var onQuit: () -> Void = {}
+    @State private var activePanel: ActivePanel = .capture
+    @State private var recordingBadgeAnimating = false
 
     private enum ActivePanel: String, CaseIterable, Identifiable {
-        case dashboard
         case capture
+        case dashboard
         case recent
 
         var id: String { rawValue }
 
         var displayName: String {
             switch self {
-            case .dashboard:
-                return "Dashboard"
             case .capture:
-                return "Capture"
+                return "Dictate"
+            case .dashboard:
+                return "Stats"
             case .recent:
                 return "Recent"
             }
@@ -26,36 +29,45 @@ struct CommandPaletteView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: VF.spacingMedium) {
             header
 
             if state.onboardingPhase == .calibrating {
                 OnboardingCalibrationView(coordinator: coordinator, state: state)
             } else {
-                mainDictationCard
+                contentCard
             }
 
             if let error = state.errorMessage {
                 Text(error)
-                    .font(.system(size: 12))
+                    .font(VF.labelFont)
                     .foregroundStyle(.red)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
+            footerBar
         }
-        .padding(.vertical, 12)
-        .background(state.isCommandLaneActive ? Color.orange.opacity(0.08) : Color(nsColor: .windowBackgroundColor))
+        .padding(.vertical, VF.spacingMedium)
+        .background(state.isCommandLaneActive ? Color.orange.opacity(0.08) : Color.clear)
+        .animation(.smooth(duration: 0.25), value: activePanel)
+        .animation(.smooth(duration: 0.3), value: state.sessionState)
+        .onAppear { updateRecordingBadgeAnimation() }
+        .onChange(of: state.sessionState) { _, _ in
+            updateRecordingBadgeAnimation()
+        }
     }
 
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+                HStack(spacing: VF.spacingSmall) {
                     Text("VoxFlow Local")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(VF.titleFont)
                     if state.isCommandLaneActive {
                         Text("SYSTEM COMMAND")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(VF.captionFont.weight(.bold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Color.orange.opacity(0.24))
@@ -65,36 +77,69 @@ struct CommandPaletteView: View {
                 }
 
                 Text(state.statusLine)
-                    .font(.system(size: 12))
+                    .font(VF.labelFont)
                     .foregroundStyle(.secondary)
 
-                Text("Dictate: Ctrl+Opt+Space · Commands: Fn+Cmd+Space")
-                    .font(.system(size: 10))
+                Text("Dictate: \(state.dictationHotkeyPreset.displayName) · Commands: \(state.commandLaneHotkeyPreset.displayName)")
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            Text(state.sessionState.rawValue.capitalized)
-                .font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
-                .background(sessionBadgeColor.opacity(0.22))
-                .foregroundStyle(sessionBadgeColor)
-                .clipShape(Capsule())
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(state.backendReadyForDictation ? "Ready" : "Not Ready")
+                    .font(VF.captionFont.weight(.semibold))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(readinessBadgeColor.opacity(0.22))
+                    .foregroundStyle(readinessBadgeColor)
+                    .clipShape(Capsule())
+
+                Text(state.sessionState.rawValue.capitalized)
+                    .font(VF.captionFont.weight(.semibold))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(sessionBadgeColor.opacity(0.22))
+                    .foregroundStyle(sessionBadgeColor)
+                    .clipShape(Capsule())
+                    .scaleEffect(state.sessionState == .recording && recordingBadgeAnimating ? 1.08 : 1.0)
+                    .animation(
+                        state.sessionState == .recording
+                            ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true)
+                            : .easeOut(duration: 0.2),
+                        value: recordingBadgeAnimating
+                    )
+            }
         }
         .padding(.horizontal, 16)
     }
 
+    private var contentCard: some View {
+        Group {
+            switch state.sessionState {
+            case .recording:
+                recordingStateCard
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            case .transcribing:
+                transcribingStateCard
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            default:
+                mainDictationCard
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+        }
+    }
+
     private var mainDictationCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: VF.spacingMedium) {
             HStack {
                 Text(state.canStartCaptureForDictation ? "Target Ready" : "No Text Target")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(VF.labelFont)
                     .foregroundStyle(state.canStartCaptureForDictation ? .green : .orange)
                 Spacer()
                 Text(state.focusTarget.appName ?? "No active app")
-                    .font(.system(size: 11))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -105,105 +150,121 @@ struct CommandPaletteView: View {
             }
             .pickerStyle(.segmented)
 
-            if activePanel == .dashboard {
-                DashboardPanelView(coordinator: coordinator, state: state) {
-                    activePanel = .capture
-                } onOpenFullDashboard: {
-                    onOpenDashboardWindow()
-                }
-            } else if activePanel == .recent {
-                recentDictationsPanel
-            } else {
-                Picker("Provider", selection: Binding(
-                    get: { state.providerMode },
-                    set: { coordinator.selectProviderMode($0) }
-                )) {
-                    ForEach(ProviderMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
+            Group {
+                switch activePanel {
+                case .dashboard:
+                    DashboardPanelView(coordinator: coordinator, state: state) {
+                        activePanel = .capture
+                    } onOpenFullDashboard: {
+                        onOpenDashboardWindow()
                     }
-                }
-                .pickerStyle(.segmented)
-
-                if state.providerMode == .privateAPI && (state.privateAPIBaseURL.isEmpty || state.privateAPIModel.isEmpty || state.privateAPIKey.isEmpty) {
-                    Text("Private API mode needs Base URL, Model, and API key in Settings.")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.orange)
-                }
-
-                Picker("Mode", selection: Binding(
-                    get: { state.workflowMode },
-                    set: { coordinator.selectWorkflowMode($0) }
-                )) {
-                    ForEach(WorkflowMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                if let privacyPreview = state.privacyPreview {
-                    privacyReview(preview: privacyPreview)
-                } else {
-                    switch state.workflowMode {
-                    case .translateEnToDe:
-                        translationReview
-                    case .meeting:
-                        meetingReview
-                    case .dictation:
-                        dictationReview
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    Button("Insert") {
-                        coordinator.insertCurrentText()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(insertDisabled)
-
-                    Button("Copy") {
-                        coordinator.copyCurrentText()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(state.displayText.isEmpty)
-
-                    Button("Retry") {
-                        coordinator.retryLastCapture()
-                    }
-                    .buttonStyle(.bordered)
-
-                    Spacer()
+                case .recent:
+                    recentDictationsPanel
+                case .capture:
+                    capturePanel
                 }
             }
+            .id(activePanel)
+            .transition(.opacity.combined(with: .move(edge: .trailing)))
         }
         .padding(16)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+    }
+
+    private var capturePanel: some View {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            Picker("Provider", selection: Binding(
+                get: { state.providerMode },
+                set: { coordinator.selectProviderMode($0) }
+            )) {
+                ForEach(ProviderMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if state.providerMode == .privateAPI && (state.privateAPIBaseURL.isEmpty || state.privateAPIModel.isEmpty || state.privateAPIKey.isEmpty) {
+                Text("Private API mode needs Base URL, Model, and API key in Settings.")
+                    .font(VF.captionFont.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
+
+            Picker("Mode", selection: Binding(
+                get: { state.workflowMode },
+                set: { coordinator.selectWorkflowMode($0) }
+            )) {
+                ForEach(state.availableWorkflowModes) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if let privacyPreview = state.privacyPreview {
+                privacyReview(preview: privacyPreview)
+            } else {
+                switch state.workflowMode {
+                case .translateEnToDe:
+                    translationReview
+                case .meeting:
+                    meetingReview
+                case .dictation:
+                    dictationReview
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button("Insert") {
+                    coordinator.insertCurrentText()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: [])
+                .disabled(insertDisabled)
+
+                Button("Copy") {
+                    coordinator.copyCurrentText()
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.displayText.isEmpty)
+
+                Button("Retry") {
+                    coordinator.retryLastCapture()
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut("r", modifiers: [.command])
+
+                Spacer()
+            }
+        }
     }
 
     private func privacyReview(preview: PrivacyPreview) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
             Text("Privacy Review")
-                .font(.system(size: 12, weight: .semibold))
+                .font(VF.labelFont.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             Text("Original")
-                .font(.system(size: 11, weight: .semibold))
+                .font(VF.captionFont.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(preview.originalText)
-                .font(.system(size: 13))
+                .font(VF.bodyFont)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .background(Color.gray.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
                 .lineLimit(4)
 
             Text("Redacted")
-                .font(.system(size: 11, weight: .semibold))
+                .font(VF.captionFont.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(preview.redactedText)
-                .font(.system(size: 13))
+                .font(VF.bodyFont)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .background(Color.blue.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .background {
+                    RoundedRectangle(cornerRadius: VF.cornerMedium)
+                        .fill(.ultraThinMaterial)
+                        .overlay(Color.blue.opacity(0.08))
+                }
                 .lineLimit(4)
 
             HStack(spacing: 8) {
@@ -221,15 +282,16 @@ struct CommandPaletteView: View {
                     coordinator.cancelPrivacyPreview()
                 }
                 .buttonStyle(.bordered)
+                .keyboardShortcut(.escape, modifiers: [])
             }
         }
     }
 
     private var dictationReview: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
             Group {
                 if state.displayText.isEmpty {
-                    Text("Hold Ctrl+Opt+Space to dictate. Use Fn+Cmd+Space for command lane.")
+                    Text("Hold \(state.dictationHotkeyPreset.displayName) to dictate. Use \(state.commandLaneHotkeyPreset.displayName) for command lane.")
                         .foregroundStyle(.secondary)
                 } else {
                     ScrollView {
@@ -238,11 +300,10 @@ struct CommandPaletteView: View {
                     }
                 }
             }
-            .font(.system(size: 14))
+            .font(VF.bodyFont)
             .frame(minHeight: 92, maxHeight: 120)
             .padding(10)
-            .background(Color.gray.opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
 
             HStack(spacing: 8) {
                 ForEach(CleanupMode.allCases) { mode in
@@ -254,7 +315,7 @@ struct CommandPaletteView: View {
 
             HStack(spacing: 8) {
                 Text("Tone")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(VF.labelFont.weight(.semibold))
                     .foregroundStyle(.secondary)
 
                 ForEach(ToneStyle.allCases) { tone in
@@ -270,30 +331,32 @@ struct CommandPaletteView: View {
     }
 
     private var translationReview: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
             if let candidate = state.translationCandidate {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Captured English")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(VF.captionFont.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(candidate.sourceEnglish)
-                        .font(.system(size: 14))
+                        .font(VF.bodyFont)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
-                        .background(Color.gray.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text("German Output")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(VF.captionFont.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(candidate.targetGerman)
-                        .font(.system(size: 14))
+                        .font(VF.bodyFont)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
-                        .background(Color.green.opacity(0.11))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background {
+                            RoundedRectangle(cornerRadius: VF.cornerMedium)
+                                .fill(.ultraThinMaterial)
+                                .overlay(Color.green.opacity(0.08))
+                        }
                 }
 
                 if !candidate.approved {
@@ -307,81 +370,84 @@ struct CommandPaletteView: View {
                 }
             } else {
                 Text("Hold hotkey, speak in English, release to produce German text.")
-                    .font(.system(size: 14))
+                    .font(VF.bodyFont)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(Color.gray.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
             }
         }
     }
 
     private var meetingReview: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
             if let meeting = state.meetingCandidate {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Captured Transcript")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(VF.captionFont.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(meeting.transcript)
-                        .font(.system(size: 13))
+                        .font(VF.bodyFont)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
-                        .background(Color.gray.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
                         .lineLimit(4)
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Structured Notes")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(VF.captionFont.weight(.semibold))
                         .foregroundStyle(.secondary)
                     ScrollView {
                         Text(meeting.formattedNotes)
-                            .font(.system(size: 13))
+                            .font(VF.bodyFont)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(minHeight: 100, maxHeight: 150)
                     .padding(10)
-                    .background(Color.blue.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .background {
+                        RoundedRectangle(cornerRadius: VF.cornerMedium)
+                            .fill(.ultraThinMaterial)
+                            .overlay(Color.blue.opacity(0.08))
+                    }
                 }
 
                 if !meeting.speakerSegments.isEmpty {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Speaker Segments")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(VF.captionFont.weight(.semibold))
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(meeting.speakerSegments) { segment in
                                 Text("• \(segment.speaker) (\(segment.utteranceCount)): \(segment.text)")
-                                    .font(.system(size: 12))
+                                    .font(VF.labelFont)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                         .padding(10)
-                        .background(Color.gray.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
                     }
                 }
 
                 if !meeting.taskOwners.isEmpty {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Task Owners")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(VF.captionFont.weight(.semibold))
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(meeting.taskOwners) { owner in
                                 let confidence = Int((owner.confidence * 100).rounded())
                                 Text("• \(owner.task) -> \(owner.owner) (\(confidence)%)")
-                                    .font(.system(size: 12))
+                                    .font(VF.labelFont)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                         .padding(10)
-                        .background(Color.green.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background {
+                            RoundedRectangle(cornerRadius: VF.cornerMedium)
+                                .fill(.ultraThinMaterial)
+                                .overlay(Color.green.opacity(0.08))
+                        }
                     }
                 }
 
@@ -408,21 +474,20 @@ struct CommandPaletteView: View {
                 }
             } else {
                 Text("Meeting mode: hold hotkey to capture, then review summary, decisions, actions, and follow-ups.")
-                    .font(.system(size: 14))
+                    .font(VF.bodyFont)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(Color.gray.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
             }
         }
     }
 
     private var recentDictationsPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
             if state.recentDictations.isEmpty {
                 Text("No recent dictations this session.")
-                    .font(.system(size: 13))
+                    .font(VF.bodyFont)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 24)
@@ -443,15 +508,15 @@ struct CommandPaletteView: View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(String(candidate.rawText.prefix(80)) + (candidate.rawText.count > 80 ? "..." : ""))
-                    .font(.system(size: 12))
+                    .font(VF.labelFont)
                     .lineLimit(2)
 
                 HStack(spacing: 6) {
                     Text(candidate.selectedMode.displayName)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(VF.captionFont.weight(.medium))
                         .foregroundStyle(.secondary)
                     Text(relativeTime(candidate.timestamp))
-                        .font(.system(size: 10))
+                        .font(VF.captionFont)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -475,8 +540,97 @@ struct CommandPaletteView: View {
             }
         }
         .padding(8)
-        .background(Color.gray.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: VF.cornerSmall))
+    }
+
+    private var recordingStateCard: some View {
+        VStack(alignment: .center, spacing: VF.spacingMedium) {
+            TimelineView(.animation(minimumInterval: 0.08)) { context in
+                HStack(alignment: .bottom, spacing: 6) {
+                    ForEach(0..<5, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.red.gradient)
+                            .frame(width: 8, height: waveformHeight(index: index, time: context.date.timeIntervalSinceReferenceDate))
+                    }
+                }
+                .frame(height: 54)
+            }
+
+            Text(String(format: "%.1f", state.recordingDuration))
+                .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.primary)
+
+            Text("Release hotkey to transcribe")
+                .font(VF.captionFont)
+                .foregroundStyle(.secondary)
+
+            Button("Cancel Capture") {
+                coordinator.cancelActiveCapture()
+            }
+            .buttonStyle(.bordered)
+            .keyboardShortcut(.escape, modifiers: [])
+        }
+        .frame(maxWidth: .infinity)
+        .padding(18)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+    }
+
+    private var transcribingStateCard: some View {
+        VStack(spacing: VF.spacingMedium) {
+            ProgressView()
+                .controlSize(.regular)
+            Text("Transcribing...")
+                .font(VF.bodyFont)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 150)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+    }
+
+    private var footerBar: some View {
+        HStack(spacing: VF.spacingSmall) {
+            Button {
+                onOpenSetup()
+            } label: {
+                Image(systemName: "wand.and.stars")
+            }
+            .accessibilityLabel("Open Setup Wizard")
+            .help("Open Setup Wizard")
+            .buttonStyle(.bordered)
+            .keyboardShortcut("1", modifiers: [.command])
+
+            Button {
+                onOpenDashboardWindow()
+            } label: {
+                Image(systemName: "chart.bar.xaxis")
+            }
+            .accessibilityLabel("Open Dashboard")
+            .help("Open Dashboard")
+            .buttonStyle(.bordered)
+            .keyboardShortcut("2", modifiers: [.command])
+
+            SettingsLink {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Open Settings")
+            .help("Open Settings")
+            .keyboardShortcut(",", modifiers: [.command])
+
+            Spacer()
+
+            Button {
+                onQuit()
+            } label: {
+                Image(systemName: "power")
+            }
+            .accessibilityLabel("Quit VoxFlow")
+            .help("Quit VoxFlow")
+            .buttonStyle(.bordered)
+            .keyboardShortcut("q", modifiers: [.command])
+        }
+        .labelStyle(.iconOnly)
+        .controlSize(.regular)
+        .padding(.horizontal, 16)
     }
 
     private func relativeTime(_ date: Date) -> String {
@@ -484,6 +638,16 @@ struct CommandPaletteView: View {
         if interval < 60 { return "just now" }
         if interval < 3600 { return "\(Int(interval / 60))m ago" }
         return "\(Int(interval / 3600))h ago"
+    }
+
+    private func waveformHeight(index: Int, time: TimeInterval) -> CGFloat {
+        let phase = (time * 3.2) + (Double(index) * 0.9)
+        let value = abs(sin(phase))
+        return 12 + CGFloat(value * 36)
+    }
+
+    private func updateRecordingBadgeAnimation() {
+        recordingBadgeAnimating = state.sessionState == .recording
     }
 
     private var insertDisabled: Bool {
@@ -523,5 +687,9 @@ struct CommandPaletteView: View {
         case .error:
             return .red
         }
+    }
+
+    private var readinessBadgeColor: Color {
+        state.backendReadyForDictation ? .green : .orange
     }
 }

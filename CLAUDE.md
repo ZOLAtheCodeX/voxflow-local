@@ -8,7 +8,7 @@ VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Pytho
 
 ```
 Sources/VoxFlowApp/        Swift frontend (SwiftUI, MenuBarExtra)
-  AppCoordinator.swift      Central orchestrator (~510 lines, @MainActor)
+  AppCoordinator.swift      Central orchestrator (~580 lines, @MainActor)
   Services/                 Extracted coordinators + backend services
     SettingsCoordinator.swift           Provider, STT, insert behavior, app tone overrides + persistence
     OnboardingCoordinator.swift         Calibration flow lifecycle
@@ -18,11 +18,11 @@ Sources/VoxFlowApp/        Swift frontend (SwiftUI, MenuBarExtra)
     AccessibilityInsertService.swift    AX text insertion + bundleID-aware app info
     SessionMemoryStore.swift            Ring buffer for recent dictations (recent/push/count)
   Models/AppModels.swift    All domain types (enums, structs, InsertBehavior, FocusTargetSnapshot)
-  State/AppState.swift      Published app state (~48 @Published properties)
+  State/AppState.swift      Published app state (~50 @Published properties)
   Views/                    SwiftUI views
 backend/app/
-  server.py                 FastAPI server (~1624 lines, all endpoints)
-scripts/                    Shell scripts (bootstrap, run, doctor, launcher)
+  server.py                 FastAPI server (~1700 lines, all endpoints)
+scripts/                    Shell scripts (bootstrap, test, run, doctor, launcher, release)
 models/                     Pre-downloaded ML models (~24GB, not in git)
 ```
 
@@ -56,7 +56,8 @@ swift run VoxFlowLocal
 - **Python 3.11+** required
 - Key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.8.0, transformers 4.56.0
 - Backend binds to `127.0.0.1:8765` (localhost only)
-- Health check: `curl http://127.0.0.1:8765/health`
+- Health check: `curl http://127.0.0.1:8765/v1/health`
+- Readiness contract: `curl http://127.0.0.1:8765/v1/ready`
 
 ### Environment Variables
 
@@ -78,6 +79,7 @@ swift run VoxFlowLocal
 - **`@MainActor` coordinator pattern**: `AppCoordinator` orchestrates audio capture and workflow routing; 5 extracted coordinators handle settings, onboarding, text insertion, benchmarking, and privacy consent via protocol-typed properties. Views observe `AppCoordinator.state` unchanged.
 - **Privacy gate helper**: `processWithPrivacyGate` centralizes the `privateAPI` vs `localOnly` branch for all three workflow processors (`processDictation`, `processTranslation`, `processMeeting`)
 - **Auto-insert mode**: `InsertBehavior` enum (`.alwaysReview`, `.autoInsertRaw/Light/Polish`) controls whether dictation skips the review step. Persisted via `SettingsCoordinator`.
+- **Feature gates**: Dictation core remains always-on; translation and meeting workflows are experimental toggles (`translationModeEnabled`, `meetingModeEnabled`) surfaced through Settings and workflow picker filtering.
 - **App-context tone resolution**: `resolveEffectiveTone()` checks user overrides → `SettingsCoordinator.defaultAppTones` → global `toneStyle`, keyed by `FocusTargetSnapshot.bundleID`. Overrides persisted as JSON in UserDefaults.
 - **Clipboard bridge**: After successful AX direct insert, text is also copied to clipboard for recoverability. Skipped when paste fallback already uses clipboard.
 - **Session memory**: `SessionMemoryStore` ring buffer exposed via `AppState.recentDictations` with re-insert and copy actions in the "Recent" tab.
@@ -99,7 +101,8 @@ swift run VoxFlowLocal
 - Test coverage: 201+ tests (110 Swift + 91 Python) covering models, parsing, coordinators, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
-- Run backend tests: `cd backend && python -m pytest`
+- Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`
+- Run full suite: `./scripts/test_all.sh`
 
 ## Common Issues
 
@@ -112,7 +115,7 @@ swift run VoxFlowLocal
 
 ## Git
 
-- Main branch: `main`
+- Primary branch: `master`
 - Commit style: imperative mood, concise summary line, detailed body for multi-file changes
 - Models directory (`models/`) is not tracked (too large)
 - Never commit `.env`, API keys, or credential files

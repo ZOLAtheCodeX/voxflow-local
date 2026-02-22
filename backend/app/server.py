@@ -12,6 +12,7 @@ import time
 import uuid
 import wave
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from threading import Lock
@@ -174,6 +175,25 @@ class PrivacyPreviewResponse(BaseModel):
     token: str
     original_text: str
     redacted_text: str
+
+
+class ReadyResponse(BaseModel):
+    service_status: str
+    ready_for_dictation: bool
+    stt_backend: str
+    active_stt_model: str
+    active_stt_model_loaded: bool
+    stt_fallback_active: bool
+    offline_mode: bool
+    python_executable: str
+    python_version: str
+    models_dir: str
+    models_dir_exists: bool
+    openai_audio_configured: bool
+    private_api_configured: bool
+    private_api_policy_version: str
+    private_api_policy_ready: bool
+    issues: list[str] = Field(default_factory=list)
 
 
 class VoxtralEngine:
@@ -1426,7 +1446,29 @@ class ProviderRouter:
         return structured, resolved
 
 
-app = FastAPI(title="VoxFlow Local Backend", version="0.1.0")
+def initialize_runtime_state() -> None:
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+    try:
+        import torch
+
+        state.mps_available = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
+    except Exception as exc:
+        logger.warning("MPS check at startup failed: %s", exc)
+        state.mps_available = False
+
+    state.stt_backend = current_stt_backend()
+    state.model_loaded = active_stt_model_loaded()
+
+
+@asynccontextmanager
+async def app_lifespan(_: FastAPI):
+    initialize_runtime_state()
+    yield
+
+
+app = FastAPI(title="VoxFlow Local Backend", version="0.1.0", lifespan=app_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1511,21 +1553,46 @@ def transcribe_with_active_backend(pcm: bytes, sample_rate: int, language_hint: 
     return provider_router.transcribe(pcm, sample_rate, language_hint)
 
 
-@app.on_event("startup")
-def on_startup() -> None:
-    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-
-    try:
-        import torch
-
-        state.mps_available = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
-    except Exception as exc:
-        logger.warning("MPS check at startup failed: %s", exc)
-        state.mps_available = False
-
+def readiness_snapshot() -> ReadyResponse:
     state.stt_backend = current_stt_backend()
     state.model_loaded = active_stt_model_loaded()
+    active_model = active_stt_model_id()
+    privacy_policy = provider_router.private_api_policy()
+
+    models_dir = os.environ.get("VOXFLOW_MODELS_DIR", "")
+    models_dir_exists = bool(models_dir and os.path.isdir(models_dir))
+    private_api_policy_ready = bool(
+        privacy_policy.version and privacy_policy.require_consent and privacy_policy.require_raw_confirmation
+    )
+
+    issues: list[str] = []
+    if state.service_status != "ok":
+        issues.append("service status is not ok")
+    if not state.model_loaded:
+        issues.append("active STT model is not loaded")
+    if models_dir and not models_dir_exists:
+        issues.append(f"configured models directory does not exist: {models_dir}")
+    if not models_dir:
+        issues.append("VOXFLOW_MODELS_DIR is not configured")
+
+    return ReadyResponse(
+        service_status=state.service_status,
+        ready_for_dictation=(state.service_status == "ok" and state.model_loaded),
+        stt_backend=state.stt_backend,
+        active_stt_model=active_model,
+        active_stt_model_loaded=state.model_loaded,
+        stt_fallback_active=stt_fallback_active(),
+        offline_mode=state.offline_mode,
+        python_executable=sys.executable,
+        python_version=sys.version.split()[0],
+        models_dir=models_dir,
+        models_dir_exists=models_dir_exists,
+        openai_audio_configured=openai_audio_client.configured,
+        private_api_configured=private_api_client.configured,
+        private_api_policy_version=privacy_policy.version or "unset",
+        private_api_policy_ready=private_api_policy_ready,
+        issues=issues,
+    )
 
 
 @app.get("/v1/health")
@@ -1550,6 +1617,11 @@ def health() -> dict[str, str]:
             bool(privacy_policy.version and privacy_policy.require_consent and privacy_policy.require_raw_confirmation)
         ).lower(),
     }
+
+
+@app.get("/v1/ready", response_model=ReadyResponse)
+def ready() -> ReadyResponse:
+    return readiness_snapshot()
 
 
 @app.post("/v1/transcribe", response_model=TranscribeResponse)

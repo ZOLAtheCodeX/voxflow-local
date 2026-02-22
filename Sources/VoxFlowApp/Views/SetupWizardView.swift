@@ -115,11 +115,15 @@ struct SetupWizardView: View {
             if didRunHealthCheck {
                 VStack(alignment: .leading, spacing: 4) {
                     healthLine("Service", backendHealth["service_status"] ?? "unknown")
+                    healthLine("Ready for dictation", backendHealth["ready_for_dictation"] ?? "unknown")
                     healthLine("Model loaded", backendHealth["model_loaded"] ?? "unknown")
                     healthLine("Backend", backendHealth["stt_backend"] ?? "unknown")
                     healthLine("Active model", backendHealth["active_stt_model"] ?? "unknown")
                     healthLine("Fallback active", backendHealth["stt_fallback_active"] ?? "unknown")
                     healthLine("Offline mode", backendHealth["offline_mode"] ?? "unknown")
+                    if let issues = backendHealth["issues"], !issues.isEmpty {
+                        healthLine("Issues", issues)
+                    }
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -200,7 +204,7 @@ struct SetupWizardView: View {
             Text("4. Functional Check")
                 .font(.system(size: 15, weight: .semibold))
 
-            Text("Focus any text field (Notes, browser input, chat app), then hold `Control + Option + Space` to dictate and release to insert.")
+            Text("Focus any text field (Notes, browser input, chat app), then hold `\(state.dictationHotkeyPreset.displayName)` to dictate and release to insert.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
 
@@ -268,13 +272,23 @@ struct SetupWizardView: View {
         refreshPermissions()
 
         do {
-            let health = try await BackendAPIClient.health()
-            backendHealth = health
+            let readiness = try await BackendAPIClient.ready()
+            backendHealth = [
+                "service_status": readiness.serviceStatus,
+                "ready_for_dictation": String(readiness.readyForDictation).lowercased(),
+                "model_loaded": String(readiness.activeSttModelLoaded).lowercased(),
+                "stt_backend": readiness.sttBackend,
+                "active_stt_model": readiness.activeSttModel,
+                "stt_fallback_active": String(readiness.sttFallbackActive).lowercased(),
+                "offline_mode": String(readiness.offlineMode).lowercased(),
+                "issues": readiness.issues.joined(separator: "; "),
+            ]
             didRunHealthCheck = true
-            if health["service_status"] == "ok", health["model_loaded"] == "true" {
+            if readiness.readyForDictation {
                 healthStatusLine = "Backend ready: model loaded and healthy."
             } else {
-                healthStatusLine = "Backend reachable, but model is not fully ready."
+                let issue = readiness.issues.first ?? "active STT model is not loaded"
+                healthStatusLine = "Backend reachable, not ready: \(issue)"
             }
         } catch {
             backendHealth = [:]

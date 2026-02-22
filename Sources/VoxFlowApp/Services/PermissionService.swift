@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 @preconcurrency import ApplicationServices
 import Foundation
 
@@ -20,8 +21,12 @@ final class PermissionService {
     }
 
     func promptAccessibilityPermission() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let trusted = AXIsProcessTrustedWithOptions(options)
+        if !trusted,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func microphoneStatus() -> Bool {

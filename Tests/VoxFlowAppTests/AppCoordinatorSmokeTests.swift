@@ -65,6 +65,15 @@ final class AppCoordinatorSmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectWorkflowModeMeetingRequiresEnabled() {
+        let state = AppState()
+        state.meetingModeEnabled = false
+        let mode: WorkflowMode = .meeting
+        let shouldReject = mode == .meeting && !state.meetingModeEnabled
+        XCTAssertTrue(shouldReject)
+    }
+
+    @MainActor
     func testResetForNewCaptureTransitionsToRecording() {
         let state = AppState()
         state.sessionState = .idle

@@ -1,5 +1,6 @@
 import Foundation
 import os.log
+import Darwin
 
 private let log = Logger(subsystem: "local.voxflow.app", category: "BackendProcessManager")
 
@@ -20,7 +21,12 @@ struct BackendLaunchConfiguration: Equatable {
     let openAITTSVoice: String
 }
 
-final class BackendProcessManager {
+final class BackendProcessManager: @unchecked Sendable {
+    private static let defaultBackendPort = 8765
+    private let workQueue = DispatchQueue(label: "local.voxflow.app.backend-process-manager")
+    private let workQueueSpecificKey = DispatchSpecificKey<UInt8>()
+    private let workQueueSpecificValue: UInt8 = 1
+
     private struct PythonInvocation {
         let executableURL: URL
         let arguments: [String]
@@ -28,53 +34,135 @@ final class BackendProcessManager {
 
     private var process: Process?
     private var activeConfiguration: BackendLaunchConfiguration?
+    private var stdoutPipe: Pipe?
+    private var stderrPipe: Pipe?
+    private var _lastStartupFailureReason: String?
+
+    var lastStartupFailureReason: String? {
+        syncOnWorkQueue { _lastStartupFailureReason }
+    }
+
+    init() {
+        workQueue.setSpecific(key: workQueueSpecificKey, value: workQueueSpecificValue)
+    }
 
     var isRunning: Bool {
-        process?.isRunning == true
+        syncOnWorkQueue {
+            process?.isRunning == true
+        }
     }
 
     func startIfNeeded(configuration: BackendLaunchConfiguration) {
+        syncOnWorkQueue {
+            startIfNeededOnWorkQueue(configuration: configuration)
+        }
+    }
+
+    func startIfNeededAsync(configuration: BackendLaunchConfiguration) {
+        workQueue.async { [weak self] in
+            self?.startIfNeededOnWorkQueue(configuration: configuration)
+        }
+    }
+
+    func restart(configuration: BackendLaunchConfiguration) {
+        syncOnWorkQueue {
+            restartOnWorkQueue(configuration: configuration)
+        }
+    }
+
+    func restartAsync(configuration: BackendLaunchConfiguration) {
+        workQueue.async { [weak self] in
+            self?.restartOnWorkQueue(configuration: configuration)
+        }
+    }
+
+    func stop() {
+        syncOnWorkQueue {
+            stopOnWorkQueue()
+        }
+    }
+
+    func stopAsync() {
+        workQueue.async { [weak self] in
+            self?.stopOnWorkQueue()
+        }
+    }
+
+    private func restartOnWorkQueue(configuration: BackendLaunchConfiguration) {
+        stopOnWorkQueue()
+        startIfNeededOnWorkQueue(configuration: configuration)
+    }
+
+    private func startIfNeededOnWorkQueue(configuration: BackendLaunchConfiguration) {
+        _lastStartupFailureReason = nil
+
+        if process?.isRunning != true {
+            process = nil
+            activeConfiguration = nil
+            clearPipeHandlers()
+        }
+
         if process?.isRunning == true {
             if activeConfiguration == configuration {
                 return
             }
-            stop()
+            stopOnWorkQueue()
+        }
+
+        let backendPort = resolveBackendPort()
+        guard ensureBackendPortAvailable(backendPort) else {
+            let issue = "Unable to free backend port \(backendPort)"
+            log.error("\(issue)")
+            _lastStartupFailureReason = issue
+            process = nil
+            activeConfiguration = nil
+            clearPipeHandlers()
+            return
         }
 
         let backendPath = resolveBackendPath()
         guard FileManager.default.fileExists(atPath: backendPath) else {
+            let issue = "Backend entrypoint missing at \(backendPath)"
+            log.error("\(issue)")
+            _lastStartupFailureReason = issue
             return
         }
 
         let invocation = resolvePythonInvocation(forBackendPath: backendPath)
         let task = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
         task.executableURL = invocation.executableURL
         task.arguments = invocation.arguments
         task.environment = mergedEnvironment(configuration: configuration)
-        task.standardOutput = Pipe()
-        task.standardError = Pipe()
+        task.standardOutput = stdout
+        task.standardError = stderr
+        drainPipe(stdout, label: "stdout")
+        drainPipe(stderr, label: "stderr")
+        stdoutPipe = stdout
+        stderrPipe = stderr
 
         do {
             try task.run()
             process = task
             activeConfiguration = configuration
+            _lastStartupFailureReason = nil
             log.info("Backend started (pid: \(task.processIdentifier))")
         } catch {
             log.error("Failed to start backend: \(error.localizedDescription)")
+            _lastStartupFailureReason = "Failed to start backend process: \(error.localizedDescription)"
             process = nil
             activeConfiguration = nil
+            clearPipeHandlers()
         }
     }
 
-    func restart(configuration: BackendLaunchConfiguration) {
-        stop()
-        startIfNeeded(configuration: configuration)
-    }
-
-    func stop() {
+    private func stopOnWorkQueue() {
         guard let process, process.isRunning else {
             self.process = nil
             activeConfiguration = nil
+            _lastStartupFailureReason = nil
+            clearPipeHandlers()
             return
         }
 
@@ -89,8 +177,25 @@ final class BackendProcessManager {
             process.interrupt()
         }
 
+        if process.isRunning {
+            _ = kill(process.processIdentifier, SIGKILL)
+        }
+
         self.process = nil
         activeConfiguration = nil
+        _lastStartupFailureReason = nil
+        clearPipeHandlers()
+    }
+
+    private func isOnWorkQueue() -> Bool {
+        DispatchQueue.getSpecific(key: workQueueSpecificKey) == workQueueSpecificValue
+    }
+
+    private func syncOnWorkQueue<T>(_ operation: () -> T) -> T {
+        if isOnWorkQueue() {
+            return operation()
+        }
+        return workQueue.sync(execute: operation)
     }
 
     private func resolveBackendPath() -> String {
@@ -174,7 +279,7 @@ final class BackendProcessManager {
             "TMPDIR": inherited["TMPDIR"] ?? "/tmp",
             "LANG": inherited["LANG"] ?? "en_US.UTF-8",
         ]
-        if let modelsDir = inherited["VOXFLOW_MODELS_DIR"] {
+        if let modelsDir = resolveModelsDirectory(inheritedEnvironment: inherited) {
             environment["VOXFLOW_MODELS_DIR"] = modelsDir
         }
         environment["PYTHONUNBUFFERED"] = "1"
@@ -201,4 +306,124 @@ final class BackendProcessManager {
         environment["VOXFLOW_OPENAI_TTS_VOICE"] = configuration.openAITTSVoice
         return environment
     }
+
+    private func resolveModelsDirectory(inheritedEnvironment: [String: String]) -> String? {
+        if let explicit = inheritedEnvironment["VOXFLOW_MODELS_DIR"], !explicit.isEmpty {
+            return explicit
+        }
+
+        if let bundledModels = Bundle.main.resourceURL?
+            .appendingPathComponent("models")
+            .path,
+           FileManager.default.fileExists(atPath: bundledModels) {
+            return bundledModels
+        }
+
+        if let projectRoot = inheritedEnvironment["VOXFLOW_PROJECT_ROOT"], !projectRoot.isEmpty {
+            let projectModels = URL(fileURLWithPath: projectRoot)
+                .appendingPathComponent("models")
+                .path
+            if FileManager.default.fileExists(atPath: projectModels) {
+                return projectModels
+            }
+        }
+
+        let cwdModels = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("models")
+            .path
+        if FileManager.default.fileExists(atPath: cwdModels) {
+            return cwdModels
+        }
+
+        return nil
+    }
+
+    private func drainPipe(_ pipe: Pipe, label: String) {
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            guard let chunk = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !chunk.isEmpty else { return }
+            if label == "stderr" {
+                log.error("Backend \(label): \(chunk)")
+            } else {
+                log.debug("Backend \(label): \(chunk)")
+            }
+        }
+    }
+
+    private func clearPipeHandlers() {
+        stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+        stderrPipe?.fileHandleForReading.readabilityHandler = nil
+        stdoutPipe = nil
+        stderrPipe = nil
+    }
+
+    private func resolveBackendPort() -> Int {
+        let raw = ProcessInfo.processInfo.environment["VOXFLOW_BACKEND_URL"] ?? "http://127.0.0.1:\(Self.defaultBackendPort)"
+        guard let url = URL(string: raw) else { return Self.defaultBackendPort }
+        if let port = url.port {
+            return port
+        }
+        if let scheme = url.scheme?.lowercased(), scheme == "https" {
+            return 443
+        }
+        return 80
+    }
+
+    private func ensureBackendPortAvailable(_ port: Int) -> Bool {
+        var pids = listeningPIDs(onPort: port)
+        pids.removeAll { $0 == getpid() }
+        guard !pids.isEmpty else { return true }
+
+        log.warning("Port \(port) is in use; attempting recovery for backend startup")
+        terminatePIDs(pids, signal: SIGTERM)
+        usleep(400_000)
+
+        pids = listeningPIDs(onPort: port)
+        pids.removeAll { $0 == getpid() }
+        if !pids.isEmpty {
+            terminatePIDs(pids, signal: SIGKILL)
+            usleep(250_000)
+        }
+
+        pids = listeningPIDs(onPort: port)
+        pids.removeAll { $0 == getpid() }
+        return pids.isEmpty
+    }
+
+    private func terminatePIDs(_ pids: [pid_t], signal: Int32) {
+        for pid in pids {
+            _ = kill(pid, signal)
+        }
+    }
+
+    private func listeningPIDs(onPort port: Int) -> [pid_t] {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        task.arguments = ["-ti", "tcp:\(port)"]
+
+        let stdout = Pipe()
+        task.standardOutput = stdout
+        task.standardError = Pipe()
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            log.error("Failed to query port listeners on \(port): \(error.localizedDescription)")
+            return []
+        }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard let raw = String(data: data, encoding: .utf8), !raw.isEmpty else {
+            return []
+        }
+
+        return raw
+            .split(separator: "\n")
+            .compactMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
 }

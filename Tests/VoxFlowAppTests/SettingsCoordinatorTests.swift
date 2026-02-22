@@ -65,6 +65,8 @@ final class SettingsCoordinatorTests: XCTestCase {
         let defaults = UserDefaults.standard
         defaults.set("whisper", forKey: "voxflow.stt.backend")
         defaults.set("privateAPI", forKey: "voxflow.provider.mode")
+        defaults.set("controlShiftSpace", forKey: "voxflow.hotkey.dictationPreset")
+        defaults.set("fnOptionSpace", forKey: "voxflow.hotkey.commandLanePreset")
         defaults.set(true, forKey: "voxflow.onboarding.complete")
 
         let (sut, state, _) = makeSUT()
@@ -72,11 +74,15 @@ final class SettingsCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(state.sttBackend, .whisper)
         XCTAssertEqual(state.providerMode, .privateAPI)
+        XCTAssertEqual(state.dictationHotkeyPreset, .controlShiftSpace)
+        XCTAssertEqual(state.commandLaneHotkeyPreset, .fnOptionSpace)
         XCTAssertEqual(state.onboardingPhase, .complete)
         XCTAssertEqual(state.sessionState, .idle)
 
         defaults.removeObject(forKey: "voxflow.stt.backend")
         defaults.removeObject(forKey: "voxflow.provider.mode")
+        defaults.removeObject(forKey: "voxflow.hotkey.dictationPreset")
+        defaults.removeObject(forKey: "voxflow.hotkey.commandLanePreset")
         defaults.removeObject(forKey: "voxflow.onboarding.complete")
     }
 
@@ -91,6 +97,41 @@ final class SettingsCoordinatorTests: XCTestCase {
         XCTAssertEqual(state.workflowMode, .dictation)
         XCTAssertFalse(state.translationModeEnabled)
         UserDefaults.standard.removeObject(forKey: "voxflow.translation.modeEnabled")
+    }
+
+    @MainActor
+    func testSetMeetingModeDisabledDowngradesWorkflowMode() {
+        let (sut, state, _) = makeSUT()
+        state.workflowMode = .meeting
+        state.meetingModeEnabled = true
+
+        sut.setMeetingModeEnabled(false)
+
+        XCTAssertEqual(state.workflowMode, .dictation)
+        XCTAssertFalse(state.meetingModeEnabled)
+        UserDefaults.standard.removeObject(forKey: "voxflow.meeting.modeEnabled")
+    }
+
+    @MainActor
+    func testSetDictationHotkeyPresetPersists() {
+        let (sut, state, _) = makeSUT()
+
+        sut.setDictationHotkeyPreset(.controlShiftSpace)
+
+        XCTAssertEqual(state.dictationHotkeyPreset, .controlShiftSpace)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "voxflow.hotkey.dictationPreset"), "controlShiftSpace")
+        UserDefaults.standard.removeObject(forKey: "voxflow.hotkey.dictationPreset")
+    }
+
+    @MainActor
+    func testSetCommandLaneHotkeyPresetPersists() {
+        let (sut, state, _) = makeSUT()
+
+        sut.setCommandLaneHotkeyPreset(.fnOptionSpace)
+
+        XCTAssertEqual(state.commandLaneHotkeyPreset, .fnOptionSpace)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "voxflow.hotkey.commandLanePreset"), "fnOptionSpace")
+        UserDefaults.standard.removeObject(forKey: "voxflow.hotkey.commandLanePreset")
     }
 
     @MainActor

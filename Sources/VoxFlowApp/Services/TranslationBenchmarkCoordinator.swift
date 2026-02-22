@@ -30,11 +30,13 @@ final class TranslationBenchmarkCoordinator: TranslationBenchmarkCoordinating {
 
         for (index, profile) in TranslationProfile.allCases.enumerated() {
             state.benchmarkStatusLine = "Benchmarking \(profile.displayName) (\(index + 1)/\(TranslationProfile.allCases.count))"
-            backendManager.restart(configuration: settings.backendLaunchConfiguration(for: profile))
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            var placeholderDetected = false
+            backendManager.restartAsync(configuration: settings.backendLaunchConfiguration(for: profile))
+            if !(await waitForBackendReady()) {
+                placeholderDetected = true
+            }
 
             var latenciesMs: [Double] = []
-            var placeholderDetected = false
 
             for (sampleIndex, sampleText) in samples.enumerated() {
                 let started = CFAbsoluteTimeGetCurrent()
@@ -75,7 +77,8 @@ final class TranslationBenchmarkCoordinator: TranslationBenchmarkCoordinating {
         }
 
         state.translationProfile = originalProfile
-        backendManager.restart(configuration: settings.currentBackendLaunchConfiguration())
+        backendManager.restartAsync(configuration: settings.currentBackendLaunchConfiguration())
+        _ = await waitForBackendReady()
 
         state.translationBenchmarkResults = results
         updateBenchmarkHistory(with: results)
@@ -159,5 +162,18 @@ final class TranslationBenchmarkCoordinator: TranslationBenchmarkCoordinating {
 
             state.benchmarkHistoryByProfile[result.profile] = stats
         }
+    }
+
+    private func waitForBackendReady(maxAttempts: Int = 8, intervalNanoseconds: UInt64 = 500_000_000) async -> Bool {
+        for attempt in 0..<maxAttempts {
+            if let readiness = try? await BackendAPIClient.ready(),
+               readiness.readyForDictation {
+                return true
+            }
+            if attempt < maxAttempts - 1 {
+                try? await Task.sleep(nanoseconds: intervalNanoseconds)
+            }
+        }
+        return false
     }
 }

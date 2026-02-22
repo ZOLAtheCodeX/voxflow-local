@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import os.log
+import SwiftUI
 
 @MainActor
 final class AppCoordinator: ObservableObject {
@@ -26,40 +27,104 @@ final class AppCoordinator: ObservableObject {
 
     private var timer: Timer?
     private var sessionCounter: Int = 0
+    private var hotkeysRegistered = false
+    private var warmupTask: Task<Void, Never>?
+    private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
+    private var mainWindowController: NSWindowController?
 
     private init() {
         let settingsCoordinator = SettingsCoordinator(state: state, backendManager: backendManager)
         settingsCoordinator.migrateAPIKeysToKeychain()
         settingsCoordinator.configureInitialState()
         self.settings = settingsCoordinator
-        backendManager.startIfNeeded(configuration: settingsCoordinator.currentBackendLaunchConfiguration())
-        configureHotkeys()
+        backendManager.startIfNeededAsync(configuration: settingsCoordinator.currentBackendLaunchConfiguration())
         startFocusMonitoring()
-        Task { await warmup() }
-    }
-
-    func warmup() async {
-        do {
-            _ = try await BackendAPIClient.health()
-        } catch {
-            state.statusLine = "Backend offline. Start backend in Settings."
+        beginWarmupMonitoring()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.showMainWindow()
         }
     }
 
-    func configureHotkeys() {
+    func warmup() async {
+        for attempt in 0..<24 {
+            guard !Task.isCancelled else { return }
+            await refreshBackendReadiness()
+            if state.backendReadyForDictation {
+                return
+            }
+            let delay: UInt64 = attempt < 4 ? 2_000_000_000 : 5_000_000_000
+            try? await Task.sleep(nanoseconds: delay)
+        }
+    }
+
+    func refreshReadiness() {
+        Task { await refreshBackendReadiness() }
+    }
+
+    func appDidBecomeActive() {
+        showMainWindowIfNeeded()
+        configureHotkeysIfNeeded()
+        if !state.backendReadyForDictation {
+            beginWarmupMonitoring()
+        }
+    }
+
+    func showMainWindow() {
+        showMainWindowIfNeeded(force: true)
+    }
+
+    private func beginWarmupMonitoring() {
+        warmupTask?.cancel()
+        warmupTask = Task { [weak self] in
+            await self?.warmup()
+        }
+    }
+
+    private func refreshBackendReadiness() async {
         do {
-            try hotkeyService.register(configuration: .default, onPress: { [weak self] in
+            let readiness = try await BackendAPIClient.ready()
+            state.backendReadyForDictation = readiness.readyForDictation
+            state.backendReadinessIssue = readiness.issues.first
+            if !readiness.readyForDictation, let firstIssue = readiness.issues.first {
+                state.statusLine = "Backend not ready: \(firstIssue)"
+            }
+        } catch {
+            state.backendReadyForDictation = false
+            let startupIssue = backendManager.lastStartupFailureReason
+            state.backendReadinessIssue = startupIssue ?? "Backend offline"
+            if let startupIssue {
+                state.statusLine = "Backend startup issue: \(startupIssue)"
+            } else {
+                state.statusLine = "Backend offline. Start backend in Settings."
+            }
+        }
+    }
+
+    func configureHotkeysIfNeeded() {
+        configureHotkeys(force: false)
+    }
+
+    func configureHotkeys(force: Bool = true) {
+        if !force && hotkeysRegistered {
+            return
+        }
+        do {
+            try hotkeyService.register(configuration: state.dictationHotkeyPreset.configuration, onPress: { [weak self] in
                 Task { @MainActor in self?.startCapture() }
             }, onRelease: { [weak self] in
                 Task { @MainActor in await self?.finishCaptureAndTranscribe() }
             })
 
-            try commandHotkeyService.register(configuration: .commandLane, onPress: { [weak self] in
+            try commandHotkeyService.register(configuration: state.commandLaneHotkeyPreset.configuration, onPress: { [weak self] in
                 Task { @MainActor in self?.startCapture(commandLane: true) }
             }, onRelease: { [weak self] in
                 Task { @MainActor in await self?.finishCaptureAndTranscribe(commandLane: true) }
             })
+            hotkeysRegistered = true
+            state.errorMessage = nil
+            log.info("Hotkeys registered")
         } catch {
+            hotkeysRegistered = false
             log.error("Failed to register hotkey: \(error.localizedDescription)")
             state.errorMessage = "Failed to register hotkey. Check accessibility permissions."
         }
@@ -67,6 +132,22 @@ final class AppCoordinator: ObservableObject {
 
     func startCapture(commandLane: Bool = false) {
         guard state.sessionState == .idle || state.sessionState == .review || state.sessionState == .error || state.sessionState == .onboarding else {
+            return
+        }
+
+        let permissions = permissionService.snapshot()
+        if !permissions.microphoneAuthorized {
+            state.statusLine = "Microphone permission required — grant in System Settings"
+            return
+        }
+
+        if !commandLane && state.onboardingPhase != .calibrating && !permissions.accessibilityAuthorized {
+            state.statusLine = "Accessibility permission required — grant in System Settings"
+            return
+        }
+
+        if !state.backendReadyForDictation {
+            state.statusLine = "Backend not ready — wait for model warmup"
             return
         }
 
@@ -158,6 +239,28 @@ final class AppCoordinator: ObservableObject {
         state.setIdle()
     }
 
+    func cancelActiveCapture() {
+        timer?.invalidate()
+
+        if state.sessionState == .recording {
+            _ = try? audioCapture.stopCapture()
+            state.isCommandLaneActive = false
+            state.setIdle()
+            state.statusLine = "Capture canceled"
+            return
+        }
+
+        if state.privacyPreview != nil {
+            cancelPrivacyPreview()
+            return
+        }
+
+        if state.sessionState == .review || state.sessionState == .error {
+            retryLastCapture()
+            return
+        }
+    }
+
     // MARK: - Text Insertion Forwarding
 
     func copyCurrentText() { textInsertion.copyCurrentText() }
@@ -240,6 +343,11 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
+        if mode == .meeting && !state.meetingModeEnabled {
+            state.statusLine = "Enable Experimental Meeting Mode in Settings"
+            return
+        }
+
         state.workflowMode = mode
         state.transcriptCandidate = nil
         state.translationCandidate = nil
@@ -262,6 +370,15 @@ final class AppCoordinator: ObservableObject {
     func selectInsertBehavior(_ behavior: InsertBehavior) { settings.selectInsertBehavior(behavior) }
     func updateAppToneOverride(bundleID: String, tone: ToneStyle?) { settings.updateAppToneOverride(bundleID: bundleID, tone: tone) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }
+    func setMeetingModeEnabled(_ isEnabled: Bool) { settings.setMeetingModeEnabled(isEnabled) }
+    func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {
+        settings.setDictationHotkeyPreset(preset)
+        configureHotkeys(force: true)
+    }
+    func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset) {
+        settings.setCommandLaneHotkeyPreset(preset)
+        configureHotkeys(force: true)
+    }
     func selectTranslationProfile(_ profile: TranslationProfile) { settings.selectTranslationProfile(profile) }
     func selectSTTBackend(_ backend: STTBackend) { settings.selectSTTBackend(backend) }
     func updateLocalSpeechModels(voxtralModel: String, whisperModel: String) { settings.updateLocalSpeechModels(voxtralModel: voxtralModel, whisperModel: whisperModel) }
@@ -285,7 +402,12 @@ final class AppCoordinator: ObservableObject {
     func applyFastestBenchmarkProfile() { benchmark.applyFastestBenchmarkProfile() }
 
     func openSettings() {
-        state.showSettingsWindow = true
+        NSApp.activate(ignoringOtherApps: true)
+        let opened = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if !opened {
+            log.error("Unable to open Settings window from coordinator")
+            state.statusLine = "Unable to open Settings window"
+        }
     }
 
     func clearError() {
@@ -305,11 +427,51 @@ final class AppCoordinator: ObservableObject {
     }
 
     func startBackend() {
-        backendManager.startIfNeeded(configuration: settings.currentBackendLaunchConfiguration())
+        backendManager.restartAsync(configuration: settings.currentBackendLaunchConfiguration())
+        beginWarmupMonitoring()
     }
 
     func stopBackend() {
-        backendManager.stop()
+        warmupTask?.cancel()
+        backendManager.stopAsync()
+        state.backendReadyForDictation = false
+        state.backendReadinessIssue = "Backend stopped"
+    }
+
+    private func showMainWindowIfNeeded(force: Bool = false) {
+        if let mainWindow = NSApp.windows.first(where: {
+            ($0.identifier == mainWindowIdentifier || $0.title == "VoxFlow") && !$0.isMiniaturized
+        }) {
+            mainWindow.makeKeyAndOrderFront(nil)
+            if force {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            return
+        }
+
+        if let managedWindow = mainWindowController?.window {
+            managedWindow.makeKeyAndOrderFront(nil)
+            if force {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            return
+        }
+
+        if mainWindowController == nil {
+            let host = NSHostingController(rootView: MainWindowView(coordinator: self, state: state))
+            let window = NSWindow(contentViewController: host)
+            window.identifier = mainWindowIdentifier
+            window.title = "VoxFlow"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.setContentSize(NSSize(width: 980, height: 700))
+            window.center()
+            window.isReleasedWhenClosed = false
+            mainWindowController = NSWindowController(window: window)
+        }
+
+        mainWindowController?.showWindow(nil)
+        mainWindowController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Onboarding Forwarding
@@ -507,9 +669,6 @@ final class AppCoordinator: ObservableObject {
         case .switchToDictation:
             selectWorkflowMode(.dictation)
         case .switchToTranslate:
-            if !state.translationModeEnabled {
-                settings.setTranslationModeEnabled(true)
-            }
             selectWorkflowMode(.translateEnToDe)
         case .switchToMeeting:
             selectWorkflowMode(.meeting)

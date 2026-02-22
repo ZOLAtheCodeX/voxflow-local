@@ -377,24 +377,82 @@ struct AppInsertStats: Identifiable, Hashable {
 struct HotkeyConfiguration {
     var keyCode: UInt32
     var modifiers: UInt32
-    private static let fnModifierMask: UInt32 = 0x0080_0000
+    static let fnModifierMask: UInt32 = 0x0080_0000
 
     static let `default` = HotkeyConfiguration(
-        keyCode: 49,
+        keyCode: spaceKeyCode,
         modifiers: UInt32(controlKey) | UInt32(optionKey)
     )
 
     static let commandLane = HotkeyConfiguration(
-        keyCode: 49,
+        keyCode: spaceKeyCode,
         modifiers: UInt32(cmdKey) | fnModifierMask
     )
 
+    static let spaceKeyCode: UInt32 = 49
+}
+
+enum DictationHotkeyPreset: String, CaseIterable, Identifiable, Codable {
+    case controlOptionSpace
+    case controlShiftSpace
+    case optionShiftSpace
+
+    var id: String { rawValue }
+
     var displayName: String {
-        "Control + Option + Space"
+        switch self {
+        case .controlOptionSpace:
+            return "Control + Option + Space"
+        case .controlShiftSpace:
+            return "Control + Shift + Space"
+        case .optionShiftSpace:
+            return "Option + Shift + Space"
+        }
     }
 
-    var commandLaneDisplayName: String {
-        "Fn + Command + Space"
+    var configuration: HotkeyConfiguration {
+        let modifiers: UInt32
+        switch self {
+        case .controlOptionSpace:
+            modifiers = UInt32(controlKey) | UInt32(optionKey)
+        case .controlShiftSpace:
+            modifiers = UInt32(controlKey) | UInt32(shiftKey)
+        case .optionShiftSpace:
+            modifiers = UInt32(optionKey) | UInt32(shiftKey)
+        }
+        return HotkeyConfiguration(keyCode: HotkeyConfiguration.spaceKeyCode, modifiers: modifiers)
+    }
+}
+
+enum CommandLaneHotkeyPreset: String, CaseIterable, Identifiable, Codable {
+    case fnCommandSpace
+    case fnOptionSpace
+    case fnControlSpace
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fnCommandSpace:
+            return "Fn + Command + Space"
+        case .fnOptionSpace:
+            return "Fn + Option + Space"
+        case .fnControlSpace:
+            return "Fn + Control + Space"
+        }
+    }
+
+    var configuration: HotkeyConfiguration {
+        let modifiers: UInt32
+        switch self {
+        case .fnCommandSpace:
+            modifiers = UInt32(cmdKey) | HotkeyConfiguration.fnModifierMask
+        case .fnOptionSpace:
+            modifiers = UInt32(optionKey) | HotkeyConfiguration.fnModifierMask
+        case .fnControlSpace:
+            modifiers = UInt32(controlKey) | HotkeyConfiguration.fnModifierMask
+        }
+        return HotkeyConfiguration(keyCode: HotkeyConfiguration.spaceKeyCode, modifiers: modifiers)
     }
 }
 

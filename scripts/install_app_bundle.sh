@@ -7,6 +7,14 @@ DEST_DIR="${HOME}/Applications"
 DEST_APP="${DEST_DIR}/VoxFlow.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 NESTED_APP="${DEST_APP}/VoxFlow.app"
+STAGED_APP="${DEST_DIR}/.VoxFlow.app.staging.$$"
+ENTITLEMENTS_FILE="${ROOT_DIR}/scripts/release/VoxFlow.entitlements"
+
+cleanup_staging() {
+  rm -rf "${STAGED_APP}" 2>/dev/null || true
+}
+
+trap cleanup_staging EXIT
 
 is_valid_bundle() {
   local app_path="$1"
@@ -39,18 +47,50 @@ if [[ -d "${NESTED_APP}" ]] && ! is_valid_bundle "${DEST_APP}" && is_valid_bundl
   mv "${DEST_APP}.tmp" "${DEST_APP}"
 fi
 
-if [[ -d "${DEST_APP}" ]]; then
-  echo "[install] removing existing install..."
-  rm -rf "${DEST_APP}"
+cleanup_staging
+
+echo "[install] copying bundle to staging location..."
+ditto "${SRC_APP}" "${STAGED_APP}"
+
+if ! is_valid_bundle "${STAGED_APP}"; then
+  echo "[install] staging copy is invalid: ${STAGED_APP}"
+  echo "[install] expected:"
+  echo "  ${STAGED_APP}/Contents/Info.plist"
+  echo "  ${STAGED_APP}/Contents/MacOS/VoxFlowLocal"
+  exit 1
 fi
 
-echo "[install] copying bundle with ditto..."
-ditto "${SRC_APP}" "${DEST_APP}"
+if command -v codesign >/dev/null 2>&1; then
+  echo "[install] applying ad-hoc signature to staged app..."
+  if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
+    if ! codesign --force --sign - --entitlements "${ENTITLEMENTS_FILE}" "${STAGED_APP}" >/dev/null 2>&1; then
+      echo "[install] warning: ad-hoc signing failed; launcher may reject the app."
+    fi
+  elif ! codesign --force --sign - "${STAGED_APP}" >/dev/null 2>&1; then
+    echo "[install] warning: ad-hoc signing failed; launcher may reject the app."
+  fi
+fi
+
+echo "[install] clearing quarantine attributes on staged app..."
+xattr -cr "${STAGED_APP}" || true
+
+if [[ -d "${DEST_APP}" ]]; then
+  echo "[install] removing existing install..."
+  chmod -R u+w "${DEST_APP}" 2>/dev/null || true
+  if ! rm -rf "${DEST_APP}" 2>/dev/null; then
+    echo "[install] unable to remove existing app at ${DEST_APP}"
+    echo "[install] check permissions and remove it manually, then re-run this script."
+    exit 1
+  fi
+fi
+
+echo "[install] promoting staged app into ~/Applications..."
+mv "${STAGED_APP}" "${DEST_APP}"
 
 if command -v codesign >/dev/null 2>&1; then
-  echo "[install] applying ad-hoc signature..."
-  if ! codesign --force --deep --sign - "${DEST_APP}" >/dev/null 2>&1; then
-    echo "[install] warning: ad-hoc signing failed; launcher may reject the app."
+  echo "[install] verifying ad-hoc signature..."
+  if ! codesign --verify --strict "${DEST_APP}" >/dev/null 2>&1; then
+    echo "[install] warning: codesign verification failed; launcher may reject the app."
   fi
 fi
 

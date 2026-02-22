@@ -10,13 +10,13 @@ final class AppState: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var errorMessage: String?
     @Published var lastInsertResult: InsertResult?
-    @Published var showSettingsWindow = false
     @Published var targetingMode: TargetingMode = .cursorAware
     @Published var focusTarget: FocusTargetSnapshot = .unavailable
     @Published var onboardingPhase: OnboardingPhase = .notStarted
     @Published var calibrationItems: [CalibrationItem] = []
     @Published var activeCalibrationIndex: Int = 0
     @Published var workflowMode: WorkflowMode = .dictation
+    @Published var dictationCoreModeEnabled = true
     @Published var toneStyle: ToneStyle = .neutral
     @Published var insertBehavior: InsertBehavior = .alwaysReview
     @Published var appToneOverrides: [String: ToneStyle] = [:]
@@ -24,7 +24,10 @@ final class AppState: ObservableObject {
     @Published var translationCandidate: TranslationCandidate?
     @Published var meetingCandidate: MeetingCandidate?
     @Published var translationModeEnabled = false
+    @Published var meetingModeEnabled = false
     @Published var translationProfile: TranslationProfile = .translateGemma4B
+    @Published var dictationHotkeyPreset: DictationHotkeyPreset = .controlOptionSpace
+    @Published var commandLaneHotkeyPreset: CommandLaneHotkeyPreset = .fnCommandSpace
     @Published var sttBackend: STTBackend = .voxtral
     @Published var localVoxtralModel: String = "mistralai/Voxtral-Mini-3B-2507"
     @Published var localWhisperModel: String = "openai/whisper-small"
@@ -47,6 +50,8 @@ final class AppState: ObservableObject {
     @Published var privacyPreview: PrivacyPreview?
     @Published var launchedAt: Date = Date()
     @Published var captureCount = 0
+    @Published var backendReadyForDictation = false
+    @Published var backendReadinessIssue: String?
     @Published var localCaptureCount = 0
     @Published var privateAPICaptureCount = 0
     @Published var totalTranscriptionLatencyMs = 0
@@ -97,6 +102,17 @@ final class AppState: ObservableObject {
 
     var requiresMeetingApproval: Bool {
         workflowMode == .meeting
+    }
+
+    var availableWorkflowModes: [WorkflowMode] {
+        var modes: [WorkflowMode] = [.dictation]
+        if translationModeEnabled {
+            modes.append(.translateEnToDe)
+        }
+        if meetingModeEnabled {
+            modes.append(.meeting)
+        }
+        return modes
     }
 
     var averageTranscriptionLatencyMs: Int {

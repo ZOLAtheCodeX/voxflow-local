@@ -46,6 +46,36 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Hotkeys") {
+                Picker(
+                    "Dictation hold-to-talk",
+                    selection: Binding(
+                        get: { state.dictationHotkeyPreset },
+                        set: { coordinator.setDictationHotkeyPreset($0) }
+                    )
+                ) {
+                    ForEach(DictationHotkeyPreset.allCases) { preset in
+                        Text(preset.displayName).tag(preset)
+                    }
+                }
+
+                Picker(
+                    "Command lane",
+                    selection: Binding(
+                        get: { state.commandLaneHotkeyPreset },
+                        set: { coordinator.setCommandLaneHotkeyPreset($0) }
+                    )
+                ) {
+                    ForEach(CommandLaneHotkeyPreset.allCases) { preset in
+                        Text(preset.displayName).tag(preset)
+                    }
+                }
+
+                Text("Hotkey changes apply immediately. Avoid combinations reserved by macOS or other apps.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Provider Mode") {
                 Picker(
                     "Inference routing",
@@ -235,6 +265,18 @@ struct SettingsView: View {
                     )
                 )
 
+                Toggle(
+                    "Enable Experimental Meeting Mode",
+                    isOn: Binding(
+                        get: { state.meetingModeEnabled },
+                        set: { coordinator.setMeetingModeEnabled($0) }
+                    )
+                )
+
+                Text("Dictation mode is always enabled as the release-quality core workflow.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
                 Text("Host memory: \(state.hostMemoryGB) GB")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -265,6 +307,16 @@ struct SettingsView: View {
                         coordinator.stopBackend()
                     }
                 }
+
+                Button("Recheck Readiness") {
+                    coordinator.refreshReadiness()
+                }
+
+                Text(state.backendReadyForDictation
+                     ? "Backend ready for dictation."
+                     : "Backend not ready: \(state.backendReadinessIssue ?? "unknown issue")")
+                    .font(.system(size: 11))
+                    .foregroundStyle(state.backendReadyForDictation ? .green : .orange)
             }
 
             Section("Benchmark") {

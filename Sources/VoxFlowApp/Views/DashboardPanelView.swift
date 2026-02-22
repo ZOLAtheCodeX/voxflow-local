@@ -8,18 +8,18 @@ struct DashboardPanelView: View {
     var onOpenFullDashboard: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: VF.spacingMedium) {
             HStack {
                 Text("Session Dashboard")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(VF.labelFont)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(sessionDurationText)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: VF.spacingSmall) {
                 metricCard(
                     title: "Captures",
                     value: "\(state.captureCount)",
@@ -56,13 +56,13 @@ struct DashboardPanelView: View {
 
             HStack {
                 Label("Mode: \(state.workflowMode.displayName)", systemImage: "rectangle.3.group")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
                 Label("Provider: \(state.providerMode.displayName)", systemImage: "cpu")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -85,7 +85,7 @@ struct DashboardPanelView: View {
 
             if let topApp = state.appInsertStatsSummary.first {
                 Text("Top App: \(topApp.appName) · \(Int((topApp.successRate * 100).rounded()))% success")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
         }
@@ -131,19 +131,18 @@ struct DashboardPanelView: View {
     private func metricCard(title: String, value: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(VF.captionFont.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(size: 16, weight: .bold))
+                .font(VF.titleFont.weight(.bold))
                 .foregroundStyle(.primary)
             Text(detail)
-                .font(.system(size: 10))
+                .font(VF.captionFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
         .padding(10)
-        .background(Color.gray.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
     }
 }

@@ -8,12 +8,17 @@ struct ModeChip: View {
     var body: some View {
         Button(action: onSelect) {
             Text(mode.displayName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(VF.labelFont)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(selected ? Color.accentColor : Color.gray.opacity(0.14))
+                .background {
+                    if selected {
+                        Capsule().fill(Color.accentColor)
+                    } else {
+                        Capsule().fill(.regularMaterial)
+                    }
+                }
                 .foregroundColor(selected ? .white : .primary)
-                .clipShape(Capsule())
         }
         .buttonStyle(.plain)
     }

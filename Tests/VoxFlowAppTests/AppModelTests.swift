@@ -15,6 +15,20 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(labels.count, WorkflowMode.allCases.count)
     }
 
+    @MainActor
+    func testAvailableWorkflowModesDefaultToDictationOnly() {
+        let state = AppState()
+        XCTAssertEqual(state.availableWorkflowModes, [.dictation])
+    }
+
+    @MainActor
+    func testAvailableWorkflowModesIncludeExperimentalModesWhenEnabled() {
+        let state = AppState()
+        state.translationModeEnabled = true
+        state.meetingModeEnabled = true
+        XCTAssertEqual(state.availableWorkflowModes, [.dictation, .translateEnToDe, .meeting])
+    }
+
     func testToneStyleDisplayNamesUnique() {
         let labels = Set(ToneStyle.allCases.map(\.displayName))
         XCTAssertEqual(labels.count, ToneStyle.allCases.count)
@@ -28,6 +42,16 @@ final class AppModelTests: XCTestCase {
     func testSTTBackendDisplayNamesUnique() {
         let labels = Set(STTBackend.allCases.map(\.displayName))
         XCTAssertEqual(labels.count, STTBackend.allCases.count)
+    }
+
+    func testDictationHotkeyPresetDisplayNamesUnique() {
+        let labels = Set(DictationHotkeyPreset.allCases.map(\.displayName))
+        XCTAssertEqual(labels.count, DictationHotkeyPreset.allCases.count)
+    }
+
+    func testCommandLaneHotkeyPresetDisplayNamesUnique() {
+        let labels = Set(CommandLaneHotkeyPreset.allCases.map(\.displayName))
+        XCTAssertEqual(labels.count, CommandLaneHotkeyPreset.allCases.count)
     }
 
     // MARK: - TranscriptCandidate.text(for:)

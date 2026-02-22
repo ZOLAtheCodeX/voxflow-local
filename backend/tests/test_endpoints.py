@@ -63,6 +63,40 @@ class TestHealth:
         assert data["service_status"] == "ok"
 
 
+# ── Readiness ─────────────────────────────────────────────────────────
+
+class TestReadiness:
+    @pytest.mark.anyio
+    async def test_returns_200(self, client: httpx.AsyncClient):
+        resp = await client.get("/v1/ready")
+        assert resp.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_response_has_expected_keys(self, client: httpx.AsyncClient):
+        data = (await client.get("/v1/ready")).json()
+        expected_keys = {
+            "service_status",
+            "ready_for_dictation",
+            "stt_backend",
+            "active_stt_model",
+            "active_stt_model_loaded",
+            "python_executable",
+            "python_version",
+            "models_dir",
+            "models_dir_exists",
+            "issues",
+        }
+        assert expected_keys.issubset(data.keys())
+
+    @pytest.mark.anyio
+    async def test_response_has_typed_boolean_flags(self, client: httpx.AsyncClient):
+        data = (await client.get("/v1/ready")).json()
+        assert isinstance(data["ready_for_dictation"], bool)
+        assert isinstance(data["active_stt_model_loaded"], bool)
+        assert isinstance(data["models_dir_exists"], bool)
+        assert isinstance(data["issues"], list)
+
+
 # ── Privacy Preview ──────────────────────────────────────────────────
 
 class TestPrivacyPreview:
