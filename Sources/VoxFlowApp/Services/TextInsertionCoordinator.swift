@@ -3,19 +3,13 @@ import Foundation
 import os.log
 
 @MainActor protocol TextInsertionCoordinating {
+    func insertCurrentText()
     func insertCurrentText(targetApp: NSRunningApplication?)
+    func insertText(_ text: String, statusSuffix: String) -> Bool
     func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) -> Bool
     func copyCurrentText()
     func copyMeetingMarkdownTemplate()
     func copyMeetingNotionTemplate()
-}
-
-extension TextInsertionCoordinating {
-    func insertCurrentText() { insertCurrentText(targetApp: nil) }
-    @discardableResult
-    func insertText(_ text: String, statusSuffix: String) -> Bool {
-        insertText(text, statusSuffix: statusSuffix, targetApp: nil)
-    }
 }
 
 @MainActor
@@ -29,7 +23,11 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         self.insertService = insertService
     }
 
-    func insertCurrentText(targetApp: NSRunningApplication? = nil) {
+    func insertCurrentText() {
+        insertCurrentText(targetApp: nil)
+    }
+
+    func insertCurrentText(targetApp: NSRunningApplication?) {
         guard !state.displayText.isEmpty else { return }
 
         if state.privacyPreview != nil {
@@ -75,7 +73,12 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     }
 
     @discardableResult
-    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication? = nil) -> Bool {
+    func insertText(_ text: String, statusSuffix: String) -> Bool {
+        insertText(text, statusSuffix: statusSuffix, targetApp: nil)
+    }
+
+    @discardableResult
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) -> Bool {
         guard !text.isEmpty else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
