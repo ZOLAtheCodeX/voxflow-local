@@ -28,9 +28,12 @@ final class AppCoordinator: ObservableObject {
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
 
     private var timer: Timer?
+    private var captureTimeoutTimer: Timer?
     private var sessionCounter: Int = 0
     private var hotkeysRegistered = false
     private var fnTriggeredCaptureInProgress = false
+    private static let maxCaptureDuration: TimeInterval = 60
+    private static let minCaptureSamples: Int = 4800 // 0.3s at 16kHz mono PCM16 = 4800 samples = 9600 bytes
     private var warmupTask: Task<Void, Never>?
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
     private var mainWindowController: NSWindowController?
@@ -199,6 +202,14 @@ final class AppCoordinator: ObservableObject {
                     self?.state.recordingDuration += 0.1
                 }
             }
+            captureTimeoutTimer?.invalidate()
+            captureTimeoutTimer = Timer.scheduledTimer(withTimeInterval: Self.maxCaptureDuration, repeats: false) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.state.sessionState == .recording else { return }
+                    self.log.warning("Capture timeout reached (\(Self.maxCaptureDuration)s) — auto-stopping")
+                    await self.finishCaptureAndTranscribe()
+                }
+            }
             if !commandLane {
                 cueSoundService.playStartCue()
             }
@@ -219,11 +230,24 @@ final class AppCoordinator: ObservableObject {
         }
 
         timer?.invalidate()
+        captureTimeoutTimer?.invalidate()
+        captureTimeoutTimer = nil
         state.sessionState = .transcribing
         state.statusLine = commandLane ? "Interpreting command..." : "Transcribing..."
 
         do {
             let capturedAudio = try audioCapture.stopCapture()
+
+            // Guard: discard very short captures (< 0.3s) that cause Whisper hallucination
+            let minBytes = Int(capturedAudio.sampleRate * 0.3) * MemoryLayout<Int16>.size
+            if capturedAudio.pcm.count < minBytes {
+                log.info("Audio too short (\(capturedAudio.pcm.count) bytes, need \(minBytes)) — discarding")
+                state.sessionState = .idle
+                state.statusLine = "Too short — hold longer to dictate"
+                state.recordingDuration = 0
+                return
+            }
+
             let sessionID = "session-\(sessionCounter)"
             let transcription = try await BackendAPIClient.transcribe(
                 sessionID: sessionID,
@@ -240,6 +264,14 @@ final class AppCoordinator: ObservableObject {
             )
 
             let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if rawText.isEmpty || rawText.hasPrefix("[transcription") {
+                log.info("Empty or placeholder transcription — discarding")
+                state.sessionState = .idle
+                state.statusLine = rawText.isEmpty ? "No speech detected — try again" : rawText
+                state.recordingDuration = 0
+                return
+            }
 
             if state.onboardingPhase == .calibrating {
                 onboarding.handleCalibrationResult(rawText: rawText)

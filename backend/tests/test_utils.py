@@ -13,6 +13,7 @@ from server import (
     coerce_string_list,
     extract_json_object,
     is_placeholder_text,
+    is_whisper_hallucination,
     light_cleanup,
     normalize_provider_mode,
     normalize_stt_backend,
@@ -217,6 +218,41 @@ class TestIsPlaceholderText:
 
     def test_bracket_but_not_placeholder(self):
         assert is_placeholder_text("[Note] This is fine") is False
+
+
+# ── is_whisper_hallucination ─────────────────────────────────────────
+
+class TestIsWhisperHallucination:
+    def test_thank_you_for_watching(self):
+        assert is_whisper_hallucination("Thank you for watching.") is True
+
+    def test_subscribe(self):
+        assert is_whisper_hallucination("Subscribe to my channel.") is True
+
+    def test_music_symbol(self):
+        assert is_whisper_hallucination("♪") is True
+
+    def test_empty_string(self):
+        assert is_whisper_hallucination("") is True
+
+    def test_whitespace_only(self):
+        assert is_whisper_hallucination("   ") is True
+
+    def test_repeated_word(self):
+        assert is_whisper_hallucination("you you you") is True
+
+    def test_normal_speech(self):
+        assert is_whisper_hallucination("I need to schedule a meeting for tomorrow") is False
+
+    def test_short_real_word(self):
+        assert is_whisper_hallucination("hello") is False
+
+    def test_single_you_not_hallucination(self):
+        # "you" alone is in the hallucination set
+        assert is_whisper_hallucination("you") is True
+
+    def test_real_sentence_with_thank_you(self):
+        assert is_whisper_hallucination("Thank you for helping me with this project") is False
 
 
 # ── split_sentences ──────────────────────────────────────────────────

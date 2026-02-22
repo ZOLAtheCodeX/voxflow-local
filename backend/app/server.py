@@ -694,6 +694,49 @@ def is_placeholder_text(text: str) -> bool:
     return lowered.startswith("[translation unavailable") or lowered.startswith("[transcription unavailable")
 
 
+# Whisper-small commonly hallucinates these phrases on short, silent, or noisy audio
+_WHISPER_HALLUCINATION_PHRASES = frozenset(
+    p.lower()
+    for p in [
+        "Thank you for watching.",
+        "Thank you for watching!",
+        "Thanks for watching.",
+        "Thanks for watching!",
+        "Thank you so much for watching.",
+        "Thank you so much for watching!",
+        "Subscribe to my channel.",
+        "Subscribe to the channel.",
+        "Please subscribe.",
+        "Like and subscribe.",
+        "Thank you.",
+        "Thanks.",
+        "Bye.",
+        "Goodbye.",
+        "you",
+        "You",
+        "...",
+        "♪",
+        "♪♪",
+        "♪♪♪",
+    ]
+)
+
+
+def is_whisper_hallucination(text: str) -> bool:
+    """Detect common Whisper hallucination patterns on short/noisy audio."""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    lowered = stripped.lower()
+    if lowered in _WHISPER_HALLUCINATION_PHRASES:
+        return True
+    # Repeated single character or token (e.g., "..." or "you you you")
+    words = lowered.split()
+    if len(words) >= 3 and len(set(words)) == 1:
+        return True
+    return False
+
+
 @dataclass
 class ConsentRecord:
     token: str
@@ -1651,6 +1694,14 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
 
     text, confidence = provider_router.transcribe(audio_bytes, payload.sample_rate, payload.language_hint)
     latency_ms = int((time.perf_counter() - started) * 1000)
+
+    # Only filter hallucinations on short audio (< 3 seconds); longer recordings
+    # are unlikely to be pure hallucination.
+    audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
+    if audio_duration_s < 3.0 and is_whisper_hallucination(text):
+        logger.info("Filtered likely Whisper hallucination on short audio (%.1fs): %r", audio_duration_s, text)
+        text = ""
+        confidence = 0.0
 
     return TranscribeResponse(
         text=text,
