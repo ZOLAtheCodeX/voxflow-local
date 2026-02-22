@@ -302,17 +302,20 @@ struct TranslationBenchmarkHistoryStats: Identifiable, Hashable {
 }
 
 enum TargetingMode: String, CaseIterable, Identifiable {
-    case textFieldOnly
+    case anyApp
     case cursorAware
+    case textFieldOnly
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .textFieldOnly:
-            return "Text Field Only"
+        case .anyApp:
+            return "Any App (clipboard fallback)"
         case .cursorAware:
             return "Follow Active Cursor"
+        case .textFieldOnly:
+            return "Text Field Only"
         }
     }
 }

@@ -10,7 +10,7 @@ final class AppState: ObservableObject {
     @Published var recordingDuration: TimeInterval = 0
     @Published var errorMessage: String?
     @Published var lastInsertResult: InsertResult?
-    @Published var targetingMode: TargetingMode = .cursorAware
+    @Published var targetingMode: TargetingMode = .anyApp
     @Published var focusTarget: FocusTargetSnapshot = .unavailable
     @Published var onboardingPhase: OnboardingPhase = .notStarted
     @Published var calibrationItems: [CalibrationItem] = []
@@ -89,6 +89,8 @@ final class AppState: ObservableObject {
 
     var canStartCaptureForDictation: Bool {
         switch targetingMode {
+        case .anyApp:
+            return true
         case .textFieldOnly:
             return focusTarget.hasFocusedTextInput
         case .cursorAware:

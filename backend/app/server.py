@@ -694,8 +694,8 @@ def is_placeholder_text(text: str) -> bool:
     return lowered.startswith("[translation unavailable") or lowered.startswith("[transcription unavailable")
 
 
-# Whisper-small commonly hallucinates these phrases on short, silent, or noisy audio
-_WHISPER_HALLUCINATION_PHRASES = frozenset(
+# Phrases Whisper hallucinates that are NEVER real dictation — filter at any duration
+_WHISPER_HALLUCINATION_ALWAYS = frozenset(
     p.lower()
     for p in [
         "Thank you for watching.",
@@ -706,34 +706,55 @@ _WHISPER_HALLUCINATION_PHRASES = frozenset(
         "Thank you so much for watching!",
         "Subscribe to my channel.",
         "Subscribe to the channel.",
+        "Subscribe for more.",
+        "Subscribe for more!",
         "Please subscribe.",
         "Like and subscribe.",
+        "Please like and subscribe.",
+        "♪",
+        "♪♪",
+        "♪♪♪",
+        "...",
+    ]
+)
+
+# Phrases only filtered on short audio (< 3s) — could be real speech in longer recordings
+_WHISPER_HALLUCINATION_SHORT_ONLY = frozenset(
+    p.lower()
+    for p in [
         "Thank you.",
         "Thanks.",
         "Bye.",
         "Goodbye.",
         "you",
         "You",
-        "...",
-        "♪",
-        "♪♪",
-        "♪♪♪",
     ]
 )
 
 
-def is_whisper_hallucination(text: str) -> bool:
-    """Detect common Whisper hallucination patterns on short/noisy audio."""
+def is_whisper_hallucination(text: str, short_audio: bool = True) -> bool:
+    """Detect common Whisper hallucination patterns.
+
+    Args:
+        text: The transcribed text to check.
+        short_audio: If True, also filters single-word/short phrases that could
+                     be real speech in longer recordings.
+    """
     stripped = text.strip()
     if not stripped:
         return True
     lowered = stripped.lower()
-    if lowered in _WHISPER_HALLUCINATION_PHRASES:
+    # Always-filter phrases (never real dictation)
+    if lowered in _WHISPER_HALLUCINATION_ALWAYS:
         return True
-    # Repeated single character or token (e.g., "..." or "you you you")
-    words = lowered.split()
-    if len(words) >= 3 and len(set(words)) == 1:
-        return True
+    # Short-audio-only filters
+    if short_audio:
+        if lowered in _WHISPER_HALLUCINATION_SHORT_ONLY:
+            return True
+        # Repeated single word (e.g., "you you you")
+        words = lowered.split()
+        if len(words) >= 3 and len(set(words)) == 1:
+            return True
     return False
 
 
@@ -1695,11 +1716,13 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     text, confidence = provider_router.transcribe(audio_bytes, payload.sample_rate, payload.language_hint)
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    # Only filter hallucinations on short audio (< 3 seconds); longer recordings
-    # are unlikely to be pure hallucination.
+    # Two-tier hallucination filter:
+    # - Known YouTube/podcast phrases: filtered at ANY duration (never real dictation)
+    # - Single words, repeated words: filtered only on short audio (< 3s)
     audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
-    if audio_duration_s < 3.0 and is_whisper_hallucination(text):
-        logger.info("Filtered likely Whisper hallucination on short audio (%.1fs): %r", audio_duration_s, text)
+    is_short = audio_duration_s < 3.0
+    if is_whisper_hallucination(text, short_audio=is_short):
+        logger.info("Filtered Whisper hallucination (%.1fs, short=%s): %r", audio_duration_s, is_short, text)
         text = ""
         confidence = 0.0
 

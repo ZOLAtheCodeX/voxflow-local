@@ -223,11 +223,15 @@ class TestIsPlaceholderText:
 # ── is_whisper_hallucination ─────────────────────────────────────────
 
 class TestIsWhisperHallucination:
+    # --- always-filter phrases (any duration) ---
     def test_thank_you_for_watching(self):
         assert is_whisper_hallucination("Thank you for watching.") is True
 
     def test_subscribe(self):
         assert is_whisper_hallucination("Subscribe to my channel.") is True
+
+    def test_subscribe_for_more(self):
+        assert is_whisper_hallucination("Subscribe for more.") is True
 
     def test_music_symbol(self):
         assert is_whisper_hallucination("♪") is True
@@ -238,18 +242,30 @@ class TestIsWhisperHallucination:
     def test_whitespace_only(self):
         assert is_whisper_hallucination("   ") is True
 
+    # --- always-filter phrases work even with short_audio=False ---
+    def test_always_filter_on_long_audio(self):
+        assert is_whisper_hallucination("Thank you for watching.", short_audio=False) is True
+        assert is_whisper_hallucination("Subscribe for more.", short_audio=False) is True
+
+    # --- short-audio-only filters ---
     def test_repeated_word(self):
         assert is_whisper_hallucination("you you you") is True
 
+    def test_repeated_word_not_filtered_on_long_audio(self):
+        assert is_whisper_hallucination("you you you", short_audio=False) is False
+
+    def test_single_you_short_audio(self):
+        assert is_whisper_hallucination("you", short_audio=True) is True
+
+    def test_single_you_long_audio(self):
+        assert is_whisper_hallucination("you", short_audio=False) is False
+
+    # --- real speech never filtered ---
     def test_normal_speech(self):
         assert is_whisper_hallucination("I need to schedule a meeting for tomorrow") is False
 
     def test_short_real_word(self):
         assert is_whisper_hallucination("hello") is False
-
-    def test_single_you_not_hallucination(self):
-        # "you" alone is in the hallucination set
-        assert is_whisper_hallucination("you") is True
 
     def test_real_sentence_with_thank_you(self):
         assert is_whisper_hallucination("Thank you for helping me with this project") is False
