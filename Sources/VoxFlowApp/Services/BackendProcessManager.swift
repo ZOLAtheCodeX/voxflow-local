@@ -284,7 +284,6 @@ final class BackendProcessManager: @unchecked Sendable {
         }
         environment["PYTHONUNBUFFERED"] = "1"
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
-        environment["PYTHONPYCACHEPREFIX"] = "/tmp/voxflow-pycache"
         environment["VOXFLOW_OFFLINE"] = "1"
         environment["VOXFLOW_STT_BACKEND"] = configuration.sttBackend
         environment["VOXFLOW_STT_MODEL"] = configuration.sttModel
