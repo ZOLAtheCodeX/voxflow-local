@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os.log
 
 @MainActor protocol TextInsertionCoordinating {
     func insertCurrentText()
@@ -11,6 +12,7 @@ import Foundation
 
 @MainActor
 final class TextInsertionCoordinator: TextInsertionCoordinating {
+    private let log = Logger(subsystem: "local.voxflow.app", category: "TextInsertion")
     private let state: AppState
     private let insertService: AccessibilityInsertService
 
@@ -40,6 +42,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         state.sessionState = .inserting
         let appName = state.focusTarget.appName ?? "Unknown App"
         let result = insertService.insert(text: state.displayText)
+        log.info("insertCurrentText: method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)
 
@@ -69,6 +72,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
 
         let appName = state.focusTarget.appName ?? "Unknown App"
         let result = insertService.insert(text: text)
+        log.info("insertText: method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)
 

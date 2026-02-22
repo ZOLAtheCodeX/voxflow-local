@@ -162,26 +162,33 @@ final class AppCoordinator: ObservableObject {
 
     func startCapture(commandLane: Bool = false) {
         guard state.sessionState == .idle || state.sessionState == .review || state.sessionState == .error || state.sessionState == .onboarding else {
+            let blockedState = state.sessionState
+            log.warning("startCapture blocked: sessionState=\(String(describing: blockedState))")
             return
         }
 
         let permissions = permissionService.snapshot()
         if !permissions.microphoneAuthorized {
+            log.warning("startCapture blocked: microphone not authorized")
             state.statusLine = "Microphone permission required — grant in System Settings"
             return
         }
 
         if !commandLane && state.onboardingPhase != .calibrating && !permissions.accessibilityAuthorized {
+            log.warning("startCapture blocked: accessibility not authorized")
             state.statusLine = "Accessibility permission required — grant in System Settings"
             return
         }
 
         if !state.backendReadyForDictation {
+            log.warning("startCapture blocked: backend not ready for dictation")
             state.statusLine = "Backend not ready — wait for model warmup"
             return
         }
 
         if !commandLane && state.onboardingPhase != .calibrating && !state.canStartCaptureForDictation {
+            let canStart = state.canStartCaptureForDictation
+            log.warning("startCapture blocked: no focused text target (canStart=\(canStart))")
             state.statusLine = "Focus a text field or place cursor before dictating"
             return
         }
@@ -222,7 +229,11 @@ final class AppCoordinator: ObservableObject {
     }
 
     func finishCaptureAndTranscribe(commandLane: Bool = false) async {
-        guard state.sessionState == .recording else { return }
+        guard state.sessionState == .recording else {
+            let blockedState = state.sessionState
+            log.warning("finishCapture blocked: sessionState=\(String(describing: blockedState)), expected .recording")
+            return
+        }
         defer { state.isCommandLaneActive = false }
         if !commandLane {
             fnTriggeredCaptureInProgress = false
@@ -264,6 +275,7 @@ final class AppCoordinator: ObservableObject {
             )
 
             let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
 
             if rawText.isEmpty || rawText.hasPrefix("[transcription") {
                 log.info("Empty or placeholder transcription — discarding")
