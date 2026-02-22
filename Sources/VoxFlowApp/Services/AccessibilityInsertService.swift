@@ -58,33 +58,25 @@ final class AccessibilityInsertService {
             return false
         }
 
-        guard let currentValue = copyStringAttribute(kAXValueAttribute as CFString, on: focusedElement) else {
-            return false
+        // Snapshot the field value before any insertion attempt so we can
+        // verify the AX call actually had an effect — some apps return
+        // .success from kAXSelectedTextAttribute without changing content.
+        let valueBefore = copyStringAttribute(kAXValueAttribute as CFString, on: focusedElement)
+
+        // Prefer kAXSelectedTextAttribute — inserts at cursor position without
+        // touching surrounding content or stripping rich text formatting.
+        let selectedTextResult = AXUIElementSetAttributeValue(
+            focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef
+        )
+        if selectedTextResult == .success {
+            let valueAfter = copyStringAttribute(kAXValueAttribute as CFString, on: focusedElement)
+            if valueAfter != valueBefore, let valueAfter, valueAfter.contains(text) {
+                return true
+            }
+            // AX returned success but content didn't change — fall through to paste
         }
 
-        guard let selectedRange = copySelectedRange(on: focusedElement) else {
-            return false
-        }
-
-        let nsString = currentValue as NSString
-        guard selectedRange.location <= nsString.length,
-              selectedRange.location + selectedRange.length <= nsString.length else {
-            return false
-        }
-
-        let updated = nsString.replacingCharacters(in: selectedRange, with: text)
-        let setResult = AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, updated as CFTypeRef)
-        guard setResult == .success else {
-            return false
-        }
-
-        var newRange = CFRange(location: selectedRange.location + (text as NSString).length, length: 0)
-        guard let axRange = AXValueCreate(.cfRange, &newRange) else {
-            return false
-        }
-
-        let cursorResult = AXUIElementSetAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, axRange)
-        return cursorResult == .success
+        return false
     }
 
     private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil) -> Bool {

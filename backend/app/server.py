@@ -522,6 +522,9 @@ class PolishEngine:
                 result = self._pipeline(prompt, max_new_tokens=120)[0]["generated_text"].strip()
                 if self._guardrail_triggered(text, result):
                     return apply_tone(light_cleanup(text), tone), True
+                # If model echoed the input unchanged, apply light_cleanup as floor
+                if result.strip().lower() == text.strip().lower():
+                    return apply_tone(light_cleanup(text), tone), False
                 return result, False
             except Exception as exc:
                 logger.error("Polish inference failed: %s", exc)
