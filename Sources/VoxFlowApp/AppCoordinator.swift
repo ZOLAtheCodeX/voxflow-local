@@ -57,6 +57,7 @@ final class AppCoordinator: ObservableObject {
             .sink { [weak self] newState in
                 if newState == .idle {
                     self?.capturedTargetApp = nil
+                    self?.focusMonitor.unfreeze()
                 }
             }
             .store(in: &cancellables)
@@ -206,6 +207,7 @@ final class AppCoordinator: ObservableObject {
 
         state.resetForNewCapture()
         capturedTargetApp = NSWorkspace.shared.frontmostApplication
+        focusMonitor.freeze()
         sessionCounter += 1
         state.isCommandLaneActive = commandLane
         if commandLane {

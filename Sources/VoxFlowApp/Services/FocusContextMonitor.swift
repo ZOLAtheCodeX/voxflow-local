@@ -8,6 +8,7 @@ final class FocusContextMonitor {
     private var timer: Timer?
     private var lastSnapshot: FocusTargetSnapshot = .unavailable
     private var onUpdate: (@MainActor (FocusTargetSnapshot) -> Void)?
+    private(set) var isFrozen = false
 
     init(insertService: AccessibilityInsertService) {
         self.insertService = insertService
@@ -35,6 +36,14 @@ final class FocusContextMonitor {
         onUpdate = nil
     }
 
+    func freeze() {
+        isFrozen = true
+    }
+
+    func unfreeze() {
+        isFrozen = false
+    }
+
     private func poll() {
         let snapshot = insertService.focusedTargetSnapshot()
         let changed = snapshot.hasFocusedTextInput != lastSnapshot.hasFocusedTextInput
@@ -43,8 +52,7 @@ final class FocusContextMonitor {
             || snapshot.bundleID != lastSnapshot.bundleID
             || snapshot.role != lastSnapshot.role
         lastSnapshot = snapshot
-        if changed {
-            onUpdate?(snapshot)
-        }
+        guard !isFrozen, changed else { return }
+        onUpdate?(snapshot)
     }
 }
