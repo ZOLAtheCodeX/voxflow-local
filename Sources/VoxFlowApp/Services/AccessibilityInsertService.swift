@@ -34,11 +34,15 @@ final class AccessibilityInsertService {
     }
 
     func insert(text: String) -> InsertResult {
+        // Capture the target app BEFORE any insertion attempt.
+        // During async transcription, focus may have shifted away.
+        let targetApp = NSWorkspace.shared.frontmostApplication
+
         if insertDirectly(text: text) {
             return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
         }
 
-        if simulatePaste(text: text) {
+        if simulatePaste(text: text, targetApp: targetApp) {
             return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
         }
 
@@ -83,12 +87,38 @@ final class AccessibilityInsertService {
         return cursorResult == .success
     }
 
-    private func simulatePaste(text: String) -> Bool {
+    private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil) -> Bool {
         let pasteboard = NSPasteboard.general
+
+        // Save the user's current clipboard so we can restore it after pasting
+        let previousContents = pasteboard.string(forType: .string)
+
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else { return false }
 
-        return simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
+        // Re-activate the target app — focus may have shifted during transcription
+        if let app = targetApp, !app.isActive {
+            app.activate()
+            // Give macOS time to bring the app window forward
+            usleep(150_000) // 150ms
+        } else {
+            // Small delay even without activation — Electron apps need time
+            // to register clipboard changes before Cmd+V arrives
+            usleep(50_000) // 50ms
+        }
+
+        let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
+
+        // Restore the user's previous clipboard after a brief delay
+        // so the target app has time to process the paste event
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if let previous = previousContents {
+                pasteboard.clearContents()
+                pasteboard.setString(previous, forType: .string)
+            }
+        }
+
+        return pasted
     }
 
     private func simulateKeyPress(virtualKey: CGKeyCode, flags: CGEventFlags) -> Bool {
