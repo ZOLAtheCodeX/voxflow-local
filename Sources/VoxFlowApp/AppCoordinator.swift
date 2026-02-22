@@ -13,7 +13,9 @@ final class AppCoordinator: ObservableObject {
     private let backendManager = BackendProcessManager()
     private let audioCapture = AudioCaptureService()
     private let hotkeyService = GlobalHotkeyService()
+    private let fnHoldHotkeyService = FnHoldHotkeyService()
     private let commandHotkeyService = GlobalHotkeyService()
+    private let cueSoundService = CaptureCueSoundService()
     private let permissionService = PermissionService()
     private let insertService = AccessibilityInsertService()
     private let sessionMemory = SessionMemoryStore(capacity: 20)
@@ -28,6 +30,7 @@ final class AppCoordinator: ObservableObject {
     private var timer: Timer?
     private var sessionCounter: Int = 0
     private var hotkeysRegistered = false
+    private var fnTriggeredCaptureInProgress = false
     private var warmupTask: Task<Void, Never>?
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
     private var mainWindowController: NSWindowController?
@@ -109,11 +112,21 @@ final class AppCoordinator: ObservableObject {
             return
         }
         do {
-            try hotkeyService.register(configuration: state.dictationHotkeyPreset.configuration, onPress: { [weak self] in
-                Task { @MainActor in self?.startCapture() }
-            }, onRelease: { [weak self] in
-                Task { @MainActor in await self?.finishCaptureAndTranscribe() }
-            })
+            if state.dictationHotkeyPreset.usesFlagsMonitor {
+                hotkeyService.unregister()
+                fnHoldHotkeyService.register(onPress: { [weak self] in
+                    Task { @MainActor in self?.handleFnHoldPress() }
+                }, onRelease: { [weak self] in
+                    Task { @MainActor in await self?.handleFnHoldRelease() }
+                })
+            } else {
+                fnHoldHotkeyService.unregister()
+                try hotkeyService.register(configuration: state.dictationHotkeyPreset.configuration, onPress: { [weak self] in
+                    Task { @MainActor in self?.startCapture() }
+                }, onRelease: { [weak self] in
+                    Task { @MainActor in await self?.finishCaptureAndTranscribe() }
+                })
+            }
 
             try commandHotkeyService.register(configuration: state.commandLaneHotkeyPreset.configuration, onPress: { [weak self] in
                 Task { @MainActor in self?.startCapture(commandLane: true) }
@@ -124,10 +137,24 @@ final class AppCoordinator: ObservableObject {
             state.errorMessage = nil
             log.info("Hotkeys registered")
         } catch {
+            hotkeyService.unregister()
+            fnHoldHotkeyService.unregister()
+            commandHotkeyService.unregister()
             hotkeysRegistered = false
             log.error("Failed to register hotkey: \(error.localizedDescription)")
             state.errorMessage = "Failed to register hotkey. Check accessibility permissions."
         }
+    }
+
+    private func handleFnHoldPress() {
+        startCapture()
+        fnTriggeredCaptureInProgress = state.sessionState == .recording
+    }
+
+    private func handleFnHoldRelease() async {
+        guard fnTriggeredCaptureInProgress else { return }
+        fnTriggeredCaptureInProgress = false
+        await finishCaptureAndTranscribe()
     }
 
     func startCapture(commandLane: Bool = false) {
@@ -159,6 +186,9 @@ final class AppCoordinator: ObservableObject {
         state.resetForNewCapture()
         sessionCounter += 1
         state.isCommandLaneActive = commandLane
+        if commandLane {
+            fnTriggeredCaptureInProgress = false
+        }
         privacy.clearPendingOperation()
 
         do {
@@ -169,16 +199,24 @@ final class AppCoordinator: ObservableObject {
                     self?.state.recordingDuration += 0.1
                 }
             }
+            if !commandLane {
+                cueSoundService.playStartCue()
+            }
         } catch {
             state.sessionState = .error
             state.errorMessage = "Microphone access failed: \(error.localizedDescription)"
             state.isCommandLaneActive = false
+            fnTriggeredCaptureInProgress = false
         }
     }
 
     func finishCaptureAndTranscribe(commandLane: Bool = false) async {
         guard state.sessionState == .recording else { return }
         defer { state.isCommandLaneActive = false }
+        if !commandLane {
+            fnTriggeredCaptureInProgress = false
+            cueSoundService.playStopCue()
+        }
 
         timer?.invalidate()
         state.sessionState = .transcribing
@@ -236,6 +274,7 @@ final class AppCoordinator: ObservableObject {
         state.privacyPreview = nil
         privacy.clearPendingOperation()
         state.isCommandLaneActive = false
+        fnTriggeredCaptureInProgress = false
         state.setIdle()
     }
 
@@ -245,6 +284,7 @@ final class AppCoordinator: ObservableObject {
         if state.sessionState == .recording {
             _ = try? audioCapture.stopCapture()
             state.isCommandLaneActive = false
+            fnTriggeredCaptureInProgress = false
             state.setIdle()
             state.statusLine = "Capture canceled"
             return

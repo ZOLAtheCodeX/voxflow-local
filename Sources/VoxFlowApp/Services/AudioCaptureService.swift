@@ -15,14 +15,23 @@ final class AudioCaptureService {
     static let maxBufferBytes = 10 * 1024 * 1024 // ~5 minutes at 16 kHz mono PCM16
 
     private let engine = AVAudioEngine()
+    private let bufferLock = NSLock()
     private var pcmBuffer = Data()
     private var sampleRate: Double = 16_000
     private var isCapturing = false
-    private(set) var bufferLimitReached = false
+    private var _bufferLimitReached = false
+
+    var bufferLimitReached: Bool {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        return _bufferLimitReached
+    }
 
     func startCapture() throws {
+        bufferLock.lock()
         pcmBuffer.removeAll(keepingCapacity: true)
-        bufferLimitReached = false
+        _bufferLimitReached = false
+        bufferLock.unlock()
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -46,11 +55,16 @@ final class AudioCaptureService {
                 int16Samples.append(Int16(clamped * Float(Int16.max)))
             }
 
+            let chunk = Data(bytes: int16Samples, count: int16Samples.count * MemoryLayout<Int16>.size)
+
+            self.bufferLock.lock()
             guard self.pcmBuffer.count < AudioCaptureService.maxBufferBytes else {
-                self.bufferLimitReached = true
+                self._bufferLimitReached = true
+                self.bufferLock.unlock()
                 return
             }
-            self.pcmBuffer.append(Data(bytes: int16Samples, count: int16Samples.count * MemoryLayout<Int16>.size))
+            self.pcmBuffer.append(chunk)
+            self.bufferLock.unlock()
         }
 
         engine.prepare()
@@ -65,6 +79,10 @@ final class AudioCaptureService {
         engine.stop()
         isCapturing = false
 
-        return CapturedAudio(pcm: pcmBuffer, sampleRate: sampleRate)
+        bufferLock.lock()
+        let captured = pcmBuffer
+        bufferLock.unlock()
+
+        return CapturedAudio(pcm: captured, sampleRate: sampleRate)
     }
 }

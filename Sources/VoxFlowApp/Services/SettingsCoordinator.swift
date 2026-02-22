@@ -127,6 +127,9 @@ final class SettingsCoordinator: SettingsCoordinating {
         if let insertBehaviorRaw = defaults.string(forKey: insertBehaviorKey),
            let behavior = InsertBehavior(rawValue: insertBehaviorRaw) {
             state.insertBehavior = behavior
+        } else {
+            state.insertBehavior = .autoInsertLight
+            defaults.set(state.insertBehavior.rawValue, forKey: insertBehaviorKey)
         }
 
         if let overridesData = defaults.data(forKey: appToneOverridesKey),

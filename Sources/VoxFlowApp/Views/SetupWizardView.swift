@@ -9,6 +9,7 @@ struct SetupWizardView: View {
     @State private var isCheckingHealth = false
     @State private var healthStatusLine = "Not checked yet"
     @State private var didRunHealthCheck = false
+    @State private var permissionPollTimer: Timer?
 
     var body: some View {
         ScrollView {
@@ -24,7 +25,12 @@ struct SetupWizardView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             refreshPermissions()
+            startPermissionPolling()
             Task { await runHealthCheckIfNeeded() }
+        }
+        .onDisappear {
+            permissionPollTimer?.invalidate()
+            permissionPollTimer = nil
         }
     }
 
@@ -76,6 +82,12 @@ struct SetupWizardView: View {
                     .foregroundStyle(permissions.accessibilityAuthorized ? .green : .orange)
             }
 
+            if !permissions.accessibilityAuthorized {
+                Text("If already granted: remove VoxFlow from System Settings → Privacy → Accessibility, then re-add it. Rebuilding the app invalidates the prior grant.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(spacing: 8) {
                 Button("Request Microphone") {
                     coordinator.requestMicrophonePermission()
@@ -86,11 +98,6 @@ struct SetupWizardView: View {
                     coordinator.requestAccessibilityPermission()
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button("Refresh") {
-                    refreshPermissions()
-                }
-                .buttonStyle(.bordered)
             }
         }
         .padding(14)
@@ -253,6 +260,17 @@ struct SetupWizardView: View {
 
     private func refreshPermissions() {
         permissions = coordinator.permissionSnapshot()
+    }
+
+    private func startPermissionPolling() {
+        permissionPollTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            Task { @MainActor in
+                permissions = coordinator.permissionSnapshot()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        permissionPollTimer = timer
     }
 
     private func runHealthCheckIfNeeded() async {

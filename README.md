@@ -5,7 +5,7 @@ Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Vo
 ## Implemented
 
 - Main app window (Dashboard/Settings/Setup tabs) plus menu bar command palette (`SwiftUI` + `AppKit` bridge)
-- Global hold-to-talk hotkey (default `Control + Option + Space`, configurable in Settings)
+- Global hold-to-talk hotkey (default `Fn` hold/release, configurable in Settings)
 - System command lane hotkey (default `Fn + Command + Space`, configurable in Settings) with alternate UI color state
 - Keyboard-first palette shortcuts (`Cmd+1` setup, `Cmd+2` dashboard, `Cmd+,` settings, `Cmd+Q` quit, `Esc` cancel capture/review)
 - Onboarding calibration flow (first run phrase capture)

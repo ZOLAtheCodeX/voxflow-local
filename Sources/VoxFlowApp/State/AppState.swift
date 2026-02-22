@@ -18,7 +18,7 @@ final class AppState: ObservableObject {
     @Published var workflowMode: WorkflowMode = .dictation
     @Published var dictationCoreModeEnabled = true
     @Published var toneStyle: ToneStyle = .neutral
-    @Published var insertBehavior: InsertBehavior = .alwaysReview
+    @Published var insertBehavior: InsertBehavior = .autoInsertLight
     @Published var appToneOverrides: [String: ToneStyle] = [:]
     @Published var recentDictations: [TranscriptCandidate] = []
     @Published var translationCandidate: TranslationCandidate?
@@ -26,7 +26,7 @@ final class AppState: ObservableObject {
     @Published var translationModeEnabled = false
     @Published var meetingModeEnabled = false
     @Published var translationProfile: TranslationProfile = .translateGemma4B
-    @Published var dictationHotkeyPreset: DictationHotkeyPreset = .controlOptionSpace
+    @Published var dictationHotkeyPreset: DictationHotkeyPreset = .fnOnly
     @Published var commandLaneHotkeyPreset: CommandLaneHotkeyPreset = .fnCommandSpace
     @Published var sttBackend: STTBackend = .voxtral
     @Published var localVoxtralModel: String = "mistralai/Voxtral-Mini-3B-2507"

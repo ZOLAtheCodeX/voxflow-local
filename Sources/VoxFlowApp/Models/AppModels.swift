@@ -393,14 +393,21 @@ struct HotkeyConfiguration {
 }
 
 enum DictationHotkeyPreset: String, CaseIterable, Identifiable, Codable {
+    case fnOnly
     case controlOptionSpace
     case controlShiftSpace
     case optionShiftSpace
 
     var id: String { rawValue }
 
+    var usesFlagsMonitor: Bool {
+        self == .fnOnly
+    }
+
     var displayName: String {
         switch self {
+        case .fnOnly:
+            return "Fn"
         case .controlOptionSpace:
             return "Control + Option + Space"
         case .controlShiftSpace:
@@ -413,6 +420,9 @@ enum DictationHotkeyPreset: String, CaseIterable, Identifiable, Codable {
     var configuration: HotkeyConfiguration {
         let modifiers: UInt32
         switch self {
+        case .fnOnly:
+            // Fn-only is handled by FnHoldHotkeyService; this fallback is never registered.
+            modifiers = UInt32(controlKey) | UInt32(optionKey)
         case .controlOptionSpace:
             modifiers = UInt32(controlKey) | UInt32(optionKey)
         case .controlShiftSpace:

@@ -34,6 +34,21 @@ final class GlobalHotkeyService {
             { (_, event, userData) -> OSStatus in
                 guard let event, let userData else { return noErr }
                 let service = Unmanaged<GlobalHotkeyService>.fromOpaque(userData).takeUnretainedValue()
+
+                var eventHotkeyID = EventHotKeyID()
+                let hotkeyStatus = GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &eventHotkeyID
+                )
+                guard hotkeyStatus == noErr, eventHotkeyID.id == service.instanceHotkeyID else {
+                    return noErr
+                }
+
                 let kind = GetEventKind(event)
                 if kind == UInt32(kEventHotKeyPressed) {
                     service.onPress?()
