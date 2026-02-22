@@ -249,22 +249,26 @@ class VoxtralEngine:
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
         self._load_pipeline()
 
+        if not pcm:
+            logger.warning("Voxtral transcribe called with empty audio buffer")
+            return "[transcription unavailable: no audio captured]", 0.0
+
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
-        if self._pipeline:
-            try:
-                output = self._pipeline(
-                    {"array": audio, "sampling_rate": sample_rate},
-                    generate_kwargs={"language": language_hint},
-                )
-                text = str(output.get("text", "")).strip()
-                confidence = 0.93 if text else 0.0
-                return text, confidence
-            except Exception as exc:
-                logger.error("Voxtral transcription failed: %s", exc)
+        if not self._pipeline:
+            return "[transcription unavailable: local Voxtral model not loaded]", 0.0
 
-        fallback = "[transcription unavailable: local Voxtral model not loaded]"
-        return fallback, 0.0
+        try:
+            output = self._pipeline(
+                {"array": audio, "sampling_rate": sample_rate},
+                generate_kwargs={"language": language_hint},
+            )
+            text = str(output.get("text", "")).strip()
+            confidence = 0.93 if text else 0.0
+            return text, confidence
+        except Exception as exc:
+            logger.error("Voxtral transcription failed: %s", exc)
+            return f"[transcription failed: {exc}]", 0.0
 
     @property
     def model_loaded(self) -> bool:
@@ -316,21 +320,27 @@ class WhisperEngine:
 
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
         self._load_pipeline()
+
+        if not pcm:
+            logger.warning("Whisper transcribe called with empty audio buffer")
+            return "[transcription unavailable: no audio captured]", 0.0
+
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
-        if self._pipeline:
-            try:
-                output = self._pipeline(
-                    {"array": audio, "sampling_rate": sample_rate},
-                    generate_kwargs={"language": language_hint},
-                )
-                text = str(output.get("text", "")).strip()
-                confidence = 0.9 if text else 0.0
-                return text, confidence
-            except Exception as exc:
-                logger.error("Whisper transcription failed: %s", exc)
+        if not self._pipeline:
+            return "[transcription unavailable: local Whisper model not loaded]", 0.0
 
-        return "[transcription unavailable: local Whisper model not loaded]", 0.0
+        try:
+            output = self._pipeline(
+                {"array": audio, "sampling_rate": sample_rate},
+                generate_kwargs={"language": language_hint},
+            )
+            text = str(output.get("text", "")).strip()
+            confidence = 0.9 if text else 0.0
+            return text, confidence
+        except Exception as exc:
+            logger.error("Whisper transcription failed: %s", exc)
+            return f"[transcription failed: {exc}]", 0.0
 
     @property
     def model_loaded(self) -> bool:
