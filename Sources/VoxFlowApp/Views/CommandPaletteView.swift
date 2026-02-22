@@ -8,6 +8,8 @@ struct CommandPaletteView: View {
     var onQuit: () -> Void = {}
     @State private var activePanel: ActivePanel = .capture
     @State private var recordingBadgeAnimating = false
+    @State private var transcribingElapsed: Int = 0
+    @State private var transcribingTimer: Timer?
 
     private enum ActivePanel: String, CaseIterable, Identifiable {
         case capture
@@ -579,12 +581,35 @@ struct CommandPaletteView: View {
         VStack(spacing: VF.spacingMedium) {
             ProgressView()
                 .controlSize(.regular)
-            Text("Transcribing...")
+            Text("Processing… \(transcribingElapsed)s")
                 .font(VF.bodyFont)
                 .foregroundStyle(.secondary)
+            if transcribingElapsed > 90 {
+                Text("Taking longer than expected…")
+                    .font(VF.captionFont)
+                    .foregroundStyle(.orange)
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 150)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+        .onAppear { startTranscribingTimer() }
+        .onDisappear { stopTranscribingTimer() }
+    }
+
+    private func startTranscribingTimer() {
+        transcribingElapsed = 0
+        transcribingTimer?.invalidate()
+        transcribingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                transcribingElapsed += 1
+            }
+        }
+    }
+
+    private func stopTranscribingTimer() {
+        transcribingTimer?.invalidate()
+        transcribingTimer = nil
+        transcribingElapsed = 0
     }
 
     private var footerBar: some View {
