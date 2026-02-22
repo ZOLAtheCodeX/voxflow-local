@@ -5,6 +5,7 @@ struct TranscribeResponse: Codable {
     let isFinal: Bool
     let latencyMs: Int
     let confidenceEstimate: Double
+    let processingTimeMs: Int
 }
 
 struct CleanupResponse: Codable {
@@ -79,7 +80,7 @@ enum BackendAPIClient {
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForRequest = 120
         config.timeoutIntervalForResource = 120
         return URLSession(configuration: config)
     }()
