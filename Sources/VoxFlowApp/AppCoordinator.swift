@@ -4,6 +4,11 @@ import Foundation
 import os.log
 import SwiftUI
 
+extension Notification.Name {
+    static let voxflowOpenDashboard = Notification.Name("voxflowOpenDashboard")
+    static let voxflowOpenSetup = Notification.Name("voxflowOpenSetup")
+}
+
 @MainActor
 final class AppCoordinator: ObservableObject {
     static let shared = AppCoordinator()
@@ -40,6 +45,7 @@ final class AppCoordinator: ObservableObject {
     private var warmupTask: Task<Void, Never>?
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
     private var mainWindowController: NSWindowController?
+    private(set) var menuBarPanel: MenuBarPanelController?
 
     private init() {
         let settingsCoordinator = SettingsCoordinator(state: state, backendManager: backendManager)
@@ -61,6 +67,8 @@ final class AppCoordinator: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        setupMenuBarPanel()
     }
 
     func warmup() async {
@@ -812,6 +820,51 @@ final class AppCoordinator: ObservableObject {
 
         if state.sessionState == .transcribing {
             state.sessionState = .idle
+        }
+    }
+
+    private func setupMenuBarPanel() {
+        let panelContent = CommandPaletteView(
+            coordinator: self,
+            state: state,
+            onOpenDashboardWindow: {
+                NotificationCenter.default.post(name: .voxflowOpenDashboard, object: nil)
+            },
+            onOpenSetup: {
+                NotificationCenter.default.post(name: .voxflowOpenSetup, object: nil)
+            },
+            onQuit: {
+                NSApp.terminate(nil)
+            }
+        )
+        .frame(width: 430)
+
+        menuBarPanel = MenuBarPanelController(
+            content: panelContent,
+            iconName: iconName(for: state)
+        )
+
+        // Observe sessionState and commandLane for icon updates
+        state.$sessionState
+            .combineLatest(state.$isCommandLaneActive)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                guard let self else { return }
+                self.menuBarPanel?.updateIcon(systemName: self.iconName(for: self.state))
+            }
+            .store(in: &cancellables)
+    }
+
+    private func iconName(for state: AppState) -> String {
+        if state.isCommandLaneActive { return "terminal.fill" }
+        switch state.sessionState {
+        case .idle: return "mic.fill"
+        case .recording: return "record.circle.fill"
+        case .transcribing: return "waveform"
+        case .review: return "checkmark.bubble.fill"
+        case .inserting: return "square.and.arrow.down.fill"
+        case .onboarding: return "sparkles"
+        case .error: return "exclamationmark.triangle.fill"
         }
     }
 
