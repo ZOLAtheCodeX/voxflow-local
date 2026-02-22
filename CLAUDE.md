@@ -17,6 +17,7 @@ Sources/VoxFlowApp/        Swift frontend (SwiftUI, MenuBarExtra)
     PrivacyConsentCoordinator.swift     Privacy preview + closure-based continuation
     AccessibilityInsertService.swift    AX text insertion + bundleID-aware app info
     SessionMemoryStore.swift            Ring buffer for recent dictations (recent/push/count)
+    MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem for menu bar palette
   Models/AppModels.swift    All domain types (enums, structs, InsertBehavior, FocusTargetSnapshot)
   State/AppState.swift      Published app state (~50 @Published properties)
   Views/                    SwiftUI views
@@ -87,6 +88,9 @@ swift run VoxFlowLocal
 - **CF type bridging**: Use `CFGetTypeID()` guard + `as!` for AXUIElement/AXValue casts (Swift 6.2 rejects `as?` on CF types)
 - **os.Logger**: Use `Logger(subsystem: "local.voxflow.app", category: "...")` for logging
 - **Accessibility API**: `AccessibilityInsertService` handles text insertion via AX direct write or simulated paste fallback; returns `(name, bundleID)` tuple from `focusedAppInfo`
+- **Non-activating panel**: Menu bar palette uses `NSPanel` with `.nonactivatingPanel` style mask and `.floating` level via `MenuBarPanelController`. Never steals focus from the target app.
+- **Target snapshot**: `capturedTargetApp` is frozen at `startCapture()` time and threaded through the pipeline to `insert(text:targetApp:)`. `FocusContextMonitor` freezes during active sessions via `freeze()`/`unfreeze()`.
+- **Dynamic activation policy**: `activateForWindow()` toggles between `.regular` (Dock visible) and `.accessory` (menu-bar-only) based on whether managed windows are open. `LSUIElement = true` in Info.plist.
 
 ### Python
 
@@ -98,7 +102,7 @@ swift run VoxFlowLocal
 
 ## Testing
 
-- Test coverage: 201+ tests (110 Swift + 91 Python) covering models, parsing, coordinators, backend utilities
+- Test coverage: 212+ tests (121 Swift + 91 Python) covering models, parsing, coordinators, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`
@@ -130,3 +134,5 @@ swift run VoxFlowLocal
 - Store secrets in UserDefaults — use `KeychainService`
 - Use bare `except Exception: pass` in Python — always log
 - Hardcode absolute paths in scripts — use `BASH_SOURCE`-relative resolution
+- Call `NSApp.activate(ignoringOtherApps: true)` directly — use `activateForWindow()` which manages the activation policy toggle
+- Read `NSWorkspace.shared.frontmostApplication` at insert time — use the frozen `capturedTargetApp` from `startCapture()`

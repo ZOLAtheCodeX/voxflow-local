@@ -145,9 +145,9 @@ Run install/runtime diagnostics:
 
 Bundle runtime note:
 - `build_app_bundle.sh` now copies `.venv` into the app bundle by default (safer for macOS LaunchServices).
-- `build_app_bundle.sh` now builds a standard app (`Dock` + normal window lifecycle) by default while still keeping the menu bar extra.
+- VoxFlow runs as a menu-bar agent app by default (`LSUIElement = true`). The Dock icon appears only when a window (Dashboard, Setup, Settings) is open and disappears when all windows close.
 - Use `--link-venv` only for faster local dev iteration.
-- Use `--menu-bar-only` only if you explicitly want an agent-style menu bar app.
+- Use `FORCE_DOCK_ICON=1 ./scripts/build_app_bundle.sh` if you want a persistent Dock icon.
 
 ```bash
 ./scripts/build_app_bundle.sh --link-venv
