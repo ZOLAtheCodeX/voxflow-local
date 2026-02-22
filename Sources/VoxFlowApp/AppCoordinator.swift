@@ -46,6 +46,7 @@ final class AppCoordinator: ObservableObject {
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
     private var mainWindowController: NSWindowController?
     private(set) var menuBarPanel: MenuBarPanelController?
+    private var windowCloseObserver: Any?
 
     private init() {
         let settingsCoordinator = SettingsCoordinator(state: state, backendManager: backendManager)
@@ -510,7 +511,7 @@ final class AppCoordinator: ObservableObject {
     func applyFastestBenchmarkProfile() { benchmark.applyFastestBenchmarkProfile() }
 
     func openSettings() {
-        NSApp.activate(ignoringOtherApps: true)
+        activateForWindow()
         let opened = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         if !opened {
             log.error("Unable to open Settings window from coordinator")
@@ -552,7 +553,7 @@ final class AppCoordinator: ObservableObject {
         }) {
             mainWindow.makeKeyAndOrderFront(nil)
             if force {
-                NSApp.activate(ignoringOtherApps: true)
+                activateForWindow()
             }
             return
         }
@@ -560,7 +561,7 @@ final class AppCoordinator: ObservableObject {
         if let managedWindow = mainWindowController?.window {
             managedWindow.makeKeyAndOrderFront(nil)
             if force {
-                NSApp.activate(ignoringOtherApps: true)
+                activateForWindow()
             }
             return
         }
@@ -579,7 +580,7 @@ final class AppCoordinator: ObservableObject {
 
         mainWindowController?.showWindow(nil)
         mainWindowController?.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        activateForWindow()
     }
 
     // MARK: - Onboarding Forwarding
@@ -865,6 +866,44 @@ final class AppCoordinator: ObservableObject {
         case .inserting: return "square.and.arrow.down.fill"
         case .onboarding: return "sparkles"
         case .error: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    // MARK: - Activation Policy
+
+    /// Activate app and show in Dock when opening a managed window.
+    func activateForWindow() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        installWindowCloseObserver()
+    }
+
+    /// Revert to accessory (menu-bar-only) when all managed windows close.
+    private func installWindowCloseObserver() {
+        guard windowCloseObserver == nil else { return }
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.checkAndRevertActivationPolicy()
+            }
+        }
+    }
+
+    private func checkAndRevertActivationPolicy() {
+        let hasManagedWindows = NSApp.windows.contains { window in
+            window.isVisible
+            && window.level == .normal
+            && window.className != "NSStatusBarWindow"
+        }
+        if !hasManagedWindows {
+            NSApp.setActivationPolicy(.accessory)
+            if let observer = windowCloseObserver {
+                NotificationCenter.default.removeObserver(observer)
+                windowCloseObserver = nil
+            }
         }
     }
 

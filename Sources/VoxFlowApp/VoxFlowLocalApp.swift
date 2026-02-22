@@ -61,7 +61,7 @@ struct VoxFlowLocalApp: App {
     }
 
     private func activateAndOpenWindow(id: String) {
-        NSApp.activate(ignoringOtherApps: true)
+        coordinator.activateForWindow()
         openWindow(id: id)
     }
 }

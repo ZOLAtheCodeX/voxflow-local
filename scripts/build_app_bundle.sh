@@ -138,9 +138,9 @@ fi
 rm -rf "${ICONSET_DIR}"
 rm -rf "${ICON_TMP_DIR}"
 
-LSUIELEMENT_VALUE="<false/>"
-if [[ ${MENU_BAR_ONLY} -eq 1 ]]; then
-  LSUIELEMENT_VALUE="<true/>"
+LSUIELEMENT_VALUE="<true/>"
+if [[ ${MENU_BAR_ONLY} -eq 0 ]] && [[ ${FORCE_DOCK_ICON:-0} -eq 1 ]]; then
+  LSUIELEMENT_VALUE="<false/>"
 fi
 
 cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
