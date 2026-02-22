@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import os.log
 import SwiftUI
@@ -32,6 +33,8 @@ final class AppCoordinator: ObservableObject {
     private var sessionCounter: Int = 0
     private var hotkeysRegistered = false
     private var fnTriggeredCaptureInProgress = false
+    private var capturedTargetApp: NSRunningApplication?
+    private var cancellables = Set<AnyCancellable>()
     private static let maxCaptureDuration: TimeInterval = 60
     private static let minCaptureSamples: Int = 4800 // 0.3s at 16kHz mono PCM16 = 4800 samples = 9600 bytes
     private var warmupTask: Task<Void, Never>?
@@ -49,6 +52,14 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             self?.showMainWindow()
         }
+        state.$sessionState
+            .removeDuplicates()
+            .sink { [weak self] newState in
+                if newState == .idle {
+                    self?.capturedTargetApp = nil
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func warmup() async {
@@ -194,6 +205,7 @@ final class AppCoordinator: ObservableObject {
         }
 
         state.resetForNewCapture()
+        capturedTargetApp = NSWorkspace.shared.frontmostApplication
         sessionCounter += 1
         state.isCommandLaneActive = commandLane
         if commandLane {
@@ -320,6 +332,7 @@ final class AppCoordinator: ObservableObject {
         state.isCommandLaneActive = false
         fnTriggeredCaptureInProgress = false
         state.setIdle()
+        capturedTargetApp = nil
     }
 
     func cancelActiveCapture() {
@@ -330,6 +343,7 @@ final class AppCoordinator: ObservableObject {
             state.isCommandLaneActive = false
             fnTriggeredCaptureInProgress = false
             state.setIdle()
+            capturedTargetApp = nil
             state.statusLine = "Capture canceled"
             return
         }
@@ -350,7 +364,7 @@ final class AppCoordinator: ObservableObject {
     func copyCurrentText() { textInsertion.copyCurrentText() }
     func copyMeetingMarkdownTemplate() { textInsertion.copyMeetingMarkdownTemplate() }
     func copyMeetingNotionTemplate() { textInsertion.copyMeetingNotionTemplate() }
-    func insertCurrentText() { textInsertion.insertCurrentText() }
+    func insertCurrentText() { textInsertion.insertCurrentText(targetApp: capturedTargetApp) }
 
     func approveTranslation() {
         guard var translation = state.translationCandidate else { return }
@@ -626,7 +640,7 @@ final class AppCoordinator: ObservableObject {
                 self.state.transcriptCandidate = candidate
                 self.pushToSessionMemory(candidate)
                 let appLabel = self.state.focusTarget.appName ?? "app"
-                if self.textInsertion.insertText(rawText, statusSuffix: "Inserted (raw — \(appLabel))") {
+                if self.textInsertion.insertText(rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: self.capturedTargetApp) {
                     self.state.sessionState = .idle
                 } else {
                     self.state.sessionState = .review
@@ -658,7 +672,7 @@ final class AppCoordinator: ObservableObject {
                 let text = candidate.text(for: autoMode)
                 let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
                 let appLabel = self.state.focusTarget.appName ?? "app"
-                if self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))") {
+                if self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
                     self.state.sessionState = .idle
                 } else {
                     self.state.sessionState = .review
