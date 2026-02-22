@@ -79,4 +79,16 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(state.sessionState, .inserting)
         XCTAssertEqual(state.successfulInsertCount, 0)
     }
+
+    @MainActor
+    func testInsertTextAcceptsTargetApp() {
+        let (sut, state) = makeSUT()
+        state.transcriptCandidate = TranscriptCandidate(
+            rawText: "hello", lightText: "hello", polishText: "hello", selectedMode: .raw
+        )
+        // Should compile and not crash — targetApp is optional
+        let result = sut.insertText("hello", statusSuffix: "test", targetApp: nil)
+        // Insert may fail (no AX context in test), but it should not crash
+        XCTAssertNotNil(state.lastInsertResult)
+    }
 }

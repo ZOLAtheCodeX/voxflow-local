@@ -3,11 +3,19 @@ import Foundation
 import os.log
 
 @MainActor protocol TextInsertionCoordinating {
-    func insertCurrentText()
-    func insertText(_ text: String, statusSuffix: String) -> Bool
+    func insertCurrentText(targetApp: NSRunningApplication?)
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) -> Bool
     func copyCurrentText()
     func copyMeetingMarkdownTemplate()
     func copyMeetingNotionTemplate()
+}
+
+extension TextInsertionCoordinating {
+    func insertCurrentText() { insertCurrentText(targetApp: nil) }
+    @discardableResult
+    func insertText(_ text: String, statusSuffix: String) -> Bool {
+        insertText(text, statusSuffix: statusSuffix, targetApp: nil)
+    }
 }
 
 @MainActor
@@ -21,7 +29,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         self.insertService = insertService
     }
 
-    func insertCurrentText() {
+    func insertCurrentText(targetApp: NSRunningApplication? = nil) {
         guard !state.displayText.isEmpty else { return }
 
         if state.privacyPreview != nil {
@@ -41,7 +49,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
 
         state.sessionState = .inserting
         let appName = state.focusTarget.appName ?? "Unknown App"
-        let result = insertService.insert(text: state.displayText)
+        let result = insertService.insert(text: state.displayText, targetApp: targetApp)
         log.info("insertCurrentText: method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)
@@ -67,11 +75,11 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     }
 
     @discardableResult
-    func insertText(_ text: String, statusSuffix: String) -> Bool {
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication? = nil) -> Bool {
         guard !text.isEmpty else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
-        let result = insertService.insert(text: text)
+        let result = insertService.insert(text: text, targetApp: targetApp)
         log.info("insertText: method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)

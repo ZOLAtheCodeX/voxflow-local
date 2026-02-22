@@ -34,15 +34,17 @@ final class AccessibilityInsertService {
     }
 
     func insert(text: String) -> InsertResult {
-        // Capture the target app BEFORE any insertion attempt.
-        // During async transcription, focus may have shifted away.
-        let targetApp = NSWorkspace.shared.frontmostApplication
+        insert(text: text, targetApp: nil)
+    }
+
+    func insert(text: String, targetApp: NSRunningApplication?) -> InsertResult {
+        let effectiveTarget = targetApp ?? NSWorkspace.shared.frontmostApplication
 
         if insertDirectly(text: text) {
             return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
         }
 
-        if simulatePaste(text: text, targetApp: targetApp) {
+        if simulatePaste(text: text, targetApp: effectiveTarget) {
             return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
         }
 
