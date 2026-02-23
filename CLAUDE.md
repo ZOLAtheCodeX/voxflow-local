@@ -107,7 +107,7 @@ swift run VoxFlowLocal
 
 ## Testing
 
-- Test coverage: 329 tests (204 Swift + 125 Python) covering models, parsing, coordinators, prompt framing, backend utilities
+- Test coverage: 331 tests (206 Swift + 125 Python) covering models, parsing, coordinators, prompt framing, hallucination filter, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`

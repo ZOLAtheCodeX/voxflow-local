@@ -1,8 +1,8 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-23 (session 5)
+## Last Updated: 2026-02-23 (session 6)
 
-## Branch: feature/prompt-mode (worktree: .worktrees/prompt-mode)
+## Branch: master
 
 ## Completed
 - P1: WhisperKit native STT integration (7 commits: 9b8c370..22da0c0)
@@ -35,28 +35,22 @@
   - Deleted VoxtralEngine class (~94 lines), rewired ProviderRouter → WhisperEngine
   - Removed safe mode toggle, voxtral model TextField, voice commands
   - Cleaned 9 Swift files, 1 Python file, 4 shell scripts, 2 test files
-- Prompt Mode — 4th workflow mode (10 commits on feature/prompt-mode)
-  - Task 1: Domain types — WorkflowMode.prompt, PromptIntent, PromptCandidate, AppState properties (52b90b8)
-  - Task 2: PromptFramingService.detectIntent — keyword/regex matching, 14 TDD tests (fe18ffb)
-  - Task 3: PromptFramingService.frame — 6 intent templates, 6 TDD tests (ec44dd1)
-  - Task 4: CommandParser.switchToPromptMode + SettingsCoordinator.setPromptModeEnabled (12db122)
-  - Task 5: AppCoordinator.processPrompt — cleanup(.polish) → detectIntent → frame → insert/review (ad7c2e6)
-  - Task 6: SettingsView toggle — "Enable Experimental Prompt Mode" (d519c1e)
-  - Task 7: Python PromptFramingEngine + /v1/prompt/frame endpoint (f2430aa)
-  - Task 8: BackendAPIClient.framePrompt (0ca0f44)
-  - Task 9: Python tests — 15 tests for PromptFramingEngine (28555a7)
-  - Task 10: Full test suite verification + CLAUDE.md + progress.txt updates
+- Prompt Mode — 4th workflow mode (10 commits on feature/prompt-mode, merged to master)
+  - Task 1-10: Full implementation (domain types → framing service → coordinator → views → backend → tests)
+- Bugfix/Cleanup batch (4 commits on bugfix/ui-hallucination-hotkey-cleanup)
+  - Fix: Add hello/hi/hey to HallucinationFilter short-audio filter (46db25a)
+  - Fix: Make menu bar panel opaque with readable backgrounds (21ab7be)
+  - Feat: Add Fn + Command + Space dictation hotkey preset (3584e82)
+  - Docs: Remove stale Voxtral references from README (c3aba3f)
 
 ## Remaining
-- Cleanup: Add Globe/Fn + Cmd dictation hotkey preset (currently only fnOnly, Ctrl+Opt+Space, etc.)
-- Merge feature/prompt-mode → master
 - P6: Voice commands, confidence scoring, streaming
 - P7: App publishing (notarization, DMG, distribution)
 
 ## Test Status
-- 204 Swift tests passing, 0 failures
+- 206 Swift tests passing, 0 failures
 - 125 Python tests passing, 0 failures
-- Total: 329 tests
+- Total: 331 tests
 
 ## Blockers
 - None
