@@ -740,6 +740,7 @@ final class AppCoordinator: ObservableObject {
             if providerMode == .localOnly && self.state.sttBackend == .whisperKit {
                 let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: effectiveTone)
                 let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: effectiveTone)
+
                 let candidate = TranscriptCandidate(
                     rawText: rawText, lightText: lightText,
                     polishText: polishText, selectedMode: .raw,
@@ -1003,13 +1004,17 @@ final class AppCoordinator: ObservableObject {
             iconName: iconName(for: state)
         )
 
-        // Observe sessionState and commandLane for icon updates
+        // Observe sessionState and commandLane for icon updates + auto-open on review
         state.$sessionState
             .combineLatest(state.$isCommandLaneActive)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in
+            .sink { [weak self] newState, _ in
                 guard let self else { return }
                 self.menuBarPanel?.updateIcon(systemName: self.iconName(for: self.state))
+                // Auto-open panel when entering review state so user sees the review card
+                if newState == .review, !(self.menuBarPanel?.isOpen ?? true) {
+                    self.menuBarPanel?.open()
+                }
             }
             .store(in: &cancellables)
     }

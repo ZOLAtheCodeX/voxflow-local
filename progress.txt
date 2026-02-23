@@ -1,6 +1,6 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-23 (session 7)
+## Last Updated: 2026-02-23 (session 8)
 
 ## Branch: master
 
@@ -55,6 +55,12 @@
     - Added confidence field to TranscriptCandidate, threaded through 5 construction sites
     - New ConfidenceBadge view: green >= 0.7, yellow >= 0.4, red < 0.4
     - 8 new tests for threshold boundaries and data storage
+- Bundle model path fix (b2ee3e3)
+  - WhisperKit model path falls back to Bundle.main.resourcePath when launched from Launchpad
+- Review panel auto-open fix
+  - Panel now auto-opens when entering .review state (was only toggle-on-click before)
+  - Root cause: insertBehavior persisted as .alwaysReview in UserDefaults survived reinstalls,
+    text went to review state but panel never auto-opened → silent failure
 
 ## Remaining
 - P6: Voice commands, streaming
