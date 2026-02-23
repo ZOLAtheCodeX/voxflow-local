@@ -6,7 +6,6 @@ enum CommandIntent: Equatable {
     case switchToMeeting
     case switchToLocalProvider
     case switchToPrivateProvider
-    case switchToVoxtralSTT
     case switchToWhisperSTT
     case switchToOpenAISTT
     case setTone(ToneStyle)
@@ -36,8 +35,6 @@ enum CommandParser {
             (["local", "provider"], .switchToLocalProvider),
             (["api", "mode"], .switchToPrivateProvider),
             (["private", "api"], .switchToPrivateProvider),
-            (["voxtral", "stt"], .switchToVoxtralSTT),
-            (["voxtral", "speech"], .switchToVoxtralSTT),
             (["whisper", "stt"], .switchToWhisperSTT),
             (["whisper", "speech"], .switchToWhisperSTT),
             (["openai", "stt"], .switchToOpenAISTT),

@@ -8,7 +8,6 @@ struct BackendLaunchConfiguration: Equatable {
     let sttBackend: String
     let sttModel: String
     let whisperModel: String
-    let voxtralSafeModeEnabled: Bool
     let translateModel: String
     let translateBackend: String
     let privateAPIBaseURL: String
@@ -289,7 +288,6 @@ final class BackendProcessManager: @unchecked Sendable {
         environment["VOXFLOW_STT_MODEL"] = configuration.sttModel
         environment["VOXFLOW_WHISPER_MODEL"] = configuration.whisperModel
         environment["VOXFLOW_STT_ALLOW_FALLBACK"] = environment["VOXFLOW_STT_ALLOW_FALLBACK"] ?? "1"
-        environment["VOXFLOW_VOXTRAL_SKIP_PRIMARY"] = configuration.voxtralSafeModeEnabled ? "1" : "0"
         environment["VOXFLOW_TRANSLATE_MODEL"] = configuration.translateModel
         environment["VOXFLOW_TRANSLATE_BACKEND"] = configuration.translateBackend
         environment["VOXFLOW_PRIVACY_POLICY_VERSION"] = "2026-02"

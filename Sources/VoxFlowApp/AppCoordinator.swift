@@ -543,8 +543,7 @@ final class AppCoordinator: ObservableObject {
     }
     func selectTranslationProfile(_ profile: TranslationProfile) { settings.selectTranslationProfile(profile) }
     func selectSTTBackend(_ backend: STTBackend) { settings.selectSTTBackend(backend) }
-    func updateLocalSpeechModels(voxtralModel: String, whisperModel: String) { settings.updateLocalSpeechModels(voxtralModel: voxtralModel, whisperModel: whisperModel) }
-    func setVoxtralSafeModeEnabled(_ isEnabled: Bool) { settings.setVoxtralSafeModeEnabled(isEnabled) }
+    func updateLocalWhisperModel(whisperModel: String) { settings.updateLocalWhisperModel(whisperModel: whisperModel) }
     func selectProviderMode(_ mode: ProviderMode) {
         if mode == .localOnly {
             state.privacyPreview = nil
@@ -877,8 +876,6 @@ final class AppCoordinator: ObservableObject {
             selectProviderMode(.localOnly)
         case .switchToPrivateProvider:
             selectProviderMode(.privateAPI)
-        case .switchToVoxtralSTT:
-            selectSTTBackend(.voxtral)
         case .switchToWhisperSTT:
             selectSTTBackend(.whisper)
         case .switchToOpenAISTT:
