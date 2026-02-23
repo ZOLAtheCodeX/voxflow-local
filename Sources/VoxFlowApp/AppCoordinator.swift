@@ -367,7 +367,7 @@ final class AppCoordinator: ObservableObject {
             case .dictation:
                 try await processDictation(sessionID: sessionID, rawText: rawText)
             case .prompt:
-                try await processDictation(sessionID: sessionID, rawText: rawText) // TODO: Task 5 — replace with processPrompt
+                try await processPrompt(sessionID: sessionID, rawText: rawText)
             }
         } catch {
             log.error("Transcription failed: \(error.localizedDescription)")
@@ -512,10 +512,16 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
+        if mode == .prompt && !state.promptModeEnabled {
+            state.statusLine = "Enable Experimental Prompt Mode in Settings"
+            return
+        }
+
         state.workflowMode = mode
         state.transcriptCandidate = nil
         state.translationCandidate = nil
         state.meetingCandidate = nil
+        state.promptCandidate = nil
         state.privacyPreview = nil
         privacy.clearPendingOperation()
 
@@ -537,6 +543,7 @@ final class AppCoordinator: ObservableObject {
     func updateAppProfile(bundleID: String, profile: AppProfile?) { settings.updateAppProfile(bundleID: bundleID, profile: profile) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }
     func setMeetingModeEnabled(_ isEnabled: Bool) { settings.setMeetingModeEnabled(isEnabled) }
+    func setPromptModeEnabled(_ isEnabled: Bool) { settings.setPromptModeEnabled(isEnabled) }
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {
         settings.setDictationHotkeyPreset(preset)
         configureHotkeys(force: true)
@@ -791,6 +798,53 @@ final class AppCoordinator: ObservableObject {
             self.state.statusLine = providerMode == .privateAPI
                 ? (allowRaw ? "Private API cleanup complete" : "Private API cleanup complete (redacted)")
                 : "Review and insert"
+        }
+    }
+
+    private func processPrompt(sessionID: String, rawText: String) async throws {
+        try await processWithPrivacyGate(
+            sessionID: sessionID, operation: .cleanup, inputText: rawText
+        ) { [weak self] providerMode, consentToken, allowRaw in
+            guard let self else { return }
+            let profile = self.resolveEffectiveProfile()
+            let effectiveTone = profile?.tone ?? self.state.toneStyle
+            let effectiveInsert = profile?.insertBehavior ?? self.state.insertBehavior
+
+            let cleanedText: String
+            if providerMode == .localOnly && self.state.sttBackend == .whisperKit {
+                cleanedText = TextCleanupService.cleanup(rawText, mode: .polish, tone: effectiveTone)
+            } else {
+                let cleanupResponse = try await BackendAPIClient.cleanup(
+                    sessionID: sessionID, mode: .polish, inputText: rawText,
+                    toneStyle: effectiveTone, providerMode: providerMode,
+                    consentToken: consentToken, allowRaw: allowRaw
+                )
+                cleanedText = cleanupResponse.outputText
+            }
+
+            let intent = PromptFramingService.detectIntent(cleanedText)
+            let framedPrompt = PromptFramingService.frame(cleanedText, intent: intent)
+
+            let candidate = PromptCandidate(
+                sessionID: sessionID,
+                rawText: rawText,
+                cleanedText: cleanedText,
+                framedPrompt: framedPrompt,
+                detectedIntent: intent
+            )
+            self.state.promptCandidate = candidate
+
+            if let _ = effectiveInsert.cleanupMode, providerMode == .localOnly {
+                let appLabel = self.state.focusTarget.appName ?? "app"
+                if self.textInsertion.insertText(framedPrompt, statusSuffix: "Prompt inserted (\(intent.displayName) — \(appLabel))", targetApp: self.capturedTargetApp) {
+                    self.state.sessionState = .idle
+                } else {
+                    self.state.sessionState = .review
+                }
+            } else {
+                self.state.sessionState = .review
+                self.state.statusLine = "Review prompt and insert"
+            }
         }
     }
 
