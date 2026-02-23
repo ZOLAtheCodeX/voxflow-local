@@ -27,6 +27,12 @@ enum HallucinationFilter {
         "bye.",
         "goodbye.",
         "you",
+        "hello.",
+        "hello",
+        "hi.",
+        "hi",
+        "hey.",
+        "hey",
     ])
 
     static func isLikelyHallucination(_ text: String, shortAudio: Bool) -> Bool {
