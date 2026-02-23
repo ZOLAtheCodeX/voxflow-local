@@ -28,10 +28,8 @@ final class AppState: ObservableObject {
     @Published var translationProfile: TranslationProfile = .translateGemma4B
     @Published var dictationHotkeyPreset: DictationHotkeyPreset = .fnOnly
     @Published var commandLaneHotkeyPreset: CommandLaneHotkeyPreset = .fnCommandSpace
-    @Published var sttBackend: STTBackend = .voxtral
-    @Published var localVoxtralModel: String = "mistralai/Voxtral-Mini-3B-2507"
+    @Published var sttBackend: STTBackend = .whisperKit
     @Published var localWhisperModel: String = "openai/whisper-small"
-    @Published var voxtralSafeModeEnabled = true
     @Published var providerMode: ProviderMode = .localOnly
     @Published var privateAPIBaseURL: String = ""
     @Published var privateAPIModel: String = ""
