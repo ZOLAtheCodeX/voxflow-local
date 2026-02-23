@@ -43,6 +43,11 @@ struct MeetingSummaryResponse: Codable {
     let notionExport: String
 }
 
+struct PromptFrameResponse: Codable {
+    let framedPrompt: String
+    let detectedIntent: String
+}
+
 struct PrivacyPreviewResponse: Codable {
     let operation: String
     let token: String
@@ -248,6 +253,32 @@ enum BackendAPIClient {
 
         let (data, _) = try await session.data(for: request)
         return try decoder.decode(MeetingSummaryResponse.self, from: data)
+    }
+
+    static func framePrompt(
+        sessionID: String,
+        text: String,
+        consentToken: String? = nil
+    ) async throws -> PromptFrameResponse {
+        struct Payload: Codable {
+            let session_id: String
+            let text: String
+            let consent_token: String?
+        }
+
+        let payload = Payload(
+            session_id: sessionID,
+            text: text,
+            consent_token: consentToken
+        )
+
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/prompt/frame"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, _) = try await session.data(for: request)
+        return try decoder.decode(PromptFrameResponse.self, from: data)
     }
 
     static func privacyPreview(
