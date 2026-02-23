@@ -25,6 +25,8 @@ final class AppState: ObservableObject {
     @Published var meetingCandidate: MeetingCandidate?
     @Published var translationModeEnabled = false
     @Published var meetingModeEnabled = false
+    @Published var promptModeEnabled = false
+    @Published var promptCandidate: PromptCandidate?
     @Published var translationProfile: TranslationProfile = .translateGemma4B
     @Published var dictationHotkeyPreset: DictationHotkeyPreset = .fnOnly
     @Published var commandLaneHotkeyPreset: CommandLaneHotkeyPreset = .fnCommandSpace
@@ -73,6 +75,9 @@ final class AppState: ObservableObject {
         if workflowMode == .meeting {
             return meetingCandidate?.formattedNotes ?? ""
         }
+        if workflowMode == .prompt {
+            return promptCandidate?.framedPrompt ?? ""
+        }
         guard let transcriptCandidate else {
             return ""
         }
@@ -112,6 +117,9 @@ final class AppState: ObservableObject {
         }
         if meetingModeEnabled {
             modes.append(.meeting)
+        }
+        if promptModeEnabled {
+            modes.append(.prompt)
         }
         return modes
     }
@@ -179,6 +187,7 @@ final class AppState: ObservableObject {
         transcriptCandidate = nil
         translationCandidate = nil
         meetingCandidate = nil
+        promptCandidate = nil
         privacyPreview = nil
     }
 

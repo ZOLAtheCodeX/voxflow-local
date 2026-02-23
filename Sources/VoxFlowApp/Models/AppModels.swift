@@ -34,6 +34,7 @@ enum WorkflowMode: String, CaseIterable, Identifiable, Hashable, Codable {
     case dictation
     case translateEnToDe
     case meeting
+    case prompt
 
     var id: String { rawValue }
 
@@ -45,8 +46,40 @@ enum WorkflowMode: String, CaseIterable, Identifiable, Hashable, Codable {
             return "Translate EN→DE"
         case .meeting:
             return "Meeting"
+        case .prompt:
+            return "Prompt"
         }
     }
+}
+
+enum PromptIntent: String, CaseIterable, Identifiable, Codable {
+    case email
+    case code
+    case explain
+    case creative
+    case data
+    case general
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .email: return "Email"
+        case .code: return "Code"
+        case .explain: return "Explain"
+        case .creative: return "Creative"
+        case .data: return "Data"
+        case .general: return "General"
+        }
+    }
+}
+
+struct PromptCandidate {
+    let sessionID: String
+    let rawText: String
+    let cleanedText: String
+    let framedPrompt: String
+    let detectedIntent: PromptIntent
 }
 
 enum ToneStyle: String, CaseIterable, Identifiable, Codable {
