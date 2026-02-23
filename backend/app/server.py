@@ -71,7 +71,7 @@ class RuntimeState:
     model_loaded: bool = False
     mps_available: bool = False
     offline_mode: bool = True
-    stt_backend: str = "voxtral"
+    stt_backend: str = "whisper"
 
 
 class TranscribeRequest(BaseModel):
@@ -195,101 +195,6 @@ class ReadyResponse(BaseModel):
     private_api_policy_version: str
     private_api_policy_ready: bool
     issues: list[str] = Field(default_factory=list)
-
-
-class VoxtralEngine:
-    def __init__(self) -> None:
-        model_ref = os.environ.get("VOXFLOW_STT_MODEL", "mistralai/Voxtral-Mini-3B-2507")
-        self.model_id = resolve_model_ref(model_ref)
-        fallback_ref = os.environ.get("VOXFLOW_VOXTRAL_FALLBACK_MODEL", os.environ.get("VOXFLOW_WHISPER_MODEL", "openai/whisper-small"))
-        self.fallback_model_id = resolve_model_ref(fallback_ref)
-        self.allow_fallback = bool_from_env("VOXFLOW_STT_ALLOW_FALLBACK", default=True)
-        self.skip_primary = bool_from_env("VOXFLOW_VOXTRAL_SKIP_PRIMARY", default=False)
-        self._pipeline = None
-        self._active_model_id = ""
-        self._lock = Lock()
-
-    def _load_pipeline(self) -> None:
-        if self._pipeline is not None:
-            return
-
-        with self._lock:
-            if self._pipeline is not None:
-                return
-            candidates: list[str] = []
-            if not self.skip_primary:
-                candidates.append(self.model_id)
-            if self.allow_fallback and self.fallback_model_id and self.fallback_model_id not in candidates:
-                candidates.append(self.fallback_model_id)
-
-            try:
-                from transformers import pipeline
-            except Exception as exc:
-                logger.error("Failed to import transformers: %s", exc)
-                self._pipeline = False
-                return
-
-            for candidate in candidates:
-                try:
-                    self._pipeline = pipeline(
-                        task="automatic-speech-recognition",
-                        model=candidate,
-                        device=preferred_torch_device(),
-                        torch_dtype="auto",
-                        chunk_length_s=30,
-                        stride_length_s=[5, 1],
-                    )
-                    self._active_model_id = candidate
-                    logger.info("Loaded STT model: %s", candidate)
-                    return
-                except Exception as exc:
-                    logger.warning("Failed to load STT model %s: %s", candidate, exc)
-                    self._pipeline = None
-
-            # Keep service alive even if model load fails. Health endpoint reports this.
-            self._pipeline = False
-
-    def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
-        self._load_pipeline()
-
-        if not pcm:
-            logger.warning("Voxtral transcribe called with empty audio buffer")
-            return "[transcription unavailable: no audio captured]", 0.0
-
-        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-
-        if not self._pipeline:
-            return "[transcription unavailable: local Voxtral model not loaded]", 0.0
-
-        try:
-            output = self._pipeline(
-                {"array": audio, "sampling_rate": sample_rate},
-                generate_kwargs={"language": language_hint},
-                return_timestamps=True,
-            )
-            text = str(output.get("text", "")).strip()
-            confidence = 0.93 if text else 0.0
-            return text, confidence
-        except Exception as exc:
-            logger.error("Voxtral transcription failed: %s", exc)
-            return f"[transcription failed: {exc}]", 0.0
-
-    @property
-    def model_loaded(self) -> bool:
-        self._load_pipeline()
-        return bool(self._pipeline)
-
-    @property
-    def active_model_id(self) -> str:
-        self._load_pipeline()
-        return self._active_model_id or self.model_id
-
-    @property
-    def fallback_active(self) -> bool:
-        self._load_pipeline()
-        if not self._active_model_id:
-            return False
-        return self._active_model_id != self.model_id
 
 
 class WhisperEngine:
@@ -647,9 +552,9 @@ def normalize_provider_mode(provider_mode: str) -> str:
 
 def normalize_stt_backend(raw: str) -> str:
     normalized = raw.strip().lower()
-    if normalized in {"voxtral", "whisper", "openai"}:
+    if normalized in {"whisper", "openai"}:
         return normalized
-    return "voxtral"
+    return "whisper"
 
 
 def redact_sensitive_text(text: str) -> str:
@@ -1331,7 +1236,6 @@ class ProviderRouter:
     def __init__(
         self,
         *,
-        stt_engine: VoxtralEngine,
         whisper_engine: WhisperEngine,
         openai_audio_client: OpenAIAudioClient,
         polish_engine: PolishEngine,
@@ -1339,7 +1243,6 @@ class ProviderRouter:
         private_api_client: PrivateAPIClient,
         consent_store: ConsentStore,
     ) -> None:
-        self._stt_engine = stt_engine
         self._whisper_engine = whisper_engine
         self._openai_audio_client = openai_audio_client
         self._polish_engine = polish_engine
@@ -1380,7 +1283,7 @@ class ProviderRouter:
         return policy
 
     def current_stt_backend(self) -> str:
-        return normalize_stt_backend(os.environ.get("VOXFLOW_STT_BACKEND", "voxtral"))
+        return normalize_stt_backend(os.environ.get("VOXFLOW_STT_BACKEND", "whisper"))
 
     def active_stt_model_loaded(self) -> bool:
         backend = self.current_stt_backend()
@@ -1388,7 +1291,7 @@ class ProviderRouter:
             return self._whisper_engine.model_loaded
         if backend == "openai":
             return self._openai_audio_client.configured
-        return self._stt_engine.model_loaded
+        return self._whisper_engine.model_loaded
 
     def active_stt_model_id(self) -> str:
         backend = self.current_stt_backend()
@@ -1396,13 +1299,10 @@ class ProviderRouter:
             return self._whisper_engine.active_model_id
         if backend == "openai":
             return self._openai_audio_client.stt_model
-        return self._stt_engine.active_model_id
+        return self._whisper_engine.active_model_id
 
     def stt_fallback_active(self) -> bool:
-        backend = self.current_stt_backend()
-        if backend != "voxtral":
-            return False
-        return self._stt_engine.fallback_active
+        return False
 
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
         backend = self.current_stt_backend()
@@ -1410,7 +1310,7 @@ class ProviderRouter:
             return self._whisper_engine.transcribe(pcm, sample_rate, language_hint)
         if backend == "openai":
             return self._openai_audio_client.transcribe(pcm, sample_rate, language_hint)
-        return self._stt_engine.transcribe(pcm, sample_rate, language_hint)
+        return self._whisper_engine.transcribe(pcm, sample_rate, language_hint)
 
     def resolve_effective_text(
         self,
@@ -1578,7 +1478,6 @@ async def rate_limit_middleware(request: Request, call_next):  # type: ignore[no
     _rate_limit_timestamps[client].append(now)
     return await call_next(request)
 state = RuntimeState()
-stt_engine = VoxtralEngine()
 whisper_engine = WhisperEngine()
 polish_engine = PolishEngine()
 translate_engine = TranslateEngine()
@@ -1587,7 +1486,6 @@ audit_logger = AuditLogger()
 private_api_client = PrivateAPIClient()
 openai_audio_client = OpenAIAudioClient()
 provider_router = ProviderRouter(
-    stt_engine=stt_engine,
     whisper_engine=whisper_engine,
     openai_audio_client=openai_audio_client,
     polish_engine=polish_engine,
@@ -1693,7 +1591,6 @@ def health() -> dict[str, str]:
         "stt_backend": state.stt_backend,
         "active_stt_model": active_model,
         "stt_fallback_active": str(stt_fallback_active()).lower(),
-        "voxtral_primary_skipped": str(stt_engine.skip_primary).lower(),
         "openai_audio_configured": str(openai_audio_client.configured).lower(),
         "private_api_configured": str(private_api_client.configured).lower(),
         "private_api_policy_version": privacy_policy.version or "unset",
