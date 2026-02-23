@@ -25,6 +25,7 @@ backend/app/
   server.py                 FastAPI server (~1700 lines, all endpoints)
 scripts/                    Shell scripts (bootstrap, test, run, doctor, launcher, release)
 models/                     Pre-downloaded ML models (~24GB, not in git)
+  whisperkit-coreml__openai_whisper-small.en/  Pre-downloaded WhisperKit CoreML model
 ```
 
 ## Build & Run
@@ -69,7 +70,7 @@ swift run VoxFlowLocal
 | `VOXFLOW_BACKEND_PATH` | Backend server.py path override | auto-resolved |
 | `VOXFLOW_PYTHON_PATH` | Python executable override | auto-resolved |
 | `VOXFLOW_PROJECT_ROOT` | Project root override | auto-resolved |
-| `VOXFLOW_STT_BACKEND` | STT engine: `voxtral`, `whisper`, `openai` | `voxtral` |
+| `VOXFLOW_STT_BACKEND` | STT engine: `voxtral`, `whisper`, `whisperKit`, `openai` | `voxtral` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model name | `small` |
 | `VOXFLOW_OFFLINE` | Disable network model downloads | `1` |
 
@@ -91,6 +92,7 @@ swift run VoxFlowLocal
 - **Non-activating panel**: Menu bar palette uses `NSPanel` with `.nonactivatingPanel` style mask and `.floating` level via `MenuBarPanelController`. Never steals focus from the target app.
 - **Target snapshot**: `capturedTargetApp` is frozen at `startCapture()` time and threaded through the pipeline to `insert(text:targetApp:)`. `FocusContextMonitor` freezes during active sessions via `freeze()`/`unfreeze()`.
 - **Dynamic activation policy**: `activateForWindow()` toggles between `.regular` (Dock visible) and `.accessory` (menu-bar-only) based on whether managed windows are open. `LSUIElement = true` in Info.plist.
+- **WhisperKit native STT**: `WhisperKitSTTService` wraps WhisperKit library for in-process CoreML/ANE transcription. Loaded from `models/whisperkit-coreml__openai_whisper-small.en/` with `download: false` (zero network). Selected via `STTBackend.whisperKit` in Settings. Falls through to same `TranscribeResponse` type as backend STT path.
 
 ### Python
 
@@ -103,7 +105,7 @@ swift run VoxFlowLocal
 
 ## Testing
 
-- Test coverage: 234+ tests (124 Swift + 110 Python) covering models, parsing, coordinators, backend utilities
+- Test coverage: 253+ tests (143 Swift + 110 Python) covering models, parsing, coordinators, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`
@@ -137,3 +139,4 @@ swift run VoxFlowLocal
 - Hardcode absolute paths in scripts — use `BASH_SOURCE`-relative resolution
 - Call `NSApp.activate(ignoringOtherApps: true)` directly — use `activateForWindow()` which manages the activation policy toggle
 - Read `NSWorkspace.shared.frontmostApplication` at insert time — use the frozen `capturedTargetApp` from `startCapture()`
+- Use `WhisperKit()` default init (it phones home to HuggingFace) — always use `WhisperKitConfig(modelFolder:, download: false)`

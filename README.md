@@ -52,6 +52,7 @@ Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Vo
   - Session telemetry cards + per-app compatibility matrix
   - Benchmark recommendation section with profile history table
   - Tracks insert success/fallback/failure by application
+- WhisperKit native STT — CoreML/Apple Neural Engine, in-process inference, zero network
 - Configurable STT backend:
   - `Voxtral (Local)`
   - `Whisper (Local, open-source)`
