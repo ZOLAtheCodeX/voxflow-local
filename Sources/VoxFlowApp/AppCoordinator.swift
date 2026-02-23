@@ -100,6 +100,7 @@ final class AppCoordinator: ObservableObject {
     private func loadWhisperKitModel() async {
         let modelsDir = ProcessInfo.processInfo.environment["VOXFLOW_MODELS_DIR"]
             ?? (ProcessInfo.processInfo.environment["VOXFLOW_PROJECT_ROOT"].map { $0 + "/models" })
+            ?? Bundle.main.resourcePath.map { $0 + "/models" }
             ?? "./models"
         let modelName = "openai_whisper-small.en"
         let modelFolder = WhisperKitSTTService.resolveModelFolder(modelsDir: modelsDir, modelName: modelName)
