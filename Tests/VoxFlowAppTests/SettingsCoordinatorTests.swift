@@ -144,14 +144,35 @@ final class SettingsCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testUpdateAppToneOverridePersistsAndRemoves() {
+    func testUpdateAppProfilePersistsAndRemoves() {
         let (sut, state, _) = makeSUT()
-        sut.updateAppToneOverride(bundleID: "com.test.app", tone: .formal)
-        XCTAssertEqual(state.appToneOverrides["com.test.app"], .formal)
+        let profile = AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview)
+        sut.updateAppProfile(bundleID: "com.test.app", profile: profile)
+        XCTAssertEqual(state.appProfiles["com.test.app"], profile)
 
-        sut.updateAppToneOverride(bundleID: "com.test.app", tone: nil)
-        XCTAssertNil(state.appToneOverrides["com.test.app"])
+        sut.updateAppProfile(bundleID: "com.test.app", profile: nil)
+        XCTAssertNil(state.appProfiles["com.test.app"])
         UserDefaults.standard.removeObject(forKey: "voxflow.dictation.appToneOverrides")
+    }
+
+    @MainActor
+    func testConfigureInitialStateMigratesLegacyToneOverrides() {
+        let defaults = UserDefaults.standard
+        let legacy = ["com.apple.mail": "formal", "com.tinyspeck.slackmacgap": "concise"]
+        let data = try! JSONEncoder().encode(legacy)
+        defaults.set(data, forKey: "voxflow.dictation.appToneOverrides")
+        defaults.set(true, forKey: "voxflow.onboarding.complete")
+
+        let (sut, state, _) = makeSUT()
+        sut.configureInitialState()
+
+        XCTAssertEqual(state.appProfiles["com.apple.mail"]?.tone, .formal)
+        XCTAssertEqual(state.appProfiles["com.apple.mail"]?.cleanupMode, .raw)
+        XCTAssertEqual(state.appProfiles["com.apple.mail"]?.insertBehavior, .autoInsertRaw)
+        XCTAssertEqual(state.appProfiles["com.tinyspeck.slackmacgap"]?.tone, .concise)
+
+        defaults.removeObject(forKey: "voxflow.dictation.appToneOverrides")
+        defaults.removeObject(forKey: "voxflow.onboarding.complete")
     }
 
     @MainActor

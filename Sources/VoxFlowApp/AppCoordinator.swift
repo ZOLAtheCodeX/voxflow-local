@@ -477,7 +477,7 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Settings Forwarding
 
     func selectInsertBehavior(_ behavior: InsertBehavior) { settings.selectInsertBehavior(behavior) }
-    func updateAppToneOverride(bundleID: String, tone: ToneStyle?) { settings.updateAppToneOverride(bundleID: bundleID, tone: tone) }
+    func updateAppProfile(bundleID: String, profile: AppProfile?) { settings.updateAppProfile(bundleID: bundleID, profile: profile) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }
     func setMeetingModeEnabled(_ isEnabled: Bool) { settings.setMeetingModeEnabled(isEnabled) }
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {
@@ -613,11 +613,10 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    private func resolveEffectiveTone() -> ToneStyle {
+    private func resolveEffectiveProfile() -> AppProfile? {
         let bundleID = state.focusTarget.bundleID ?? ""
-        return state.appToneOverrides[bundleID]
-            ?? SettingsCoordinator.defaultAppTones[bundleID]
-            ?? state.toneStyle
+        return state.appProfiles[bundleID]
+            ?? SettingsCoordinator.defaultAppProfiles[bundleID]
     }
 
     private func processWithPrivacyGate(
@@ -645,10 +644,12 @@ final class AppCoordinator: ObservableObject {
             sessionID: sessionID, operation: .cleanup, inputText: rawText
         ) { [weak self] providerMode, consentToken, allowRaw in
             guard let self else { return }
-            let effectiveTone = self.resolveEffectiveTone()
+            let profile = self.resolveEffectiveProfile()
+            let effectiveTone = profile?.tone ?? self.state.toneStyle
+            let effectiveInsert = profile?.insertBehavior ?? self.state.insertBehavior
 
             // Auto-insert raw skips cleanup entirely
-            if self.state.insertBehavior == .autoInsertRaw && providerMode == .localOnly {
+            if effectiveInsert == .autoInsertRaw && providerMode == .localOnly {
                 let candidate = TranscriptCandidate(
                     rawText: rawText, lightText: rawText,
                     polishText: rawText, selectedMode: .raw,
@@ -685,7 +686,7 @@ final class AppCoordinator: ObservableObject {
             if providerMode == .localOnly { self.pushToSessionMemory(candidate) }
 
             // Auto-insert light/polish
-            if let autoMode = self.state.insertBehavior.cleanupMode, providerMode == .localOnly {
+            if let autoMode = effectiveInsert.cleanupMode, providerMode == .localOnly {
                 let text = candidate.text(for: autoMode)
                 let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
                 let appLabel = self.state.focusTarget.appName ?? "app"

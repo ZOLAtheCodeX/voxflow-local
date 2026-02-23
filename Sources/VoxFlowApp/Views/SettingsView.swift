@@ -208,35 +208,53 @@ struct SettingsView: View {
 
                 Divider()
 
-                Text("App Tone Overrides")
+                Text("App Profiles")
                     .font(.system(size: 12, weight: .semibold))
 
-                if state.appToneOverrides.isEmpty {
-                    Text("No custom overrides. Apps use your selected tone or built-in defaults (Slack → Concise, Mail → Formal, etc).")
+                if state.appProfiles.isEmpty {
+                    Text("No custom overrides. Apps use your selected settings or built-in defaults (Slack → Concise, Mail → Formal, etc).")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(state.appToneOverrides.keys.sorted()), id: \.self) { bundleID in
-                        if let tone = state.appToneOverrides[bundleID] {
-                            HStack {
-                                Text(bundleID.components(separatedBy: ".").last ?? bundleID)
-                                    .font(.system(size: 12))
-                                Spacer()
-                                Picker("", selection: Binding(
-                                    get: { tone },
-                                    set: { coordinator.updateAppToneOverride(bundleID: bundleID, tone: $0) }
-                                )) {
-                                    ForEach(ToneStyle.allCases) { t in
-                                        Text(t.displayName).tag(t)
+                    ForEach(Array(state.appProfiles.keys.sorted()), id: \.self) { bundleID in
+                        if let profile = state.appProfiles[bundleID] {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(bundleID.components(separatedBy: ".").last ?? bundleID)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Spacer()
+                                    Button("Remove") {
+                                        coordinator.updateAppProfile(bundleID: bundleID, profile: nil)
                                     }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
                                 }
-                                .frame(width: 120)
-                                Button("Remove") {
-                                    coordinator.updateAppToneOverride(bundleID: bundleID, tone: nil)
+                                HStack(spacing: 12) {
+                                    Picker("Tone", selection: Binding(
+                                        get: { profile.tone },
+                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: $0, cleanupMode: profile.cleanupMode, insertBehavior: profile.insertBehavior)) }
+                                    )) {
+                                        ForEach(ToneStyle.allCases) { t in Text(t.displayName).tag(t) }
+                                    }
+                                    .frame(width: 110)
+                                    Picker("Mode", selection: Binding(
+                                        get: { profile.cleanupMode },
+                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: $0, insertBehavior: profile.insertBehavior)) }
+                                    )) {
+                                        ForEach(CleanupMode.allCases) { m in Text(m.displayName).tag(m) }
+                                    }
+                                    .frame(width: 90)
+                                    Picker("Insert", selection: Binding(
+                                        get: { profile.insertBehavior },
+                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: profile.cleanupMode, insertBehavior: $0)) }
+                                    )) {
+                                        ForEach(InsertBehavior.allCases) { b in Text(b.displayName).tag(b) }
+                                    }
+                                    .frame(width: 150)
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
+                                .font(.system(size: 11))
                             }
+                            .padding(.vertical, 2)
                         }
                     }
                 }

@@ -15,7 +15,7 @@ import os.log
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset)
     func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset)
     func selectInsertBehavior(_ behavior: InsertBehavior)
-    func updateAppToneOverride(bundleID: String, tone: ToneStyle?)
+    func updateAppProfile(bundleID: String, profile: AppProfile?)
     func restartBackendWithCurrentConfiguration(status: String)
     func currentBackendLaunchConfiguration() -> BackendLaunchConfiguration
     func backendLaunchConfiguration(for profile: TranslationProfile) -> BackendLaunchConfiguration
@@ -52,12 +52,12 @@ final class SettingsCoordinator: SettingsCoordinating {
     static let keychainPrivateAPIKeyAccount = "voxflow.privateapi.key"
     static let keychainOpenAIAPIKeyAccount = "voxflow.openai.apiKey"
 
-    static let defaultAppTones: [String: ToneStyle] = [
-        "com.tinyspeck.slackmacgap": .concise,
-        "com.apple.mail": .formal,
-        "com.microsoft.Outlook": .formal,
-        "com.google.Chrome": .neutral,
-        "com.apple.dt.Xcode": .neutral,
+    static let defaultAppProfiles: [String: AppProfile] = [
+        "com.tinyspeck.slackmacgap": AppProfile(tone: .concise, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
+        "com.apple.mail": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
+        "com.microsoft.Outlook": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
+        "com.google.Chrome": AppProfile(tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
+        "com.apple.dt.Xcode": AppProfile(tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
     ]
 
     init(state: AppState, backendManager: BackendProcessManager) {
@@ -132,9 +132,18 @@ final class SettingsCoordinator: SettingsCoordinating {
             defaults.set(state.insertBehavior.rawValue, forKey: insertBehaviorKey)
         }
 
-        if let overridesData = defaults.data(forKey: appToneOverridesKey),
-           let decoded = try? JSONDecoder().decode([String: String].self, from: overridesData) {
-            state.appToneOverrides = decoded.compactMapValues { ToneStyle(rawValue: $0) }
+        if let overridesData = defaults.data(forKey: appToneOverridesKey) {
+            if let profiles = try? JSONDecoder().decode([String: AppProfile].self, from: overridesData) {
+                state.appProfiles = profiles
+            } else if let legacy = try? JSONDecoder().decode([String: String].self, from: overridesData) {
+                state.appProfiles = legacy.compactMapValues { rawValue in
+                    guard let tone = ToneStyle(rawValue: rawValue) else { return nil }
+                    return AppProfile(tone: tone, cleanupMode: .raw, insertBehavior: .autoInsertRaw)
+                }
+                if let data = try? JSONEncoder().encode(state.appProfiles) {
+                    defaults.set(data, forKey: appToneOverridesKey)
+                }
+            }
         }
 
         let completed = defaults.bool(forKey: onboardingKey)
@@ -246,14 +255,13 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.statusLine = "Insert behavior: \(behavior.displayName)"
     }
 
-    func updateAppToneOverride(bundleID: String, tone: ToneStyle?) {
-        if let tone {
-            state.appToneOverrides[bundleID] = tone
+    func updateAppProfile(bundleID: String, profile: AppProfile?) {
+        if let profile {
+            state.appProfiles[bundleID] = profile
         } else {
-            state.appToneOverrides.removeValue(forKey: bundleID)
+            state.appProfiles.removeValue(forKey: bundleID)
         }
-        let encoded = state.appToneOverrides.mapValues { $0.rawValue }
-        if let data = try? JSONEncoder().encode(encoded) {
+        if let data = try? JSONEncoder().encode(state.appProfiles) {
             UserDefaults.standard.set(data, forKey: appToneOverridesKey)
         }
     }

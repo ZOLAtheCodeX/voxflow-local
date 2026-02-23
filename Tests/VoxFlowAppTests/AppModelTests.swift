@@ -285,6 +285,25 @@ final class AppModelTests: XCTestCase {
 
     // MARK: - MeetingCandidate.init(from:)
 
+    func testAppProfileCodableRoundTrip() throws {
+        let profile = AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview)
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(AppProfile.self, from: data)
+        XCTAssertEqual(decoded, profile)
+    }
+
+    func testAppProfileDictionaryCodableRoundTrip() throws {
+        let profiles: [String: AppProfile] = [
+            "com.apple.mail": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
+            "com.tinyspeck.slackmacgap": AppProfile(tone: .concise, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
+        ]
+        let data = try JSONEncoder().encode(profiles)
+        let decoded = try JSONDecoder().decode([String: AppProfile].self, from: data)
+        XCTAssertEqual(decoded, profiles)
+    }
+
+    // MARK: - MeetingCandidate.init(from:)
+
     func testMeetingCandidateFromResponse() {
         let response = MeetingSummaryResponse(
             transcript: "Full transcript",

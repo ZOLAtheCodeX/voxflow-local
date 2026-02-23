@@ -133,6 +133,12 @@ enum InsertBehavior: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+struct AppProfile: Codable, Equatable {
+    var tone: ToneStyle
+    var cleanupMode: CleanupMode
+    var insertBehavior: InsertBehavior
+}
+
 enum PrivacyOperationKind: String, Codable {
     case cleanup
     case translate

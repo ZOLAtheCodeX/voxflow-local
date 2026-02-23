@@ -19,7 +19,7 @@ final class AppState: ObservableObject {
     @Published var dictationCoreModeEnabled = true
     @Published var toneStyle: ToneStyle = .neutral
     @Published var insertBehavior: InsertBehavior = .autoInsertLight
-    @Published var appToneOverrides: [String: ToneStyle] = [:]
+    @Published var appProfiles: [String: AppProfile] = [:]
     @Published var recentDictations: [TranscriptCandidate] = []
     @Published var translationCandidate: TranslationCandidate?
     @Published var meetingCandidate: MeetingCandidate?
