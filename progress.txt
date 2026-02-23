@@ -57,7 +57,7 @@
     - 8 new tests for threshold boundaries and data storage
 - Bundle model path fix (b2ee3e3)
   - WhisperKit model path falls back to Bundle.main.resourcePath when launched from Launchpad
-- Review panel auto-open fix
+- Review panel auto-open fix (f97c638)
   - Panel now auto-opens when entering .review state (was only toggle-on-click before)
   - Root cause: insertBehavior persisted as .alwaysReview in UserDefaults survived reinstalls,
     text went to review state but panel never auto-opened → silent failure
