@@ -593,6 +593,12 @@ final class AppCoordinator: ObservableObject {
         state.statusLine = "Dashboard metrics reset"
     }
 
+    func clearSessionHistory() {
+        sessionMemory.clear()
+        state.recentDictations = []
+        state.statusLine = "History cleared"
+    }
+
 
     private func pushToSessionMemory(_ candidate: TranscriptCandidate) {
         sessionMemory.push(candidate: candidate)

@@ -8,6 +8,7 @@ struct CommandPaletteView: View {
     var onQuit: () -> Void = {}
     @State private var activePanel: ActivePanel = .capture
     @State private var recordingBadgeAnimating = false
+    @State private var showClearHistoryAlert = false
     @State private var transcribingElapsed: Int = 0
     @State private var transcribingTimer: Timer?
 
@@ -502,6 +503,20 @@ struct CommandPaletteView: View {
                     }
                 }
                 .frame(maxHeight: 200)
+
+                Button("Clear History") {
+                    showClearHistoryAlert = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .alert("Clear History", isPresented: $showClearHistoryAlert) {
+                    Button("Clear All", role: .destructive) {
+                        coordinator.clearSessionHistory()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Clear all recent dictations? This cannot be undone.")
+                }
             }
         }
     }
