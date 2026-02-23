@@ -154,6 +154,17 @@ class MeetingSummaryResponse(BaseModel):
     notion_export: str = ""
 
 
+class PromptFrameRequest(BaseModel):
+    session_id: str
+    text: str
+    consent_token: str | None = None
+
+
+class PromptFrameResponse(BaseModel):
+    framed_prompt: str
+    detected_intent: str
+
+
 class TTSRequest(BaseModel):
     text: str
     voice: str = "alloy"
@@ -541,6 +552,98 @@ class TranslateEngine:
             return generated.strip()
 
         return ""
+
+
+class PromptFramingEngine:
+    _INTENT_KEYWORDS: list[tuple[str, list[str]]] = [
+        ("email", ["email", "reply", "message to", "follow up", "follow-up"]),
+        ("code", [r"\bfunction\b", r"\bcode\b", "debug", "refactor", "review", "implement", r"\bapi\b", "endpoint", "algorithm", r"\bclass\b", r"\bmethod\b"]),
+        ("explain", ["explain", "what is", "how does", "teach", "break down", "why does", "how do"]),
+        ("creative", ["blog", "tweet", "post", "story", "tagline", r"\bcopy\b", "headline", "slogan", "draft"]),
+        ("data", ["summarize", "compare", "extract", "analyze", "list the", "differences between", "table of"]),
+    ]
+
+    _PRIORITY = ["email", "code", "explain", "creative", "data"]
+
+    _TEMPLATES: dict[str, str] = {
+        "email": (
+            "Task: Draft an email based on the following instructions.\n\n"
+            "Instructions: {text}\n\n"
+            "Constraints:\n"
+            "- Professional tone unless otherwise specified\n"
+            "- Concise — aim for 3-5 sentences\n"
+            "- Include subject line suggestion\n\n"
+            "Output format: Complete email with Subject and Body."
+        ),
+        "code": (
+            "Task: {text}\n\n"
+            "Constraints:\n"
+            "- Write clean, production-ready code\n"
+            "- Include brief comments for non-obvious logic\n"
+            "- Handle edge cases\n\n"
+            "Output format: Code with explanation of approach."
+        ),
+        "explain": (
+            "Task: Explain the following clearly and concisely.\n\n"
+            "Topic: {text}\n\n"
+            "Constraints:\n"
+            "- Assume intermediate knowledge level\n"
+            "- Use concrete examples where helpful\n"
+            "- Keep it under 200 words unless complexity requires more\n\n"
+            "Output format: Clear explanation with examples."
+        ),
+        "creative": (
+            "Task: {text}\n\n"
+            "Constraints:\n"
+            "- Engaging and original\n"
+            "- Match the tone implied in the instructions\n"
+            "- Provide 2-3 variations if the output is short-form\n\n"
+            "Output format: Creative content as described."
+        ),
+        "data": (
+            "Task: {text}\n\n"
+            "Constraints:\n"
+            "- Be precise and factual\n"
+            "- Use structured format (bullets, tables) where appropriate\n"
+            "- Call out assumptions\n\n"
+            "Output format: Structured analysis."
+        ),
+        "general": (
+            "Task: {text}\n\n"
+            "Please provide a thorough, well-structured response."
+        ),
+    }
+
+    @staticmethod
+    def _phrase_matches(phrase: str, text: str) -> bool:
+        if r"\b" in phrase:
+            return bool(re.search(phrase, text))
+        return phrase in text
+
+    def detect_intent(self, text: str) -> str:
+        lowered = text.lower()
+        if not lowered.strip():
+            return "general"
+
+        scores: dict[str, int] = {}
+        for intent, phrases in self._INTENT_KEYWORDS:
+            count = sum(1 for p in phrases if self._phrase_matches(p, lowered))
+            if count > 0:
+                scores[intent] = count
+
+        if not scores:
+            return "general"
+
+        max_score = max(scores.values())
+        for intent in self._PRIORITY:
+            if scores.get(intent) == max_score:
+                return intent
+
+        return "general"
+
+    def frame(self, text: str, intent: str) -> str:
+        template = self._TEMPLATES.get(intent, self._TEMPLATES["general"])
+        return template.format(text=text)
 
 
 def normalize_provider_mode(provider_mode: str) -> str:
@@ -1242,6 +1345,7 @@ class ProviderRouter:
         translate_engine: TranslateEngine,
         private_api_client: PrivateAPIClient,
         consent_store: ConsentStore,
+        prompt_framing_engine: PromptFramingEngine,
     ) -> None:
         self._whisper_engine = whisper_engine
         self._openai_audio_client = openai_audio_client
@@ -1249,6 +1353,7 @@ class ProviderRouter:
         self._translate_engine = translate_engine
         self._private_api_client = private_api_client
         self._consent_store = consent_store
+        self._prompt_framing_engine = prompt_framing_engine
 
     @staticmethod
     def _bool_from_env(name: str) -> bool:
@@ -1429,6 +1534,11 @@ class ProviderRouter:
             structured = build_meeting_summary(resolved.effective_text, payload.tone_style.lower())
         return structured, resolved
 
+    def frame_prompt(self, session_id: str, text: str, consent_token: str | None) -> tuple[str, str]:
+        intent = self._prompt_framing_engine.detect_intent(text)
+        framed = self._prompt_framing_engine.frame(text, intent)
+        return framed, intent
+
 
 def initialize_runtime_state() -> None:
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -1481,6 +1591,7 @@ state = RuntimeState()
 whisper_engine = WhisperEngine()
 polish_engine = PolishEngine()
 translate_engine = TranslateEngine()
+prompt_framing_engine = PromptFramingEngine()
 consent_store = ConsentStore()
 audit_logger = AuditLogger()
 private_api_client = PrivateAPIClient()
@@ -1492,6 +1603,7 @@ provider_router = ProviderRouter(
     translate_engine=translate_engine,
     private_api_client=private_api_client,
     consent_store=consent_store,
+    prompt_framing_engine=prompt_framing_engine,
 )
 
 
@@ -1720,6 +1832,23 @@ def meeting_summarize(payload: MeetingRequest) -> MeetingSummaryResponse:
         markdown_export=str(structured.get("markdown_export", "")).strip(),
         notion_export=str(structured.get("notion_export", "")).strip(),
     )
+
+
+@app.post("/v1/prompt/frame", response_model=PromptFrameResponse)
+def prompt_frame(payload: PromptFrameRequest) -> PromptFrameResponse:
+    framed, intent = provider_router.frame_prompt(
+        session_id=payload.session_id,
+        text=payload.text,
+        consent_token=payload.consent_token,
+    )
+    audit_logger.log(
+        operation="prompt_frame",
+        provider_mode="local_only",
+        session_id=payload.session_id,
+        payload_length=len(payload.text),
+        redacted=False,
+    )
+    return PromptFrameResponse(framed_prompt=framed, detected_intent=intent)
 
 
 @app.websocket("/v1/events")
