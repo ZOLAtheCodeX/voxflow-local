@@ -18,7 +18,6 @@ mkdir -p "${RUNTIME_DIR}"
 export VOXFLOW_MODELS_DIR="${VOXFLOW_MODELS_DIR:-${ROOT_DIR}/models}"
 mkdir -p "${VOXFLOW_MODELS_DIR}"
 export VOXFLOW_STT_ALLOW_FALLBACK="${VOXFLOW_STT_ALLOW_FALLBACK:-1}"
-export VOXFLOW_VOXTRAL_SKIP_PRIMARY="${VOXFLOW_VOXTRAL_SKIP_PRIMARY:-1}"
 export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/tmp/voxflow-pycache}"
 
@@ -51,5 +50,5 @@ if ! "${ROOT_DIR}/scripts/check_runtime_readiness.sh"; then
   "${ROOT_DIR}/scripts/check_runtime_readiness.sh"
 fi
 
-echo "[prepare] running regression suite (voxtral backend routing, safe mode)"
-"${ROOT_DIR}/scripts/run_regression_suite.sh" --backends voxtral "$@"
+echo "[prepare] running regression suite (whisper backend routing)"
+"${ROOT_DIR}/scripts/run_regression_suite.sh" --backends whisper "$@"

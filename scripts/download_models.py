@@ -11,7 +11,7 @@ from huggingface_hub import snapshot_download
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download local models for VoxFlow.")
     parser.add_argument("--cache-dir", default="./models", help="Local cache directory for model snapshots")
-    parser.add_argument("--stt-model", default="mistralai/Voxtral-Mini-3B-2507")
+    parser.add_argument("--stt-model", default="openai/whisper-small")
     parser.add_argument("--whisper-model", default="openai/whisper-small")
     parser.add_argument("--polish-model", default="google/flan-t5-small")
     parser.add_argument("--translate-model", default="google/translategemma-4b-it")

@@ -142,14 +142,12 @@ class TestNormalizeProviderMode:
 
 class TestNormalizeSttBackend:
     def test_valid_backends(self):
-        assert normalize_stt_backend("voxtral") == "voxtral"
         assert normalize_stt_backend("whisper") == "whisper"
         assert normalize_stt_backend("openai") == "openai"
-        assert normalize_stt_backend("  Voxtral  ") == "voxtral"
 
-    def test_default_to_voxtral(self):
-        assert normalize_stt_backend("unknown") == "voxtral"
-        assert normalize_stt_backend("") == "voxtral"
+    def test_default_to_whisper(self):
+        assert normalize_stt_backend("unknown") == "whisper"
+        assert normalize_stt_backend("") == "whisper"
 
 
 # ── extract_json_object ──────────────────────────────────────────────

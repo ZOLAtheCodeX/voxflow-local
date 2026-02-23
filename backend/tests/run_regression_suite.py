@@ -269,7 +269,7 @@ def main() -> int:
     parser.add_argument(
         "--backends",
         nargs="+",
-        default=["voxtral", "whisper", "openai"],
+        default=["whisper", "openai"],
         help="Backends to evaluate in order",
     )
     parser.add_argument(

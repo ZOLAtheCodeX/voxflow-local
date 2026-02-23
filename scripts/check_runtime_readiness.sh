@@ -53,7 +53,7 @@ if [[ -n "${ACTIVE_MODEL}" ]]; then
 fi
 
 if grep -q '"stt_fallback_active":true' <<<"${READINESS_JSON}"; then
-  echo "[readiness] Voxtral fallback is active (using fallback STT model)"
+  echo "[readiness] STT fallback is active (using fallback STT model)"
 fi
 
 if grep -q '"offline_mode":true' <<<"${READINESS_JSON}"; then
