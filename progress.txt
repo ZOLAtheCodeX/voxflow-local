@@ -1,0 +1,47 @@
+# VoxFlow Local — Session Progress
+
+## Last Updated: 2026-02-22 (session 2)
+
+## Branch: master
+
+## Completed
+- P1: WhisperKit native STT integration (7 commits: 9b8c370..22da0c0)
+  - Task 1: WhisperKit SPM dependency (9b8c370)
+  - Task 2: HallucinationFilter Swift port (25e53db)
+  - Task 3: STTBackend.whisperKit enum case (d1df39a)
+  - Task 4: WhisperKitSTTService (45ce777)
+  - Task 5: AppCoordinator wiring (5251e5b)
+  - Task 6: Model download script (66f9ebb)
+  - Task 7: CLAUDE.md + README.md updates (22da0c0)
+- P2: Focus bug fix (prior session)
+- P3: Extended dictation (prior session)
+- P4: Clear history (prior session)
+- P5/P6: Per-app profiles (prior session)
+- Task 8 (P1): WhisperKit model download + smoke test (383987c)
+  - Fixed download script: venv CLI priority, case-sensitive --local-dir-use-symlinks flag
+  - Downloaded 19 CoreML model files (AudioEncoder, MelSpectrogram, TextDecoder)
+  - Smoke test passed: dictation works with WhisperKit backend, no Python backend needed
+- P5: NLP-Lite Cleanup Engine — Swift-native (8 commits)
+  - Task 1: Spoken punctuation converter (replaceSpokenPunctuation)
+  - Task 2: Repeated word removal (removeRepeatedWords)
+  - Task 3: NLTokenizer sentence splitting + recasing (splitAndRecase)
+  - Task 4: NLTagger POS-aware filler detection (removeFillers)
+  - Task 5: Tone transforms — concise, formal, friendly (applyTone)
+  - Task 6: Full pipeline entry point (cleanup mode/tone routing)
+  - Task 7: AppCoordinator wiring (WhisperKit path bypasses Python backend)
+  - Task 8: CLAUDE.md + progress.txt updates
+
+## Remaining
+- Cleanup: Remove Voxtral dead code (~40+ refs across Swift frontend — model files already deleted)
+- Cleanup: Add Globe/Fn + Cmd dictation hotkey preset (currently only fnOnly, Ctrl+Opt+Space, etc.)
+- Research: Prompt Mode — dictation → structured AI prompt output (brainstorm before building)
+- P6: Voice commands, confidence scoring, streaming
+- P7: App publishing (notarization, DMG, distribution)
+
+## Test Status
+- 185 Swift tests passing, 0 failures (42 new TextCleanupService tests)
+- 110 Python tests (unchanged)
+- Total: 295 tests
+
+## Blockers
+- None

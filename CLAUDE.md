@@ -93,6 +93,7 @@ swift run VoxFlowLocal
 - **Target snapshot**: `capturedTargetApp` is frozen at `startCapture()` time and threaded through the pipeline to `insert(text:targetApp:)`. `FocusContextMonitor` freezes during active sessions via `freeze()`/`unfreeze()`.
 - **Dynamic activation policy**: `activateForWindow()` toggles between `.regular` (Dock visible) and `.accessory` (menu-bar-only) based on whether managed windows are open. `LSUIElement = true` in Info.plist.
 - **WhisperKit native STT**: `WhisperKitSTTService` wraps WhisperKit library for in-process CoreML/ANE transcription. Loaded from `models/whisperkit-coreml__openai_whisper-small.en/` with `download: false` (zero network). Selected via `STTBackend.whisperKit` in Settings. Falls through to same `TranscribeResponse` type as backend STT path.
+- **TextCleanupService**: Swift-native 7-step NLP-lite cleanup pipeline using Apple NaturalLanguage framework (NLTokenizer, NLTagger). Handles spoken punctuation, filler removal (POS-aware), repeated word dedup, sentence splitting, recasing, and tone transforms. Used in-process when `sttBackend == .whisperKit` — no Python backend needed for cleanup.
 
 ### Python
 
