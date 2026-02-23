@@ -72,6 +72,28 @@ final class MenuBarPanelController {
         )
     }
 
+    /// Re-register the status item with NSStatusBar after an activation policy change.
+    /// The old item's menu bar slot may have been invalidated by a
+    /// `.accessory` -> `.regular` -> `.accessory` policy round-trip.
+    func refreshStatusItem() {
+        let wasOpen = panel.isVisible
+
+        // Tear down old item
+        removeClickMonitors()
+        NSStatusBar.system.removeStatusItem(statusItem)
+
+        // Create fresh item
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        configureStatusItemButton(iconName: currentIconName)
+
+        // Restore panel state
+        if wasOpen {
+            open()
+        }
+
+        log.debug("Status item refreshed")
+    }
+
     func toggle() {
         if panel.isVisible {
             close()
