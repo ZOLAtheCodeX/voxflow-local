@@ -5,8 +5,7 @@ import os.log
     func configureInitialState()
     func selectProviderMode(_ mode: ProviderMode)
     func selectSTTBackend(_ backend: STTBackend)
-    func updateLocalSpeechModels(voxtralModel: String, whisperModel: String)
-    func setVoxtralSafeModeEnabled(_ isEnabled: Bool)
+    func updateLocalWhisperModel(whisperModel: String)
     func updatePrivateAPIConfig(baseURL: String, model: String, apiKey: String)
     func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String, ttsModel: String, ttsVoice: String)
     func selectTranslationProfile(_ profile: TranslationProfile)
@@ -34,9 +33,7 @@ final class SettingsCoordinator: SettingsCoordinating {
     private let dictationHotkeyPresetKey = "voxflow.hotkey.dictationPreset"
     private let commandLaneHotkeyPresetKey = "voxflow.hotkey.commandLanePreset"
     private let sttBackendKey = "voxflow.stt.backend"
-    private let sttModelKey = "voxflow.stt.model"
     private let whisperModelKey = "voxflow.whisper.model"
-    private let voxtralSafeModeKey = "voxflow.voxtral.safeMode"
     private let insertBehaviorKey = "voxflow.dictation.insertBehavior"
     private let appToneOverridesKey = "voxflow.dictation.appToneOverrides"
     private let providerModeKey = "voxflow.provider.mode"
@@ -89,7 +86,7 @@ final class SettingsCoordinator: SettingsCoordinating {
            let sttBackend = STTBackend(rawValue: sttRawValue) {
             state.sttBackend = sttBackend
         } else {
-            state.sttBackend = .voxtral
+            state.sttBackend = .whisperKit
         }
 
         if let providerRawValue = defaults.string(forKey: providerModeKey),
@@ -97,14 +94,7 @@ final class SettingsCoordinator: SettingsCoordinating {
             state.providerMode = provider
         }
 
-        state.localVoxtralModel = defaults.string(forKey: sttModelKey) ?? "mistralai/Voxtral-Mini-3B-2507"
         state.localWhisperModel = defaults.string(forKey: whisperModelKey) ?? "openai/whisper-small"
-        if defaults.object(forKey: voxtralSafeModeKey) == nil {
-            state.voxtralSafeModeEnabled = true
-            defaults.set(true, forKey: voxtralSafeModeKey)
-        } else {
-            state.voxtralSafeModeEnabled = defaults.bool(forKey: voxtralSafeModeKey)
-        }
         state.privateAPIBaseURL = defaults.string(forKey: privateAPIBaseURLKey) ?? ""
         state.privateAPIModel = defaults.string(forKey: privateAPIModelKey) ?? "gpt-4o-mini"
         state.privateAPIKey = KeychainService.load(account: Self.keychainPrivateAPIKeyAccount) ?? ""
@@ -184,29 +174,11 @@ final class SettingsCoordinator: SettingsCoordinating {
         }
     }
 
-    func updateLocalSpeechModels(voxtralModel: String, whisperModel: String) {
-        let trimmedVoxtral = voxtralModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedWhisper = whisperModel.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        state.localVoxtralModel = trimmedVoxtral.isEmpty ? "mistralai/Voxtral-Mini-3B-2507" : trimmedVoxtral
-        state.localWhisperModel = trimmedWhisper.isEmpty ? "openai/whisper-small" : trimmedWhisper
-
-        UserDefaults.standard.set(state.localVoxtralModel, forKey: sttModelKey)
+    func updateLocalWhisperModel(whisperModel: String) {
+        let trimmed = whisperModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.localWhisperModel = trimmed.isEmpty ? "openai/whisper-small" : trimmed
         UserDefaults.standard.set(state.localWhisperModel, forKey: whisperModelKey)
-
-        restartBackendWithCurrentConfiguration(status: "Local speech models updated")
-    }
-
-    func setVoxtralSafeModeEnabled(_ isEnabled: Bool) {
-        guard state.voxtralSafeModeEnabled != isEnabled else { return }
-
-        state.voxtralSafeModeEnabled = isEnabled
-        UserDefaults.standard.set(isEnabled, forKey: voxtralSafeModeKey)
-
-        let status = isEnabled
-            ? "Voxtral safe mode enabled (fallback-first)"
-            : "Pure Voxtral primary enabled (may fail under memory pressure)"
-        restartBackendWithCurrentConfiguration(status: status)
+        restartBackendWithCurrentConfiguration(status: "Local whisper model updated")
     }
 
     func updatePrivateAPIConfig(baseURL: String, model: String, apiKey: String) {
@@ -338,9 +310,8 @@ final class SettingsCoordinator: SettingsCoordinating {
     func backendLaunchConfiguration(for profile: TranslationProfile) -> BackendLaunchConfiguration {
         BackendLaunchConfiguration(
             sttBackend: state.sttBackend.rawValue,
-            sttModel: state.localVoxtralModel,
+            sttModel: state.localWhisperModel,
             whisperModel: state.localWhisperModel,
-            voxtralSafeModeEnabled: state.voxtralSafeModeEnabled,
             translateModel: profile.modelID,
             translateBackend: profile.backendKind,
             privateAPIBaseURL: state.privateAPIBaseURL,
