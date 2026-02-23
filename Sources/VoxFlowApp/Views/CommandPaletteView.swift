@@ -317,6 +317,10 @@ struct CommandPaletteView: View {
                         coordinator.selectCleanupMode(mode)
                     }
                 }
+                Spacer()
+                if let candidate = state.transcriptCandidate, candidate.confidence > 0 {
+                    ConfidenceBadge(confidence: candidate.confidence)
+                }
             }
 
             HStack(spacing: 8) {
@@ -557,6 +561,9 @@ struct CommandPaletteView: View {
                     Text(candidate.selectedMode.displayName)
                         .font(VF.captionFont.weight(.medium))
                         .foregroundStyle(.secondary)
+                    if candidate.confidence > 0 {
+                        ConfidenceBadge(confidence: candidate.confidence)
+                    }
                     Text(relativeTime(candidate.timestamp))
                         .font(VF.captionFont)
                         .foregroundStyle(.tertiary)

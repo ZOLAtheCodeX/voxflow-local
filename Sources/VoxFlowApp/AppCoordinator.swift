@@ -40,6 +40,7 @@ final class AppCoordinator: ObservableObject {
     private var hotkeysRegistered = false
     private var fnTriggeredCaptureInProgress = false
     private var capturedTargetApp: NSRunningApplication?
+    private var lastTranscriptionConfidence: Double = 0.0
     private var cancellables = Set<AnyCancellable>()
     private static let maxCaptureDuration: TimeInterval = 60
     private static let minCaptureSamples: Int = 4800 // 0.3s at 16kHz mono PCM16 = 4800 samples = 9600 bytes
@@ -65,6 +66,7 @@ final class AppCoordinator: ObservableObject {
             .sink { [weak self] newState in
                 if newState == .idle {
                     self?.capturedTargetApp = nil
+                    self?.lastTranscriptionConfidence = 0.0
                     self?.focusMonitor.unfreeze()
                 }
             }
@@ -339,6 +341,7 @@ final class AppCoordinator: ObservableObject {
             )
 
             let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            lastTranscriptionConfidence = transcription.confidenceEstimate
             log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
 
             if rawText.isEmpty || rawText.hasPrefix("[transcription") {
@@ -466,7 +469,8 @@ final class AppCoordinator: ObservableObject {
                     let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: tone)
                     state.transcriptCandidate = TranscriptCandidate(
                         rawText: rawText, lightText: lightText,
-                        polishText: polishText, selectedMode: state.selectedMode
+                        polishText: polishText, selectedMode: state.selectedMode,
+                        confidence: state.transcriptCandidate?.confidence ?? 0.0
                     )
                     state.statusLine = "Tone: \(tone.displayName)"
                     return
@@ -492,7 +496,8 @@ final class AppCoordinator: ObservableObject {
                     rawText: rawText,
                     lightText: lightText,
                     polishText: polishText,
-                    selectedMode: state.selectedMode
+                    selectedMode: state.selectedMode,
+                    confidence: state.transcriptCandidate?.confidence ?? 0.0
                 )
                 state.statusLine = "Tone: \(tone.displayName)"
             } catch {
@@ -716,6 +721,7 @@ final class AppCoordinator: ObservableObject {
                 let candidate = TranscriptCandidate(
                     rawText: rawText, lightText: rawText,
                     polishText: rawText, selectedMode: .raw,
+                    confidence: self.lastTranscriptionConfidence,
                     timestamp: Date()
                 )
                 self.state.transcriptCandidate = candidate
@@ -736,6 +742,7 @@ final class AppCoordinator: ObservableObject {
                 let candidate = TranscriptCandidate(
                     rawText: rawText, lightText: lightText,
                     polishText: polishText, selectedMode: .raw,
+                    confidence: self.lastTranscriptionConfidence,
                     timestamp: Date()
                 )
                 self.state.transcriptCandidate = candidate
@@ -774,6 +781,7 @@ final class AppCoordinator: ObservableObject {
             let candidate = TranscriptCandidate(
                 rawText: rawText, lightText: lightText,
                 polishText: polishText, selectedMode: .raw,
+                confidence: self.lastTranscriptionConfidence,
                 timestamp: Date()
             )
             self.state.transcriptCandidate = candidate

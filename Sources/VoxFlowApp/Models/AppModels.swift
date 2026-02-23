@@ -371,6 +371,7 @@ struct TranscriptCandidate: Identifiable {
     var lightText: String
     var polishText: String
     var selectedMode: CleanupMode
+    var confidence: Double = 0.0
     var timestamp: Date = Date()
 
     func text(for mode: CleanupMode) -> String {
