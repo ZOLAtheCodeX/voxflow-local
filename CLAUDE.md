@@ -2,7 +2,7 @@
 
 ## Overview
 
-VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Python FastAPI backend with on-device ML inference (Voxtral-Mini-3B, Whisper-Small, FLAN-T5-Small).
+VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Python FastAPI backend with on-device ML inference (WhisperKit, Whisper-Small, FLAN-T5-Small).
 
 ## Architecture
 
@@ -70,7 +70,7 @@ swift run VoxFlowLocal
 | `VOXFLOW_BACKEND_PATH` | Backend server.py path override | auto-resolved |
 | `VOXFLOW_PYTHON_PATH` | Python executable override | auto-resolved |
 | `VOXFLOW_PROJECT_ROOT` | Project root override | auto-resolved |
-| `VOXFLOW_STT_BACKEND` | STT engine: `voxtral`, `whisper`, `whisperKit`, `openai` | `voxtral` |
+| `VOXFLOW_STT_BACKEND` | STT engine: `whisper`, `whisperKit`, `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model name | `small` |
 | `VOXFLOW_OFFLINE` | Disable network model downloads | `1` |
 
@@ -101,12 +101,12 @@ swift run VoxFlowLocal
 - **Privacy redaction**: Regex-based PII redaction with preview before insertion
 - **Rate limiting**: 120 requests per 60 seconds per IP
 - **CORS**: Restricted to localhost origins only
-- **STT chunking**: Both VoxtralEngine and WhisperEngine use `chunk_length_s=30` with `stride_length_s=[5, 1]` for long-form transcription (30-45s)
+- **STT chunking**: WhisperEngine uses `chunk_length_s=30` with `stride_length_s=[5, 1]` for long-form transcription (30-45s)
 - **Logging**: Use `logging.getLogger("voxflow")`, never bare `print()`
 
 ## Testing
 
-- Test coverage: 253+ tests (143 Swift + 110 Python) covering models, parsing, coordinators, backend utilities
+- Test coverage: 240+ tests (183 Swift + 57 Python) covering models, parsing, coordinators, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`

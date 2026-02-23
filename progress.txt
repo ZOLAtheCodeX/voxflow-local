@@ -1,6 +1,6 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-22 (session 2)
+## Last Updated: 2026-02-23 (session 3)
 
 ## Branch: master
 
@@ -30,18 +30,22 @@
   - Task 6: Full pipeline entry point (cleanup mode/tone routing)
   - Task 7: AppCoordinator wiring (WhisperKit path bypasses Python backend)
   - Task 8: CLAUDE.md + progress.txt updates
+- Cleanup: Remove Voxtral dead code (8 commits on refactor/remove-voxtral-dead-code)
+  - Removed STTBackend.voxtral enum case, default → .whisperKit (Swift) / whisper (Python)
+  - Deleted VoxtralEngine class (~94 lines), rewired ProviderRouter → WhisperEngine
+  - Removed safe mode toggle, voxtral model TextField, voice commands
+  - Cleaned 9 Swift files, 1 Python file, 4 shell scripts, 2 test files
 
 ## Remaining
-- Cleanup: Remove Voxtral dead code (~40+ refs across Swift frontend — model files already deleted)
 - Cleanup: Add Globe/Fn + Cmd dictation hotkey preset (currently only fnOnly, Ctrl+Opt+Space, etc.)
 - Research: Prompt Mode — dictation → structured AI prompt output (brainstorm before building)
 - P6: Voice commands, confidence scoring, streaming
 - P7: App publishing (notarization, DMG, distribution)
 
 ## Test Status
-- 185 Swift tests passing, 0 failures (42 new TextCleanupService tests)
-- 110 Python tests (unchanged)
-- Total: 295 tests
+- 183 Swift tests passing, 0 failures (removed 2 voxtral command tests)
+- 57 Python util tests passing (removed 2 voxtral normalize assertions)
+- Total: 240+ tests
 
 ## Blockers
 - None
