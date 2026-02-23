@@ -67,4 +67,41 @@ final class TextCleanupServiceTests: XCTestCase {
             "no punctuation here"
         )
     }
+
+    // MARK: - Repeated word removal
+
+    func testRemoveAdjacentDuplicateWords() {
+        XCTAssertEqual(
+            TextCleanupService.removeRepeatedWords("I want to to go"),
+            "I want to go"
+        )
+    }
+
+    func testRemoveTripleDuplicate() {
+        XCTAssertEqual(
+            TextCleanupService.removeRepeatedWords("the the the cat"),
+            "the cat"
+        )
+    }
+
+    func testPreserveIntentionalRepetition() {
+        XCTAssertEqual(
+            TextCleanupService.removeRepeatedWords("I said hello hello to her"),
+            "I said hello to her"
+        )
+    }
+
+    func testNoRepeats() {
+        XCTAssertEqual(
+            TextCleanupService.removeRepeatedWords("all words are unique"),
+            "all words are unique"
+        )
+    }
+
+    func testCaseInsensitiveDuplicate() {
+        XCTAssertEqual(
+            TextCleanupService.removeRepeatedWords("The the cat"),
+            "The cat"
+        )
+    }
 }

@@ -31,4 +31,17 @@ enum TextCleanupService {
 
         return result
     }
+
+    static func removeRepeatedWords(_ text: String) -> String {
+        let words = text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        guard words.count > 1 else { return text }
+
+        var result = [words[0]]
+        for i in 1..<words.count {
+            if words[i].lowercased() != words[i - 1].lowercased() {
+                result.append(words[i])
+            }
+        }
+        return result.joined(separator: " ")
+    }
 }
