@@ -296,6 +296,17 @@ final class SettingsCoordinator: SettingsCoordinating {
 
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {
         guard state.dictationHotkeyPreset != preset else { return }
+
+        if !preset.usesFlagsMonitor {
+            let dictConfig = preset.configuration
+            let cmdConfig = state.commandLaneHotkeyPreset.configuration
+            if dictConfig.keyCode == cmdConfig.keyCode && dictConfig.modifiers == cmdConfig.modifiers {
+                log.warning("Dictation preset '\(preset.displayName)' conflicts with command lane '\(self.state.commandLaneHotkeyPreset.displayName)'")
+                state.errorMessage = "'\(preset.displayName)' conflicts with command lane hotkey. Change one to avoid issues."
+                return
+            }
+        }
+
         state.dictationHotkeyPreset = preset
         UserDefaults.standard.set(preset.rawValue, forKey: dictationHotkeyPresetKey)
         state.statusLine = "Dictation hotkey: \(preset.displayName)"
@@ -303,6 +314,17 @@ final class SettingsCoordinator: SettingsCoordinating {
 
     func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset) {
         guard state.commandLaneHotkeyPreset != preset else { return }
+
+        if !state.dictationHotkeyPreset.usesFlagsMonitor {
+            let dictConfig = state.dictationHotkeyPreset.configuration
+            let cmdConfig = preset.configuration
+            if dictConfig.keyCode == cmdConfig.keyCode && dictConfig.modifiers == cmdConfig.modifiers {
+                log.warning("Command lane preset '\(preset.displayName)' conflicts with dictation '\(self.state.dictationHotkeyPreset.displayName)'")
+                state.errorMessage = "'\(preset.displayName)' conflicts with dictation hotkey. Change one to avoid issues."
+                return
+            }
+        }
+
         state.commandLaneHotkeyPreset = preset
         UserDefaults.standard.set(preset.rawValue, forKey: commandLaneHotkeyPresetKey)
         state.statusLine = "Command hotkey: \(preset.displayName)"

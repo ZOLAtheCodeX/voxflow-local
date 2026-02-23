@@ -3,6 +3,10 @@ import SwiftUI
 import Combine
 import os.log
 
+private enum VFPanel {
+    static let cornerRadius: CGFloat = 12
+}
+
 @MainActor
 final class MenuBarPanelController {
     private let log = Logger(subsystem: "local.voxflow.app", category: "MenuBarPanel")
@@ -39,9 +43,12 @@ final class MenuBarPanelController {
         panel.hasShadow = true
         panel.backgroundColor = .windowBackgroundColor
         panel.isOpaque = true
+        panel.appearance = NSApp.effectiveAppearance
         panel.animationBehavior = .utilityWindow
 
         let hostingView = NSHostingView(rootView: content)
+        hostingView.layer?.cornerRadius = VFPanel.cornerRadius
+        hostingView.layer?.masksToBounds = true
         panel.contentView = hostingView
 
         self.panel = panel

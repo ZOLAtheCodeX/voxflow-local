@@ -18,7 +18,10 @@ enum HallucinationFilter {
         "\u{266A}",
         "\u{266A}\u{266A}",
         "\u{266A}\u{266A}\u{266A}",
+        "\u{266B}",
+        "\u{266C}",
         "...",
+        "\u{2026}",
     ])
 
     private static let shortOnlyFiltered: Set<String> = Set([
@@ -48,7 +51,7 @@ enum HallucinationFilter {
             if shortOnlyFiltered.contains(lowered) {
                 return true
             }
-            let words = lowered.split(separator: " ")
+            let words = lowered.split(whereSeparator: { $0.isWhitespace })
             if words.count >= 3, Set(words).count == 1 {
                 return true
             }

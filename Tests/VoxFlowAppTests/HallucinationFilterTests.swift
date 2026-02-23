@@ -74,4 +74,34 @@ final class HallucinationFilterTests: XCTestCase {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("THANK YOU FOR WATCHING.", shortAudio: false))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("subscribe to my channel.", shortAudio: false))
     }
+
+    // MARK: - Unicode hallucination variants (review fix coverage)
+
+    func testUnicodeEllipsisFiltered() {
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("\u{2026}", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("\u{2026}", shortAudio: true))
+    }
+
+    func testMusicNoteVariantsFiltered() {
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("\u{266B}", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("\u{266C}", shortAudio: false))
+    }
+
+    // MARK: - Greeting edge cases
+
+    func testGreetingPunctuationVariantsOnShortAudio() {
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hi.", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hey.", shortAudio: true))
+    }
+
+    func testGreetingCaseInsensitiveOnShortAudio() {
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("HELLO", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("HI", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("HEY", shortAudio: true))
+    }
+
+    func testWhitespaceTrimmedBeforeFiltering() {
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination(" hello ", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("  Thank you for watching.  ", shortAudio: false))
+    }
 }

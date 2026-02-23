@@ -1,9 +1,18 @@
 import Carbon.HIToolbox
 import Foundation
 
-enum GlobalHotkeyError: Error {
+enum GlobalHotkeyError: LocalizedError {
     case registrationFailed(OSStatus)
     case handlerFailed(OSStatus)
+
+    var errorDescription: String? {
+        switch self {
+        case .registrationFailed(let status):
+            return "Hotkey registration failed (code \(status)). The key combination may be in use by another app."
+        case .handlerFailed(let status):
+            return "Hotkey handler installation failed (code \(status))."
+        }
+    }
 }
 
 final class GlobalHotkeyService {
@@ -32,7 +41,7 @@ final class GlobalHotkeyService {
         let handlerStatus = InstallEventHandler(
             GetEventDispatcherTarget(),
             { (_, event, userData) -> OSStatus in
-                guard let event, let userData else { return noErr }
+                guard let event, let userData else { return OSStatus(eventNotHandledErr) }
                 let service = Unmanaged<GlobalHotkeyService>.fromOpaque(userData).takeUnretainedValue()
 
                 var eventHotkeyID = EventHotKeyID()
@@ -46,7 +55,7 @@ final class GlobalHotkeyService {
                     &eventHotkeyID
                 )
                 guard hotkeyStatus == noErr, eventHotkeyID.id == service.instanceHotkeyID else {
-                    return noErr
+                    return OSStatus(eventNotHandledErr)
                 }
 
                 let kind = GetEventKind(event)
