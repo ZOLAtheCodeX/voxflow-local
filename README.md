@@ -1,6 +1,6 @@
 # VoxFlow Local
 
-Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Voxtral-family STT with post-capture cleanup (`Raw`, `Light`, `Polish`) and an experimental EN->DE translate mode.
+Mac-native, local-only dictation app with WhisperKit/Whisper STT, post-capture cleanup (`Raw`, `Light`, `Polish`), and experimental EN->DE translate, meeting notes, and prompt framing modes.
 
 ## Implemented
 
@@ -21,6 +21,7 @@ Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Vo
   - `POST /v1/cleanup`
   - `POST /v1/translate` (EN->DE)
   - `POST /v1/meeting_summarize`
+  - `POST /v1/prompt/frame`
   - `POST /v1/privacy/preview`
   - `WS /v1/events`
   - `GET /v1/health`
@@ -54,7 +55,7 @@ Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Vo
   - Tracks insert success/fallback/failure by application
 - WhisperKit native STT — CoreML/Apple Neural Engine, in-process inference, zero network
 - Configurable STT backend:
-  - `Voxtral (Local)`
+  - `WhisperKit (Local, Neural Engine)` — default, fastest
   - `Whisper (Local, open-source)`
   - `OpenAI STT`
 - OpenAI speech configuration:
@@ -85,7 +86,7 @@ Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Vo
 - `scripts/reinstall_and_launch.sh`: build + install + launch in one command (auto-fallback to direct executable launch)
 - `scripts/check_runtime_readiness.sh`: verifies backend health + whether active STT model is loaded
 - `scripts/release_signed.sh`: release contract for signed + notarized direct app artifacts
-- `scripts/prepare_models_and_run_regression.sh`: downloads required STT models and runs regressions (`voxtral`, `whisper`)
+- `scripts/prepare_models_and_run_regression.sh`: downloads required STT models and runs regressions (`whisper`)
 - `scripts/create_desktop_launcher.sh`: creates a Desktop launcher (`VoxFlow.command`)
 - `scripts/doctor.sh`: checks installed app bundle, executable, models dir, and backend health
 - `scripts/run_regression_suite.sh`: deterministic STT/cleanup regression + latency report
@@ -219,20 +220,10 @@ One-command model prep + regression (recommended for first pass):
 ./scripts/prepare_models_and_run_regression.sh
 ```
 
-If backend gets killed during Voxtral checkpoint load on 16GB RAM machines, use safe mode:
-
-```bash
-VOXFLOW_VOXTRAL_SKIP_PRIMARY=1 ./scripts/run_backend.sh
-```
-
-This keeps Voxtral backend routing enabled while forcing fallback STT model loading.
-Safe mode is now the default unless you explicitly set `VOXFLOW_VOXTRAL_SKIP_PRIMARY=0`.
-You can also toggle this in-app at `Settings -> Speech Models -> Voxtral Safe Mode`.
-
 Outputs:
 - Golden clips in `backend/tests/fixtures/golden_clips/*.wav`
 - Latency percentile report in `backend/tests/reports/stt_latency_report.json`
-- Per-backend latency tracking for `voxtral`, `whisper`, `openai` (OpenAI is skipped if not configured)
+- Per-backend latency tracking for `whisper`, `openai` (OpenAI is skipped if not configured)
 - STT checks fail fast if a backend returns placeholder text (`[transcription unavailable ...]`), which indicates the model/runtime is not ready.
 
 ## Runtime Notes
@@ -245,9 +236,8 @@ export VOXFLOW_MODELS_DIR="$(pwd)/models"
 ```
 
 - Default model refs:
-  - STT: `mistralai/Voxtral-Mini-3B-2507`
-  - Voxtral fallback STT: `openai/whisper-small` (used only if Voxtral cannot load; controlled by `VOXFLOW_STT_ALLOW_FALLBACK`)
-  - Whisper STT: `openai/whisper-small`
+  - STT (WhisperKit): `openai/whisper-small` (CoreML, in-process via Apple Neural Engine)
+  - STT (Whisper): `openai/whisper-small` (Python backend)
   - Polish: `google/flan-t5-small`
   - Translate: `google/translategemma-4b-it`
 
@@ -301,7 +291,7 @@ export VOXFLOW_OPENAI_TTS_VOICE=alloy
 - Translate Mode is intentionally behind an experimental toggle in settings.
 - Extended dictation supports 30-45 seconds of continuous speech (chunked transcription with sliding window).
 - v1 targets microphone dictation only (no system audio/file transcription).
-- Voxtral remains the default STT backend unless explicitly switched in settings.
+- WhisperKit is the default STT backend (fastest, zero network). Switch in Settings if needed.
 
 ## Backlog (Deferred)
 
