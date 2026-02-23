@@ -79,9 +79,9 @@ swift run VoxFlowLocal
 ### Swift
 
 - **`@MainActor` coordinator pattern**: `AppCoordinator` orchestrates audio capture and workflow routing; 5 extracted coordinators handle settings, onboarding, text insertion, benchmarking, and privacy consent via protocol-typed properties. Views observe `AppCoordinator.state` unchanged.
-- **Privacy gate helper**: `processWithPrivacyGate` centralizes the `privateAPI` vs `localOnly` branch for all three workflow processors (`processDictation`, `processTranslation`, `processMeeting`)
+- **Privacy gate helper**: `processWithPrivacyGate` centralizes the `privateAPI` vs `localOnly` branch for all four workflow processors (`processDictation`, `processTranslation`, `processMeeting`, `processPrompt`)
 - **Auto-insert mode**: `InsertBehavior` enum (`.alwaysReview`, `.autoInsertRaw/Light/Polish`) controls whether dictation skips the review step. Persisted via `SettingsCoordinator`.
-- **Feature gates**: Dictation core remains always-on; translation and meeting workflows are experimental toggles (`translationModeEnabled`, `meetingModeEnabled`) surfaced through Settings and workflow picker filtering.
+- **Feature gates**: Dictation core remains always-on; translation, meeting, and prompt workflows are experimental toggles (`translationModeEnabled`, `meetingModeEnabled`, `promptModeEnabled`) surfaced through Settings and workflow picker filtering.
 - **Per-app profile resolution**: `resolveEffectiveProfile()` checks `state.appProfiles[bundleID]` → `SettingsCoordinator.defaultAppProfiles[bundleID]` → `nil` (callers fall back to global settings). Profiles include tone, cleanup mode, and insert behavior. Persisted as JSON `[String: AppProfile]` in UserDefaults.
 - **Clipboard bridge**: After successful AX direct insert, text is also copied to clipboard for recoverability. Skipped when paste fallback already uses clipboard.
 - **Session memory**: `SessionMemoryStore` ring buffer exposed via `AppState.recentDictations` with re-insert and copy actions in the "Recent" tab.
@@ -94,6 +94,7 @@ swift run VoxFlowLocal
 - **Dynamic activation policy**: `activateForWindow()` toggles between `.regular` (Dock visible) and `.accessory` (menu-bar-only) based on whether managed windows are open. `LSUIElement = true` in Info.plist.
 - **WhisperKit native STT**: `WhisperKitSTTService` wraps WhisperKit library for in-process CoreML/ANE transcription. Loaded from `models/whisperkit-coreml__openai_whisper-small.en/` with `download: false` (zero network). Selected via `STTBackend.whisperKit` in Settings. Falls through to same `TranscribeResponse` type as backend STT path.
 - **TextCleanupService**: Swift-native 7-step NLP-lite cleanup pipeline using Apple NaturalLanguage framework (NLTokenizer, NLTagger). Handles spoken punctuation, filler removal (POS-aware), repeated word dedup, sentence splitting, recasing, and tone transforms. Used in-process when `sttBackend == .whisperKit` — no Python backend needed for cleanup.
+- **PromptFramingService**: Static 2-step pipeline (detectIntent → frame) using keyword/regex matching + string templates. Six intent categories (email, code, explain, creative, data, general). Word-boundary regex for single-word keywords. Used in-process on WhisperKit path, backend fallback via `/v1/prompt/frame`.
 
 ### Python
 
@@ -106,7 +107,7 @@ swift run VoxFlowLocal
 
 ## Testing
 
-- Test coverage: 240+ tests (183 Swift + 57 Python) covering models, parsing, coordinators, backend utilities
+- Test coverage: 329 tests (204 Swift + 125 Python) covering models, parsing, coordinators, prompt framing, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`
@@ -131,7 +132,7 @@ swift run VoxFlowLocal
 ## Do Not
 
 - Modify extracted coordinator protocols without updating both the coordinator and AppCoordinator forwarding methods
-- Move workflow routing logic (`processDictation`, `processTranslation`, `processMeeting`) out of AppCoordinator — it belongs with the audio capture orchestration
+- Move workflow routing logic (`processDictation`, `processTranslation`, `processMeeting`, `processPrompt`) out of AppCoordinator — it belongs with the audio capture orchestration
 - Bypass `resolveEffectiveProfile()` — always use it instead of reading `state.toneStyle` directly in workflow processors
 - Store app profiles as anything other than `[String: AppProfile]` JSON in UserDefaults (keyed by bundleID)
 - Use `URLSession.shared` — use the configured session in `BackendAPIClient` (has timeouts)
