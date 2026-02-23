@@ -256,7 +256,7 @@ struct CommandPaletteView: View {
                 .font(VF.bodyFont)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
                 .lineLimit(4)
 
             Text("Redacted")
@@ -268,7 +268,7 @@ struct CommandPaletteView: View {
                 .padding(10)
                 .background {
                     RoundedRectangle(cornerRadius: VF.cornerMedium)
-                        .fill(.ultraThinMaterial)
+                        .fill(.regularMaterial)
                         .overlay(Color.blue.opacity(0.08))
                 }
                 .lineLimit(4)
@@ -309,7 +309,7 @@ struct CommandPaletteView: View {
             .font(VF.bodyFont)
             .frame(minHeight: 92, maxHeight: 120)
             .padding(10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
 
             HStack(spacing: 8) {
                 ForEach(CleanupMode.allCases) { mode in
@@ -382,7 +382,7 @@ struct CommandPaletteView: View {
                         .padding(10)
                         .background {
                             RoundedRectangle(cornerRadius: VF.cornerMedium)
-                                .fill(.ultraThinMaterial)
+                                .fill(.regularMaterial)
                                 .overlay(Color.green.opacity(0.08))
                         }
                 }
@@ -402,7 +402,7 @@ struct CommandPaletteView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
             }
         }
     }
@@ -435,7 +435,7 @@ struct CommandPaletteView: View {
                     .padding(10)
                     .background {
                         RoundedRectangle(cornerRadius: VF.cornerMedium)
-                            .fill(.ultraThinMaterial)
+                            .fill(.regularMaterial)
                             .overlay(Color.blue.opacity(0.08))
                     }
                 }
@@ -473,7 +473,7 @@ struct CommandPaletteView: View {
                         .padding(10)
                         .background {
                             RoundedRectangle(cornerRadius: VF.cornerMedium)
-                                .fill(.ultraThinMaterial)
+                                .fill(.regularMaterial)
                                 .overlay(Color.green.opacity(0.08))
                         }
                     }
@@ -506,7 +506,7 @@ struct CommandPaletteView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
             }
         }
     }
@@ -614,7 +614,7 @@ struct CommandPaletteView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(18)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
     private var transcribingStateCard: some View {
@@ -631,7 +631,7 @@ struct CommandPaletteView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 150)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
         .onAppear { startTranscribingTimer() }
         .onDisappear { stopTranscribingTimer() }
     }

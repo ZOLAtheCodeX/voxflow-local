@@ -37,8 +37,8 @@ final class MenuBarPanelController {
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = false
         panel.hasShadow = true
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
+        panel.backgroundColor = .windowBackgroundColor
+        panel.isOpaque = true
         panel.animationBehavior = .utilityWindow
 
         let hostingView = NSHostingView(rootView: content)
