@@ -14,20 +14,19 @@ final class MenuBarPanelController {
     // nonisolated(unsafe) allows deinit cleanup in Swift 6.2 strict concurrency.
     // These are only mutated from @MainActor context; the annotation is solely
     // to satisfy the nonisolated deinit access requirement.
-    private nonisolated(unsafe) let statusItem: NSStatusItem
+    private nonisolated(unsafe) var statusItem: NSStatusItem
     private let panel: NSPanel
     private nonisolated(unsafe) var globalClickMonitor: Any?
     private nonisolated(unsafe) var localClickMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
+    private var currentIconName: String
 
     var isOpen: Bool { panel.isVisible }
 
     init<Content: View>(content: Content, iconName: String = "mic.fill") {
         // Status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "VoxFlow")
-        }
+        self.currentIconName = iconName
 
         // Non-activating panel
         let panel = NSPanel(
@@ -53,12 +52,20 @@ final class MenuBarPanelController {
 
         self.panel = panel
 
-        // Wire up status item click action
-        statusItem.button?.target = self
-        statusItem.button?.action = #selector(statusItemClicked(_:))
+        // Wire up status item button with icon and click action
+        configureStatusItemButton(iconName: iconName)
+    }
+
+    private func configureStatusItemButton(iconName: String) {
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "VoxFlow")
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+        }
     }
 
     func updateIcon(systemName: String) {
+        currentIconName = systemName
         statusItem.button?.image = NSImage(
             systemSymbolName: systemName,
             accessibilityDescription: "VoxFlow"
