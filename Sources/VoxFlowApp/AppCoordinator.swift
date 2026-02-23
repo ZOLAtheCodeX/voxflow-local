@@ -458,6 +458,18 @@ final class AppCoordinator: ObservableObject {
 
         Task { @MainActor in
             do {
+                // Local retone for WhisperKit
+                if self.state.sttBackend == .whisperKit {
+                    let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: tone)
+                    let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: tone)
+                    state.transcriptCandidate = TranscriptCandidate(
+                        rawText: rawText, lightText: lightText,
+                        polishText: polishText, selectedMode: state.selectedMode
+                    )
+                    state.statusLine = "Tone: \(tone.displayName)"
+                    return
+                }
+
                 let lightText = try await BackendAPIClient.cleanup(
                     sessionID: "retone-\(sessionCounter)",
                     mode: .light,
@@ -704,6 +716,38 @@ final class AppCoordinator: ObservableObject {
                 } else {
                     self.state.sessionState = .review
                 }
+                return
+            }
+
+            // Local cleanup for WhisperKit — no backend needed
+            if providerMode == .localOnly && self.state.sttBackend == .whisperKit {
+                let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: effectiveTone)
+                let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: effectiveTone)
+                let candidate = TranscriptCandidate(
+                    rawText: rawText, lightText: lightText,
+                    polishText: polishText, selectedMode: .raw,
+                    timestamp: Date()
+                )
+                self.state.transcriptCandidate = candidate
+                self.state.selectedMode = .raw
+                self.pushToSessionMemory(candidate)
+
+                // Auto-insert light/polish
+                if let autoMode = effectiveInsert.cleanupMode {
+                    let text = candidate.text(for: autoMode)
+                    let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
+                    let appLabel = self.state.focusTarget.appName ?? "app"
+                    if self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
+                        self.state.sessionState = .idle
+                    } else {
+                        self.state.sessionState = .review
+                        self.state.statusLine = "Auto-insert failed — review and retry"
+                    }
+                    return
+                }
+
+                self.state.sessionState = .review
+                self.state.statusLine = "Review and insert"
                 return
             }
 
