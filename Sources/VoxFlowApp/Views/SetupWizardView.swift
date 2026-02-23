@@ -111,7 +111,7 @@ struct SetupWizardView: View {
             Text("2. Local Backend Readiness")
                 .font(.system(size: 15, weight: .semibold))
 
-            Text("Safe mode: \(state.voxtralSafeModeEnabled ? "ON (recommended on 16GB)" : "OFF (pure Voxtral primary attempt)")")
+            Text("STT backend: \(state.sttBackend.displayName)")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
 

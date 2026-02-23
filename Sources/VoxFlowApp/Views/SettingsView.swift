@@ -13,7 +13,6 @@ struct SettingsView: View {
     @State private var openAISTTModelDraft = ""
     @State private var openAITTSModelDraft = ""
     @State private var openAITTSVoiceDraft = ""
-    @State private var localVoxtralModelDraft = ""
     @State private var localWhisperModelDraft = ""
 
     var body: some View {
@@ -133,31 +132,12 @@ struct SettingsView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
-                Toggle(
-                    "Voxtral Safe Mode (recommended on 16GB)",
-                    isOn: Binding(
-                        get: { state.voxtralSafeModeEnabled },
-                        set: { coordinator.setVoxtralSafeModeEnabled($0) }
-                    )
-                )
-
-                Text(state.voxtralSafeModeEnabled
-                     ? "Safe mode is ON: backend skips heavy Voxtral primary load and keeps fallback path active to reduce OOM risk."
-                     : "Safe mode is OFF: backend attempts pure Voxtral primary. This may crash under memory pressure on 16GB machines.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(state.voxtralSafeModeEnabled ? Color.secondary : Color.orange)
-
                 VStack(alignment: .leading, spacing: 8) {
-                    TextField("Local Voxtral Model", text: $localVoxtralModelDraft)
-                        .textFieldStyle(.roundedBorder)
                     TextField("Local Whisper Model", text: $localWhisperModelDraft)
                         .textFieldStyle(.roundedBorder)
 
-                    Button("Apply Local Speech Models") {
-                        coordinator.updateLocalSpeechModels(
-                            voxtralModel: localVoxtralModelDraft,
-                            whisperModel: localWhisperModelDraft
-                        )
+                    Button("Apply Local Whisper Model") {
+                        coordinator.updateLocalWhisperModel(whisperModel: localWhisperModelDraft)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -408,7 +388,6 @@ struct SettingsView: View {
             openAISTTModelDraft = state.openAISTTModel
             openAITTSModelDraft = state.openAITTSModel
             openAITTSVoiceDraft = state.openAITTSVoice
-            localVoxtralModelDraft = state.localVoxtralModel
             localWhisperModelDraft = state.localWhisperModel
         }
     }
@@ -428,8 +407,6 @@ struct SettingsView: View {
 
     private var sttBackendNote: String {
         switch state.sttBackend {
-        case .voxtral:
-            return "Voxtral local STT is optimized for your default offline workflow."
         case .whisper:
             return "Whisper local STT uses an open-source OpenAI Whisper model on-device."
         case .whisperKit:
