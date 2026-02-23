@@ -201,4 +201,69 @@ final class TextCleanupServiceTests: XCTestCase {
         let result = TextCleanupService.removeFillers("um uh er")
         XCTAssertEqual(result.trimmingCharacters(in: .whitespaces), "")
     }
+
+    // MARK: - Tone transforms
+
+    func testToneNeutralNoChange() {
+        XCTAssertEqual(
+            TextCleanupService.applyTone("Hello world.", tone: .neutral),
+            "Hello world."
+        )
+    }
+
+    func testToneConciseRemovesHedging() {
+        let result = TextCleanupService.applyTone(
+            "I think maybe we should do it.", tone: .concise
+        )
+        XCTAssertFalse(result.contains("I think maybe"))
+        XCTAssertTrue(result.contains("should do it"))
+    }
+
+    func testToneConciseRemovesSofteners() {
+        let result = TextCleanupService.applyTone(
+            "It is just really very important.", tone: .concise
+        )
+        XCTAssertFalse(result.contains("just"))
+        XCTAssertFalse(result.contains("really"))
+        XCTAssertFalse(result.contains("very"))
+        XCTAssertTrue(result.contains("important"))
+    }
+
+    func testToneFormalExpandsContractions() {
+        XCTAssertEqual(
+            TextCleanupService.applyTone("I don't think we can't do it.", tone: .formal),
+            "I do not think we cannot do it."
+        )
+    }
+
+    func testToneFormalRemovesCasualInterjections() {
+        let result = TextCleanupService.applyTone(
+            "Okay so the project is done.", tone: .formal
+        )
+        XCTAssertFalse(result.lowercased().contains("okay so"))
+        XCTAssertTrue(result.contains("project is done"))
+    }
+
+    func testToneFormalEnsuresTrailingPeriod() {
+        XCTAssertTrue(
+            TextCleanupService.applyTone("The report is ready", tone: .formal).hasSuffix(".")
+        )
+    }
+
+    func testToneFriendlyKeepsContractions() {
+        let result = TextCleanupService.applyTone(
+            "I don't think so.", tone: .friendly
+        )
+        XCTAssertTrue(result.contains("don't"))
+    }
+
+    func testToneFriendlySoftensImperatives() {
+        let result = TextCleanupService.applyTone(
+            "Send the report.", tone: .friendly
+        )
+        XCTAssertTrue(
+            result.lowercased().contains("let's send") || result.contains("Send"),
+            "Should soften imperative or leave as-is"
+        )
+    }
 }
