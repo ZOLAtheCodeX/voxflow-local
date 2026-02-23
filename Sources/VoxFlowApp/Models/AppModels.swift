@@ -436,6 +436,7 @@ struct HotkeyConfiguration {
 
 enum DictationHotkeyPreset: String, CaseIterable, Identifiable, Codable {
     case fnOnly
+    case fnCommandSpace
     case controlOptionSpace
     case controlShiftSpace
     case optionShiftSpace
@@ -450,6 +451,8 @@ enum DictationHotkeyPreset: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .fnOnly:
             return "Fn"
+        case .fnCommandSpace:
+            return "Fn + Command + Space"
         case .controlOptionSpace:
             return "Control + Option + Space"
         case .controlShiftSpace:
@@ -465,6 +468,8 @@ enum DictationHotkeyPreset: String, CaseIterable, Identifiable, Codable {
         case .fnOnly:
             // Fn-only is handled by FnHoldHotkeyService; this fallback is never registered.
             modifiers = UInt32(controlKey) | UInt32(optionKey)
+        case .fnCommandSpace:
+            modifiers = UInt32(cmdKey) | HotkeyConfiguration.fnModifierMask
         case .controlOptionSpace:
             modifiers = UInt32(controlKey) | UInt32(optionKey)
         case .controlShiftSpace:
