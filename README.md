@@ -297,6 +297,7 @@ export VOXFLOW_OPENAI_TTS_VOICE=alloy
 
 - If models are missing or fail to load, backend returns explicit placeholder text instead of crashing.
 - Translate Mode is intentionally behind an experimental toggle in settings.
+- Extended dictation supports 30-45 seconds of continuous speech (chunked transcription with sliding window).
 - v1 targets microphone dictation only (no system audio/file transcription).
 - Voxtral remains the default STT backend unless explicitly switched in settings.
 

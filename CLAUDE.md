@@ -98,11 +98,12 @@ swift run VoxFlowLocal
 - **Privacy redaction**: Regex-based PII redaction with preview before insertion
 - **Rate limiting**: 120 requests per 60 seconds per IP
 - **CORS**: Restricted to localhost origins only
+- **STT chunking**: Both VoxtralEngine and WhisperEngine use `chunk_length_s=30` with `stride_length_s=[5, 1]` for long-form transcription (30-45s)
 - **Logging**: Use `logging.getLogger("voxflow")`, never bare `print()`
 
 ## Testing
 
-- Test coverage: 212+ tests (121 Swift + 91 Python) covering models, parsing, coordinators, backend utilities
+- Test coverage: 231+ tests (121 Swift + 110 Python) covering models, parsing, coordinators, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`
