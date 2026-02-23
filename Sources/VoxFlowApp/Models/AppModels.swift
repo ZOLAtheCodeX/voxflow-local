@@ -90,6 +90,7 @@ enum ProviderMode: String, CaseIterable, Identifiable, Codable {
 enum STTBackend: String, CaseIterable, Identifiable, Codable {
     case voxtral
     case whisper
+    case whisperKit
     case openAI
 
     var id: String { rawValue }
@@ -100,6 +101,8 @@ enum STTBackend: String, CaseIterable, Identifiable, Codable {
             return "Voxtral (Local)"
         case .whisper:
             return "Whisper (Local)"
+        case .whisperKit:
+            return "WhisperKit (Local, Neural Engine)"
         case .openAI:
             return "OpenAI STT"
         }

@@ -51,6 +51,7 @@ final class AppState: ObservableObject {
     @Published var launchedAt: Date = Date()
     @Published var captureCount = 0
     @Published var backendReadyForDictation = false
+    @Published var whisperKitReady = false
     @Published var backendReadinessIssue: String?
     @Published var localCaptureCount = 0
     @Published var privateAPICaptureCount = 0

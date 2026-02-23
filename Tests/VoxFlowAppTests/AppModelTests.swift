@@ -44,6 +44,17 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(labels.count, STTBackend.allCases.count)
     }
 
+    func testSTTBackendWhisperKitCodableRoundTrip() throws {
+        let backend = STTBackend.whisperKit
+        let data = try JSONEncoder().encode(backend)
+        let decoded = try JSONDecoder().decode(STTBackend.self, from: data)
+        XCTAssertEqual(decoded, .whisperKit)
+    }
+
+    func testSTTBackendWhisperKitDisplayName() {
+        XCTAssertEqual(STTBackend.whisperKit.displayName, "WhisperKit (Local, Neural Engine)")
+    }
+
     func testDictationHotkeyPresetDisplayNamesUnique() {
         let labels = Set(DictationHotkeyPreset.allCases.map(\.displayName))
         XCTAssertEqual(labels.count, DictationHotkeyPreset.allCases.count)

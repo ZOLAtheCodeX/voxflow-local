@@ -432,6 +432,8 @@ struct SettingsView: View {
             return "Voxtral local STT is optimized for your default offline workflow."
         case .whisper:
             return "Whisper local STT uses an open-source OpenAI Whisper model on-device."
+        case .whisperKit:
+            return "WhisperKit runs Whisper on Apple Neural Engine. Fastest local option. No network access."
         case .openAI:
             return "OpenAI STT sends microphone audio to your configured OpenAI endpoint."
         }
