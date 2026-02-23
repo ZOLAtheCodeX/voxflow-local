@@ -195,3 +195,50 @@ class TestCORS:
         )
         # CORS preflight should include allow-origin
         assert "access-control-allow-origin" in resp.headers
+
+
+# ── Transcribe Chunking ──────────────────────────────────────────────
+
+class TestTranscribeChunking:
+    @pytest.mark.anyio
+    async def test_transcribe_returns_processing_time_ms(self, client: httpx.AsyncClient):
+        """Verify the transcribe response includes processing_time_ms field."""
+        import base64
+        import struct
+
+        # 1 second of silence at 16kHz (16-bit PCM)
+        silence = struct.pack("<" + "h" * 16000, *([0] * 16000))
+        b64 = base64.b64encode(silence).decode()
+
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-chunking",
+            "audio_pcm16le": b64,
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "processing_time_ms" in data
+        assert isinstance(data["processing_time_ms"], int)
+        assert data["processing_time_ms"] >= 0
+
+    @pytest.mark.anyio
+    async def test_transcribe_response_has_all_expected_fields(self, client: httpx.AsyncClient):
+        """Verify transcribe response schema includes all fields."""
+        import base64
+        import struct
+
+        silence = struct.pack("<" + "h" * 16000, *([0] * 16000))
+        b64 = base64.b64encode(silence).decode()
+
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-schema",
+            "audio_pcm16le": b64,
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        data = resp.json()
+        expected_keys = {"text", "is_final", "latency_ms", "confidence_estimate", "processing_time_ms"}
+        assert expected_keys.issubset(data.keys())

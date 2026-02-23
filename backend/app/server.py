@@ -87,6 +87,7 @@ class TranscribeResponse(BaseModel):
     is_final: bool
     latency_ms: int
     confidence_estimate: float
+    processing_time_ms: int = 0
 
 
 class CleanupRequest(BaseModel):
@@ -235,6 +236,8 @@ class VoxtralEngine:
                         model=candidate,
                         device=preferred_torch_device(),
                         torch_dtype="auto",
+                        chunk_length_s=30,
+                        stride_length_s=[5, 1],
                     )
                     self._active_model_id = candidate
                     logger.info("Loaded STT model: %s", candidate)
@@ -262,6 +265,7 @@ class VoxtralEngine:
             output = self._pipeline(
                 {"array": audio, "sampling_rate": sample_rate},
                 generate_kwargs={"language": language_hint},
+                return_timestamps=True,
             )
             text = str(output.get("text", "")).strip()
             confidence = 0.93 if text else 0.0
@@ -311,6 +315,8 @@ class WhisperEngine:
                     model=self.model_id,
                     device=preferred_torch_device(),
                     torch_dtype="auto",
+                    chunk_length_s=30,
+                    stride_length_s=[5, 1],
                 )
                 self._active_model_id = self.model_id
                 logger.info("Loaded Whisper model: %s", self.model_id)
@@ -334,6 +340,7 @@ class WhisperEngine:
             output = self._pipeline(
                 {"array": audio, "sampling_rate": sample_rate},
                 generate_kwargs={"language": language_hint},
+                return_timestamps=True,
             )
             text = str(output.get("text", "")).strip()
             confidence = 0.9 if text else 0.0
@@ -1734,6 +1741,7 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
         is_final=True,
         latency_ms=latency_ms,
         confidence_estimate=confidence,
+        processing_time_ms=latency_ms,
     )
 
 
