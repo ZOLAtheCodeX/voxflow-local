@@ -25,6 +25,7 @@ final class AppCoordinator: ObservableObject {
     private let permissionService = PermissionService()
     private let insertService = AccessibilityInsertService()
     private let sessionMemory = SessionMemoryStore(capacity: 20)
+    private let whisperKitService = WhisperKitSTTService()
     private lazy var focusMonitor = FocusContextMonitor(insertService: insertService)
 
     private(set) lazy var settings: SettingsCoordinating = SettingsCoordinator(state: state, backendManager: backendManager)
@@ -73,14 +74,43 @@ final class AppCoordinator: ObservableObject {
     }
 
     func warmup() async {
+        // Load WhisperKit model if selected
+        if state.sttBackend == .whisperKit {
+            await loadWhisperKitModel()
+        }
+
+        // Always poll backend readiness (still needed for cleanup/translation)
         for attempt in 0..<24 {
             guard !Task.isCancelled else { return }
             await refreshBackendReadiness()
             if state.backendReadyForDictation {
                 return
             }
+            // If WhisperKit is ready, we can dictate even without backend
+            if state.sttBackend == .whisperKit && state.whisperKitReady {
+                return
+            }
             let delay: UInt64 = attempt < 4 ? 2_000_000_000 : 5_000_000_000
             try? await Task.sleep(nanoseconds: delay)
+        }
+    }
+
+    private func loadWhisperKitModel() async {
+        let modelsDir = ProcessInfo.processInfo.environment["VOXFLOW_MODELS_DIR"]
+            ?? (ProcessInfo.processInfo.environment["VOXFLOW_PROJECT_ROOT"].map { $0 + "/models" })
+            ?? "./models"
+        let modelName = "openai_whisper-small.en"
+        let modelFolder = WhisperKitSTTService.resolveModelFolder(modelsDir: modelsDir, modelName: modelName)
+
+        state.statusLine = "Loading WhisperKit model..."
+        do {
+            try await whisperKitService.load(modelFolder: modelFolder)
+            state.whisperKitReady = true
+            state.statusLine = "WhisperKit ready"
+        } catch {
+            state.whisperKitReady = false
+            state.statusLine = "WhisperKit failed: \(error.localizedDescription)"
+            log.error("WhisperKit load failed: \(error.localizedDescription)")
         }
     }
 
@@ -201,9 +231,15 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        if !state.backendReadyForDictation {
-            log.warning("startCapture blocked: backend not ready for dictation")
-            state.statusLine = "Backend not ready — wait for model warmup"
+        let canTranscribe = state.backendReadyForDictation
+            || (state.sttBackend == .whisperKit && state.whisperKitReady)
+        if !canTranscribe {
+            let backendReady = state.backendReadyForDictation
+            let whisperReady = state.whisperKitReady
+            log.warning("startCapture blocked: no STT backend ready (backend=\(backendReady), whisperKit=\(whisperReady))")
+            state.statusLine = state.sttBackend == .whisperKit
+                ? "WhisperKit not ready — wait for model load"
+                : "Backend not ready — wait for model warmup"
             return
         }
 
@@ -283,13 +319,18 @@ final class AppCoordinator: ObservableObject {
             }
 
             let sessionID = "session-\(sessionCounter)"
-            let transcription = try await BackendAPIClient.transcribe(
-                sessionID: sessionID,
-                audioPCM: capturedAudio.pcm,
-                sampleRate: Int(capturedAudio.sampleRate),
-                chunkIndex: 0,
-                languageHint: "en"
-            )
+            let transcription: TranscribeResponse
+            if state.sttBackend == .whisperKit {
+                transcription = try await whisperKitService.transcribe(capturedAudio)
+            } else {
+                transcription = try await BackendAPIClient.transcribe(
+                    sessionID: sessionID,
+                    audioPCM: capturedAudio.pcm,
+                    sampleRate: Int(capturedAudio.sampleRate),
+                    chunkIndex: 0,
+                    languageHint: "en"
+                )
+            }
             let isCalibrationCapture = state.onboardingPhase == .calibrating
             recordCaptureMetrics(
                 latencyMs: transcription.latencyMs,

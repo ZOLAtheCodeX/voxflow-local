@@ -176,7 +176,12 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.sttBackend = backend
         UserDefaults.standard.set(backend.rawValue, forKey: sttBackendKey)
 
-        restartBackendWithCurrentConfiguration(status: "STT backend: \(backend.displayName)")
+        if backend == .whisperKit {
+            // WhisperKit is in-process — no backend restart needed
+            state.statusLine = "STT backend: \(backend.displayName)"
+        } else {
+            restartBackendWithCurrentConfiguration(status: "STT backend: \(backend.displayName)")
+        }
     }
 
     func updateLocalSpeechModels(voxtralModel: String, whisperModel: String) {
