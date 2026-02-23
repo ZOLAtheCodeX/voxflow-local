@@ -134,4 +134,71 @@ final class TextCleanupServiceTests: XCTestCase {
             "The API is down"
         )
     }
+
+    // MARK: - Filler removal
+
+    func testRemoveObviousFillers() {
+        XCTAssertEqual(
+            TextCleanupService.removeFillers("um I want to uh go there"),
+            "I want to go there"
+        )
+    }
+
+    func testRemoveHmm() {
+        XCTAssertEqual(
+            TextCleanupService.removeFillers("hmm let me think"),
+            "let me think"
+        )
+    }
+
+    func testKeepLikeAsVerb() {
+        let result = TextCleanupService.removeFillers("I like dogs")
+        XCTAssertTrue(result.contains("like"), "Should keep 'like' as verb")
+    }
+
+    func testRemoveLikeAsFiller() {
+        let result = TextCleanupService.removeFillers("I was like going to the store")
+        XCTAssertFalse(
+            result.hasPrefix("I was like"),
+            "Should remove 'like' as filler before verb"
+        )
+    }
+
+    func testRemoveYouKnow() {
+        XCTAssertEqual(
+            TextCleanupService.removeFillers("it was you know really good"),
+            "it was really good"
+        )
+    }
+
+    func testRemoveIMean() {
+        XCTAssertEqual(
+            TextCleanupService.removeFillers("I mean the project is done"),
+            "the project is done"
+        )
+    }
+
+    func testRemoveBasically() {
+        XCTAssertEqual(
+            TextCleanupService.removeFillers("basically we need to finish this"),
+            "we need to finish this"
+        )
+    }
+
+    func testPreserveActuallyInContent() {
+        let result = TextCleanupService.removeFillers("that is actually correct")
+        XCTAssertTrue(result.contains("correct"))
+    }
+
+    func testMultipleFillerTypes() {
+        let result = TextCleanupService.removeFillers("um so basically I uh you know went there")
+        XCTAssertFalse(result.contains("um"))
+        XCTAssertFalse(result.contains("uh"))
+        XCTAssertTrue(result.contains("went there"))
+    }
+
+    func testEmptyAfterFillerRemoval() {
+        let result = TextCleanupService.removeFillers("um uh er")
+        XCTAssertEqual(result.trimmingCharacters(in: .whitespaces), "")
+    }
 }

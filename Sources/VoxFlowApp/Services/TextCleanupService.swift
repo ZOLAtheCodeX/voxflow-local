@@ -80,4 +80,65 @@ enum TextCleanupService {
 
         return recased.joined(separator: " ")
     }
+
+    static func normalizeWhitespace(_ text: String) -> String {
+        text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    private static let alwaysFillers: Set<String> = [
+        "um", "umm", "uh", "uhh", "er", "err", "ah", "ahh", "hmm", "hm",
+        "mm", "mmm", "mhm"
+    ]
+
+    private static let ambiguousFillers: Set<String> = [
+        "like", "so", "right", "actually", "basically", "literally",
+        "anyway", "anyways"
+    ]
+
+    private static let phraseFillers: [(pattern: String, replacement: String)] = [
+        (#"\byou know\b"#, ""),
+        (#"\bI mean\b"#, ""),
+        (#"\bkind of\b"#, ""),
+        (#"\bsort of\b"#, ""),
+        (#"\bokay so\b"#, ""),
+    ]
+
+    static func removeFillers(_ text: String) -> String {
+        var result = text
+
+        // Pass 0: Remove phrase fillers (multi-word)
+        for (pattern, replacement) in phraseFillers {
+            result = result.replacingOccurrences(
+                of: pattern, with: replacement,
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        result = normalizeWhitespace(result)
+
+        // Pass 1: Remove always-fillers
+        let words = result.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        let afterAlways = words.filter { !alwaysFillers.contains($0.lowercased()) }
+        result = afterAlways.joined(separator: " ")
+
+        // Pass 2: POS-aware removal of ambiguous fillers
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = result
+
+        var keepRanges: [Range<String.Index>] = []
+        tagger.enumerateTags(in: result.startIndex..<result.endIndex, unit: .word, scheme: .lexicalClass) { tag, range in
+            let word = String(result[range]).lowercased()
+            if ambiguousFillers.contains(word) {
+                if tag == .verb || tag == .adjective || tag == .noun {
+                    keepRanges.append(range)
+                }
+            } else {
+                keepRanges.append(range)
+            }
+            return true
+        }
+
+        let kept = keepRanges.map { String(result[$0]) }.joined(separator: " ")
+        return normalizeWhitespace(kept)
+    }
 }
