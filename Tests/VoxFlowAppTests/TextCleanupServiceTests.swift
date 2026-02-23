@@ -266,4 +266,59 @@ final class TextCleanupServiceTests: XCTestCase {
             "Should soften imperative or leave as-is"
         )
     }
+
+    // MARK: - Full pipeline
+
+    func testCleanupRawNormalizesAndConvertsPunctuation() {
+        let result = TextCleanupService.cleanup(
+            "  hello   world  period  ", mode: .raw, tone: .neutral
+        )
+        XCTAssertEqual(result, "hello world.")
+    }
+
+    func testCleanupLightFullPipeline() {
+        let result = TextCleanupService.cleanup(
+            "um so I want to to go to the store period",
+            mode: .light, tone: .neutral
+        )
+        XCTAssertFalse(result.contains("um"))
+        XCTAssertTrue(result.contains("want to go"))
+        XCTAssertTrue(result.hasSuffix("."))
+        XCTAssertTrue(result.first?.isUppercase == true)
+    }
+
+    func testCleanupPolishAppliesConciseTone() {
+        let result = TextCleanupService.cleanup(
+            "um I think maybe we should just do it period",
+            mode: .polish, tone: .concise
+        )
+        XCTAssertFalse(result.contains("um"))
+        XCTAssertFalse(result.contains("I think maybe"))
+        XCTAssertFalse(result.contains("just"))
+        XCTAssertTrue(result.contains("should"))
+        XCTAssertTrue(result.contains("do it"))
+    }
+
+    func testCleanupPolishFormalTone() {
+        let result = TextCleanupService.cleanup(
+            "uh I can't do it", mode: .polish, tone: .formal
+        )
+        XCTAssertFalse(result.contains("uh"))
+        XCTAssertTrue(result.contains("cannot"))
+        XCTAssertTrue(result.hasSuffix("."))
+    }
+
+    func testCleanupEmptyString() {
+        XCTAssertEqual(
+            TextCleanupService.cleanup("", mode: .polish, tone: .formal),
+            ""
+        )
+    }
+
+    func testCleanupWhitespaceOnly() {
+        XCTAssertEqual(
+            TextCleanupService.cleanup("   ", mode: .light, tone: .neutral),
+            ""
+        )
+    }
 }

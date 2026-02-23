@@ -125,21 +125,70 @@ enum TextCleanupService {
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
         tagger.string = result
 
-        var keepRanges: [Range<String.Index>] = []
+        var removeRanges: [Range<String.Index>] = []
         tagger.enumerateTags(in: result.startIndex..<result.endIndex, unit: .word, scheme: .lexicalClass) { tag, range in
             let word = String(result[range]).lowercased()
             if ambiguousFillers.contains(word) {
-                if tag == .verb || tag == .adjective || tag == .noun {
-                    keepRanges.append(range)
+                if tag != .verb && tag != .adjective && tag != .noun {
+                    removeRanges.append(range)
                 }
-            } else {
-                keepRanges.append(range)
             }
             return true
         }
 
-        let kept = keepRanges.map { String(result[$0]) }.joined(separator: " ")
+        // Remove in reverse order to preserve indices
+        var kept = result
+        for range in removeRanges.reversed() {
+            kept.removeSubrange(range)
+        }
         return normalizeWhitespace(kept)
+    }
+
+    // MARK: - Full pipeline
+
+    /// Full cleanup pipeline. Steps applied depend on mode:
+    /// - Raw: normalize + spoken punctuation (steps 1-2)
+    /// - Light: + dedup + sentence split + filler removal + recase (steps 1-6)
+    /// - Polish: + tone transform (steps 1-7)
+    static func cleanup(_ text: String, mode: CleanupMode, tone: ToneStyle) -> String {
+        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return "" }
+
+        // Step 1: Normalize whitespace
+        var result = normalizeWhitespace(text)
+
+        // Step 2: Spoken punctuation
+        result = replaceSpokenPunctuation(result)
+
+        guard mode != .raw else { return normalizeWhitespace(result) }
+
+        // Step 3: Repeated word removal
+        result = removeRepeatedWords(result)
+
+        // Step 4 + 6: Sentence split + recase
+        result = splitAndRecase(result)
+
+        // Step 5: Filler removal
+        result = removeFillers(result)
+
+        // Re-normalize after removals
+        result = normalizeWhitespace(result)
+
+        // Ensure trailing punctuation
+        if !result.isEmpty && !".!?".contains(result.last!) {
+            result += "."
+        }
+
+        // Re-capitalize first char after filler removal may have lowered it
+        if let first = result.first, first.isLowercase {
+            result = first.uppercased() + result.dropFirst()
+        }
+
+        guard mode != .light else { return result }
+
+        // Step 7: Tone transform (polish only)
+        result = applyTone(result, tone: tone)
+
+        return result
     }
 
     // MARK: - Tone transforms
