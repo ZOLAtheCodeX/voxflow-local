@@ -24,53 +24,45 @@ fi
 
 mkdir -p "$TARGET_DIR"
 
-# Try huggingface-cli first (fastest, handles LFS correctly)
-if command -v huggingface-cli &>/dev/null; then
-    echo "Using huggingface-cli..."
-    huggingface-cli download "$MODEL_REPO" \
-        --include "${MODEL_NAME}/*" \
-        --local-dir "$MODELS_DIR/whisperkit-coreml-download" \
-        --local-dir-use-symlinks false
+# Resolve a working huggingface-cli (needs 'download' subcommand)
+HF_CLI=""
+if [[ -x "$PROJECT_ROOT/.venv/bin/huggingface-cli" ]]; then
+    HF_CLI="$PROJECT_ROOT/.venv/bin/huggingface-cli"
+elif command -v huggingface-cli &>/dev/null; then
+    HF_CLI="huggingface-cli"
+fi
 
-    # Move the model subfolder to target
-    if [[ -d "$MODELS_DIR/whisperkit-coreml-download/${MODEL_NAME}" ]]; then
-        mv "$MODELS_DIR/whisperkit-coreml-download/${MODEL_NAME}"/* "$TARGET_DIR/"
-        rm -rf "$MODELS_DIR/whisperkit-coreml-download"
-        echo ""
-        echo "Download complete: $TARGET_DIR"
-        echo "Contents:"
-        ls -lh "$TARGET_DIR"
-    else
-        echo "ERROR: Expected model directory not found after download"
-        rm -rf "$MODELS_DIR/whisperkit-coreml-download"
-        exit 1
-    fi
-
-# Fallback: try venv's huggingface-cli
-elif [[ -x "$PROJECT_ROOT/.venv/bin/huggingface-cli" ]]; then
-    echo "Using venv huggingface-cli..."
-    "$PROJECT_ROOT/.venv/bin/huggingface-cli" download "$MODEL_REPO" \
-        --include "${MODEL_NAME}/*" \
-        --local-dir "$MODELS_DIR/whisperkit-coreml-download" \
-        --local-dir-use-symlinks false
-
-    if [[ -d "$MODELS_DIR/whisperkit-coreml-download/${MODEL_NAME}" ]]; then
-        mv "$MODELS_DIR/whisperkit-coreml-download/${MODEL_NAME}"/* "$TARGET_DIR/"
-        rm -rf "$MODELS_DIR/whisperkit-coreml-download"
-        echo ""
-        echo "Download complete: $TARGET_DIR"
-        echo "Contents:"
-        ls -lh "$TARGET_DIR"
-    else
-        echo "ERROR: Expected model directory not found after download"
-        rm -rf "$MODELS_DIR/whisperkit-coreml-download"
-        exit 1
-    fi
-
-else
+if [[ -z "$HF_CLI" ]]; then
     echo "ERROR: huggingface-cli not found."
     echo "Install it: pip install huggingface-hub"
     echo "Or bootstrap the backend: ./scripts/bootstrap_backend.sh"
+    exit 1
+fi
+
+# Verify it supports 'download'
+if ! "$HF_CLI" download --help &>/dev/null; then
+    echo "ERROR: huggingface-cli found but too old (no 'download' subcommand)."
+    echo "Upgrade: pip install --upgrade huggingface-hub"
+    exit 1
+fi
+
+echo "Using: $HF_CLI"
+"$HF_CLI" download "$MODEL_REPO" \
+    --include "${MODEL_NAME}/*" \
+    --local-dir "$MODELS_DIR/whisperkit-coreml-download" \
+    --local-dir-use-symlinks False
+
+# Move the model subfolder to target
+if [[ -d "$MODELS_DIR/whisperkit-coreml-download/${MODEL_NAME}" ]]; then
+    mv "$MODELS_DIR/whisperkit-coreml-download/${MODEL_NAME}"/* "$TARGET_DIR/"
+    rm -rf "$MODELS_DIR/whisperkit-coreml-download"
+    echo ""
+    echo "Download complete: $TARGET_DIR"
+    echo "Contents:"
+    ls -lh "$TARGET_DIR"
+else
+    echo "ERROR: Expected model directory not found after download"
+    rm -rf "$MODELS_DIR/whisperkit-coreml-download"
     exit 1
 fi
 
