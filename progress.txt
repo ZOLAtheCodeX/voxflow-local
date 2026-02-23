@@ -1,6 +1,6 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-23 (session 6)
+## Last Updated: 2026-02-23 (session 7)
 
 ## Branch: master
 
@@ -37,20 +37,33 @@
   - Cleaned 9 Swift files, 1 Python file, 4 shell scripts, 2 test files
 - Prompt Mode — 4th workflow mode (10 commits on feature/prompt-mode, merged to master)
   - Task 1-10: Full implementation (domain types → framing service → coordinator → views → backend → tests)
-- Bugfix/Cleanup batch (4 commits on bugfix/ui-hallucination-hotkey-cleanup)
+- Bugfix/Cleanup batch (5 commits on bugfix/ui-hallucination-hotkey-cleanup, merged to master)
   - Fix: Add hello/hi/hey to HallucinationFilter short-audio filter (46db25a)
   - Fix: Make menu bar panel opaque with readable backgrounds (21ab7be)
   - Feat: Add Fn + Command + Space dictation hotkey preset (3584e82)
   - Docs: Remove stale Voxtral references from README (c3aba3f)
+  - Docs: Update progress.txt and CLAUDE.md (520abf5)
+- Code review hardening (1 commit on master)
+  - Fix: Hotkey conflict guard in SettingsCoordinator — reject duplicate key combos (3dcb196)
+  - Fix: Unicode hallucination entries (U+266B, U+266C, U+2026) + Unicode-aware split (3dcb196)
+  - Fix: GlobalHotkeyService returns eventNotHandledErr on guard failures + LocalizedError (3dcb196)
+  - Fix: Panel Dark Mode appearance inheritance + corner radius (3dcb196)
+  - Tests: 5 new edge case tests (Unicode, greeting variants, whitespace trimming) (3dcb196)
+- Confidence Indicator UI (2 commits on master)
+  - Docs: Confidence indicator design doc (3b48a89)
+  - Feat: Color-coded confidence badge in review card + Recent tab (0116d6d)
+    - Added confidence field to TranscriptCandidate, threaded through 5 construction sites
+    - New ConfidenceBadge view: green >= 0.7, yellow >= 0.4, red < 0.4
+    - 8 new tests for threshold boundaries and data storage
 
 ## Remaining
-- P6: Voice commands, confidence scoring, streaming
+- P6: Voice commands, streaming
 - P7: App publishing (notarization, DMG, distribution)
 
 ## Test Status
-- 206 Swift tests passing, 0 failures
+- 219 Swift tests passing, 0 failures
 - 125 Python tests passing, 0 failures
-- Total: 331 tests
+- Total: 344 tests
 
 ## Blockers
 - None
