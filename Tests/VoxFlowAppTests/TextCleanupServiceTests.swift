@@ -104,4 +104,34 @@ final class TextCleanupServiceTests: XCTestCase {
             "The cat"
         )
     }
+
+    // MARK: - Sentence splitting + recasing
+
+    func testSplitAndRecaseSingleSentence() {
+        XCTAssertEqual(
+            TextCleanupService.splitAndRecase("hello world"),
+            "Hello world"
+        )
+    }
+
+    func testSplitAndRecaseMultipleSentences() {
+        XCTAssertEqual(
+            TextCleanupService.splitAndRecase("hello world. how are you. good thanks"),
+            "Hello world. How are you. Good thanks"
+        )
+    }
+
+    func testSplitAndRecasePreservesProperNouns() {
+        XCTAssertEqual(
+            TextCleanupService.splitAndRecase("i spoke to Dr. Smith about it"),
+            "I spoke to Dr. Smith about it"
+        )
+    }
+
+    func testSplitAndRecasePreservesAcronyms() {
+        XCTAssertEqual(
+            TextCleanupService.splitAndRecase("the API is down"),
+            "The API is down"
+        )
+    }
 }

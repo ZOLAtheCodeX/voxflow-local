@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 enum TextCleanupService {
 
@@ -43,5 +44,40 @@ enum TextCleanupService {
             }
         }
         return result.joined(separator: " ")
+    }
+
+    static func splitAndRecase(_ text: String) -> String {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+
+        var nlSentences: [String] = []
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            nlSentences.append(String(text[range]).trimmingCharacters(in: .whitespaces))
+            return true
+        }
+
+        // NLTokenizer may under-split on lowercase text; split further on
+        // sentence-ending punctuation followed by whitespace.
+        var sentences: [String] = []
+        for chunk in nlSentences {
+            // Insert a sentinel after sentence-ending punctuation + space
+            let marked = chunk.replacingOccurrences(
+                of: #"([.!?])\s+"#,
+                with: "$1\u{001E}",
+                options: .regularExpression
+            )
+            let subParts = marked.components(separatedBy: "\u{001E}")
+            sentences.append(contentsOf: subParts)
+        }
+
+        let recased = sentences.map { sentence -> String in
+            var s = sentence.trimmingCharacters(in: .whitespaces)
+            guard !s.isEmpty else { return s }
+            let first = s.prefix(1).uppercased()
+            s = first + s.dropFirst()
+            return s
+        }
+
+        return recased.joined(separator: " ")
     }
 }
