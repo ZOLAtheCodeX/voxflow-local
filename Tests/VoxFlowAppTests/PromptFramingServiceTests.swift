@@ -62,4 +62,46 @@ final class PromptFramingServiceTests: XCTestCase {
     func testCreativePostNotDataPost() {
         XCTAssertEqual(PromptFramingService.detectIntent("write a post about machine learning trends"), .creative)
     }
+
+    // MARK: - Framing templates
+
+    func testEmailFrameContainsSections() {
+        let result = PromptFramingService.frame("tell the client we need to reschedule", intent: .email)
+        XCTAssert(result.contains("Task:"), "Should contain Task section")
+        XCTAssert(result.contains("Constraints:"), "Should contain Constraints section")
+        XCTAssert(result.contains("Output format:"), "Should contain Output format section")
+        XCTAssert(result.contains("tell the client we need to reschedule"), "Should contain original text")
+    }
+
+    func testCodeFrameContainsSections() {
+        let result = PromptFramingService.frame("write a binary search function", intent: .code)
+        XCTAssert(result.contains("Task:"), "Should contain Task section")
+        XCTAssert(result.contains("Constraints:"), "Should contain Constraints section")
+        XCTAssert(result.contains("write a binary search function"), "Should contain original text")
+    }
+
+    func testExplainFrameContainsTopic() {
+        let result = PromptFramingService.frame("how dependency injection works", intent: .explain)
+        XCTAssert(result.contains("Topic:"), "Should contain Topic section")
+        XCTAssert(result.contains("how dependency injection works"), "Should contain original text")
+    }
+
+    func testCreativeFrameContainsSections() {
+        let result = PromptFramingService.frame("a blog post about remote work", intent: .creative)
+        XCTAssert(result.contains("Task:"), "Should contain Task section")
+        XCTAssert(result.contains("a blog post about remote work"), "Should contain original text")
+    }
+
+    func testDataFrameContainsSections() {
+        let result = PromptFramingService.frame("quarterly revenue trends", intent: .data)
+        XCTAssert(result.contains("Task:"), "Should contain Task section")
+        XCTAssert(result.contains("quarterly revenue trends"), "Should contain original text")
+    }
+
+    func testGeneralFrameIsMinimal() {
+        let result = PromptFramingService.frame("help me think through this", intent: .general)
+        XCTAssert(result.contains("Task:"), "Should contain Task section")
+        XCTAssert(result.contains("help me think through this"), "Should contain original text")
+        XCTAssertFalse(result.contains("Constraints:"), "General frame should be minimal")
+    }
 }
