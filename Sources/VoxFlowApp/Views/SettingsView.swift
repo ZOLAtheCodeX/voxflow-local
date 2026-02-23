@@ -271,6 +271,14 @@ struct SettingsView: View {
                     )
                 )
 
+                Toggle(
+                    "Enable Experimental Prompt Mode",
+                    isOn: Binding(
+                        get: { state.promptModeEnabled },
+                        set: { coordinator.setPromptModeEnabled($0) }
+                    )
+                )
+
                 Text("Dictation mode is always enabled as the release-quality core workflow.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
