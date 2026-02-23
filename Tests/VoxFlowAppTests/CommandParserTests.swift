@@ -43,14 +43,6 @@ final class CommandParserTests: XCTestCase {
 
     // MARK: - STT switching
 
-    func testVoxtralSTT() {
-        XCTAssertEqual(CommandParser.parse(from: "voxtral stt"), .switchToVoxtralSTT)
-    }
-
-    func testVoxtralSpeech() {
-        XCTAssertEqual(CommandParser.parse(from: "voxtral speech"), .switchToVoxtralSTT)
-    }
-
     func testWhisperSTT() {
         XCTAssertEqual(CommandParser.parse(from: "whisper stt"), .switchToWhisperSTT)
     }

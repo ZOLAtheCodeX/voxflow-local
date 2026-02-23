@@ -178,14 +178,14 @@ final class SettingsCoordinatorTests: XCTestCase {
     @MainActor
     func testCurrentBackendLaunchConfigurationReflectsState() {
         let (sut, state, _) = makeSUT()
-        state.sttBackend = .voxtral
-        state.localVoxtralModel = "test-model"
+        state.sttBackend = .whisperKit
+        state.localWhisperModel = "test-whisper-model"
         state.translationProfile = .marianFallback
 
         let config = sut.currentBackendLaunchConfiguration()
 
-        XCTAssertEqual(config.sttBackend, "voxtral")
-        XCTAssertEqual(config.sttModel, "test-model")
+        XCTAssertEqual(config.sttBackend, "whisperKit")
+        XCTAssertEqual(config.sttModel, "test-whisper-model")
         XCTAssertEqual(config.translateModel, TranslationProfile.marianFallback.modelID)
         XCTAssertEqual(config.translateBackend, "marian")
     }
