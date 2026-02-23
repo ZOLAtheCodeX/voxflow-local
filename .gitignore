@@ -14,3 +14,4 @@ __pycache__/
 backend/tests/reports/
 backend/tests/fixtures/golden_clips/*.tmp.aiff
 backend/tests/fixtures/golden_clips/*.aiff
+.worktrees/
