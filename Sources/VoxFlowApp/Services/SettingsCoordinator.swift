@@ -11,6 +11,7 @@ import os.log
     func selectTranslationProfile(_ profile: TranslationProfile)
     func setTranslationModeEnabled(_ isEnabled: Bool)
     func setMeetingModeEnabled(_ isEnabled: Bool)
+    func setPromptModeEnabled(_ isEnabled: Bool)
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset)
     func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset)
     func selectInsertBehavior(_ behavior: InsertBehavior)
@@ -30,6 +31,7 @@ final class SettingsCoordinator: SettingsCoordinating {
     private let translationProfileKey = "voxflow.translation.profile"
     private let translationModeEnabledKey = "voxflow.translation.modeEnabled"
     private let meetingModeEnabledKey = "voxflow.meeting.modeEnabled"
+    private let promptModeEnabledKey = "voxflow.prompt.modeEnabled"
     private let dictationHotkeyPresetKey = "voxflow.hotkey.dictationPreset"
     private let commandLaneHotkeyPresetKey = "voxflow.hotkey.commandLanePreset"
     private let sttBackendKey = "voxflow.stt.backend"
@@ -105,6 +107,7 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.openAITTSVoice = defaults.string(forKey: openAITTSVoiceKey) ?? "alloy"
         state.translationModeEnabled = defaults.bool(forKey: translationModeEnabledKey)
         state.meetingModeEnabled = defaults.bool(forKey: meetingModeEnabledKey)
+        state.promptModeEnabled = defaults.bool(forKey: promptModeEnabledKey)
         if let dictationHotkeyRaw = defaults.string(forKey: dictationHotkeyPresetKey),
            let preset = DictationHotkeyPreset(rawValue: dictationHotkeyRaw) {
             state.dictationHotkeyPreset = preset
@@ -276,6 +279,19 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.statusLine = isEnabled
             ? "Meeting experimental mode enabled"
             : "Meeting experimental mode disabled"
+    }
+
+    func setPromptModeEnabled(_ isEnabled: Bool) {
+        state.promptModeEnabled = isEnabled
+        UserDefaults.standard.set(isEnabled, forKey: promptModeEnabledKey)
+
+        if !isEnabled, state.workflowMode == .prompt {
+            state.workflowMode = .dictation
+        }
+
+        state.statusLine = isEnabled
+            ? "Prompt experimental mode enabled"
+            : "Prompt experimental mode disabled"
     }
 
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {

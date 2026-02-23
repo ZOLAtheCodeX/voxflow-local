@@ -25,6 +25,10 @@ final class CommandParserTests: XCTestCase {
         XCTAssertEqual(CommandParser.parse(from: "normal mode"), .switchToDictation)
     }
 
+    func testPromptMode() {
+        XCTAssertEqual(CommandParser.parse(from: "prompt mode"), .switchToPromptMode)
+    }
+
     func testLocalMode() {
         XCTAssertEqual(CommandParser.parse(from: "local mode"), .switchToLocalProvider)
     }

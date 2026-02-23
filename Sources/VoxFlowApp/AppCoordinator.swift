@@ -876,6 +876,8 @@ final class AppCoordinator: ObservableObject {
             selectWorkflowMode(.translateEnToDe)
         case .switchToMeeting:
             selectWorkflowMode(.meeting)
+        case .switchToPromptMode:
+            selectWorkflowMode(.prompt)
         case .switchToLocalProvider:
             selectProviderMode(.localOnly)
         case .switchToPrivateProvider:

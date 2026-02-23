@@ -15,6 +15,7 @@ enum CommandIntent: Equatable {
     case retry
     case undo
     case runBenchmark
+    case switchToPromptMode
 }
 
 enum CommandParser {
@@ -30,6 +31,7 @@ enum CommandParser {
             (["translate", "mode"], .switchToTranslate),
             (["translation", "mode"], .switchToTranslate),
             (["dictation", "mode"], .switchToDictation),
+            (["prompt", "mode"], .switchToPromptMode),
             (["normal", "mode"], .switchToDictation),
             (["local", "mode"], .switchToLocalProvider),
             (["local", "provider"], .switchToLocalProvider),
