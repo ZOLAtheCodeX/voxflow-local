@@ -1,8 +1,18 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-23 (session 3)
+## Last Updated: 2026-02-23 (session 4)
 
 ## Branch: master
+
+## Next Session: Prompt Mode Implementation
+- Design doc approved: `docs/plans/2026-02-23-prompt-mode-design.md` (committed)
+- Implementation plan ready: `docs/plans/2026-02-23-prompt-mode-implementation.md` (committed)
+- 10 TDD tasks covering: domain types, intent detection, framing templates, command parser,
+  AppCoordinator wiring, SettingsView toggle, Python backend, BackendAPIClient, Python tests, docs
+- Execution approach not yet chosen — pick between:
+  1. Subagent-Driven (same session) — fresh subagent per task + two-stage review
+  2. Parallel Session (separate) — executing-plans skill, batch execution with checkpoints
+- Requires worktree setup before starting (use `superpowers:using-git-worktrees`)
 
 ## Completed
 - P1: WhisperKit native STT integration (7 commits: 9b8c370..22da0c0)
@@ -38,7 +48,7 @@
 
 ## Remaining
 - Cleanup: Add Globe/Fn + Cmd dictation hotkey preset (currently only fnOnly, Ctrl+Opt+Space, etc.)
-- Research: Prompt Mode — dictation → structured AI prompt output (brainstorm before building)
+- Prompt Mode — design complete, implementation plan written, ready to execute
 - P6: Voice commands, confidence scoring, streaming
 - P7: App publishing (notarization, DMG, distribution)
 
