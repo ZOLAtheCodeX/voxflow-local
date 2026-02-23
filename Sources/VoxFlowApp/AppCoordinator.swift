@@ -366,6 +366,8 @@ final class AppCoordinator: ObservableObject {
                 try await processMeeting(sessionID: sessionID, rawText: rawText)
             case .dictation:
                 try await processDictation(sessionID: sessionID, rawText: rawText)
+            case .prompt:
+                try await processDictation(sessionID: sessionID, rawText: rawText) // TODO: Task 5 — replace with processPrompt
             }
         } catch {
             log.error("Transcription failed: \(error.localizedDescription)")
@@ -524,6 +526,8 @@ final class AppCoordinator: ObservableObject {
             state.statusLine = "Translate mode active (EN→DE)"
         case .meeting:
             state.statusLine = "Meeting mode active"
+        case .prompt:
+            state.statusLine = "Prompt mode active"
         }
     }
 

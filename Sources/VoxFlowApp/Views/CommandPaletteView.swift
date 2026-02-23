@@ -213,6 +213,8 @@ struct CommandPaletteView: View {
                     meetingReview
                 case .dictation:
                     dictationReview
+                case .prompt:
+                    dictationReview // TODO: Task 5 — prompt-specific review if needed
                 }
             }
 
