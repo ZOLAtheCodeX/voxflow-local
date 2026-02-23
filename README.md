@@ -12,6 +12,7 @@ Mac-native, local-only dictation app inspired by WhisperFlow workflows, using Vo
 - Target-aware activation (focused text field / active cursor)
 - Cleanup mode chips (`Raw`, `Light`, `Polish`)
 - Tone/style controls (`Neutral`, `Concise`, `Formal`, `Friendly`)
+- Per-app profiles (tone + cleanup mode + insert behavior per target app bundleID)
 - Accessibility insertion with paste fallback
 - Session-only in-memory history
 - Local backend API (`FastAPI`) with:
