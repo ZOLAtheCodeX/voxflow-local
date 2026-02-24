@@ -58,9 +58,6 @@ final class AppCoordinator: ObservableObject {
         backendManager.startIfNeededAsync(configuration: settingsCoordinator.currentBackendLaunchConfiguration())
         startFocusMonitoring()
         beginWarmupMonitoring()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.showMainWindow()
-        }
         state.$sessionState
             .removeDuplicates()
             .sink { [weak self] newState in
@@ -72,7 +69,21 @@ final class AppCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
-        setupMenuBarPanel()
+        // Defer panel setup until after the app lifecycle settles.
+        // WindowGroup auto-opens a window which triggers activateForWindow() →
+        // setActivationPolicy(.regular). Creating the status item before that
+        // would cause macOS to tear down its menu bar slot during the policy change.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didFinishLaunchingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                guard let self, self.menuBarPanel == nil else { return }
+                self.setupMenuBarPanel()
+                self.log.info("Menu bar panel setup (deferred)")
+            }
+        }
     }
 
     func warmup() async {
@@ -122,7 +133,6 @@ final class AppCoordinator: ObservableObject {
     }
 
     func appDidBecomeActive() {
-        showMainWindowIfNeeded()
         configureHotkeysIfNeeded()
         if !state.backendReadyForDictation {
             beginWarmupMonitoring()
@@ -1063,6 +1073,9 @@ final class AppCoordinator: ObservableObject {
         }
         if !hasManagedWindows {
             NSApp.setActivationPolicy(.accessory)
+            // Re-register status item — the .regular -> .accessory round-trip
+            // may have invalidated its menu bar slot.
+            menuBarPanel?.refreshStatusItem()
             if let observer = windowCloseObserver {
                 NotificationCenter.default.removeObserver(observer)
                 windowCloseObserver = nil
