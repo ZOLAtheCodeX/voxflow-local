@@ -1,6 +1,6 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-23 (session 8)
+## Last Updated: 2026-02-23 (session 9)
 
 ## Branch: master
 
@@ -70,8 +70,22 @@
     activateForWindow() → setActivationPolicy(.regular) lifecycle
 
 ## Remaining
+- Menu bar icon visibility (partial fix — see Known Issues below)
 - P6: Voice commands, streaming
 - P7: App publishing (notarization, DMG, distribution)
+
+## Known Issues
+- Menu bar icon: NSStatusItem is created and registered (confirmed via accessibility API
+  at position 816,2, size 32x24), but only VISUALLY appears while dictation is active
+  (holding hotkey). Disappears when idle. Possible causes to investigate next session:
+  1. macOS may be auto-hiding the status item (overflow/priority behavior on Sonoma+)
+  2. The icon image may render as transparent at idle (mic.fill SF Symbol rendering issue)
+  3. The WindowGroup's auto-created window (900x732 at 372,108) may interact with
+     status item visibility despite being in .accessory policy mode
+  4. The Combine subscription in setupMenuBarPanel() that calls updateIcon() on every
+     sessionState change may be inadvertently clearing the image when returning to .idle
+  NOTE: Dictation, hotkeys, text insertion, and review panel all work correctly.
+  Do NOT change working code — investigate icon visibility in isolation.
 
 ## Test Status
 - 219 Swift tests passing, 0 failures
@@ -79,4 +93,4 @@
 - Total: 344 tests
 
 ## Blockers
-- None
+- None (icon is cosmetic — core dictation pipeline fully functional)
