@@ -61,6 +61,13 @@
   - Panel now auto-opens when entering .review state (was only toggle-on-click before)
   - Root cause: insertBehavior persisted as .alwaysReview in UserDefaults survived reinstalls,
     text went to review state but panel never auto-opened → silent failure
+- Menu bar icon fix — activation policy resilience (3 commits: 31e1634..4ecff58)
+  - Refactor: Extract configureStatusItemButton() helper, make statusItem mutable (31e1634)
+  - Feat: Add refreshStatusItem() to re-register after policy transitions (5e8abd5)
+  - Fix: Defer panel setup to after app lifecycle, refresh after policy revert,
+    stop auto-opening main window on launch (4ecff58)
+  - Root cause: NSStatusItem created in init() was destroyed by WindowGroup →
+    activateForWindow() → setActivationPolicy(.regular) lifecycle
 
 ## Remaining
 - P6: Voice commands, streaming
