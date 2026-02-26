@@ -75,8 +75,8 @@ def test_transcribe_no_pipeline():
     # Ensure pipeline load fails
     sys.modules["transformers"].pipeline.side_effect = Exception("Fail")
 
-    # Action
-    text, conf = engine.transcribe(b"audio", 16000, "en")
+    # Action — must be even-length bytes (int16 = 2 bytes per sample)
+    text, conf = engine.transcribe(bytes(32), 16000, "en")
 
     # Assert
     assert "[transcription unavailable" in text
@@ -94,8 +94,8 @@ def test_transcribe_success():
     # When _load_pipeline calls pipeline(), it should return our instance
     sys.modules["transformers"].pipeline.return_value = mock_pipeline_instance
 
-    # Action
-    text, conf = engine.transcribe(b"audio", 16000, "en")
+    # Action — must be even-length bytes (int16 = 2 bytes per sample)
+    text, conf = engine.transcribe(bytes(32), 16000, "en")
 
     # Assert
     assert text == "Hello world"
