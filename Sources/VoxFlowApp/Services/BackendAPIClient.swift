@@ -80,7 +80,10 @@ enum BackendAPIClient {
            let url = URL(string: override) {
             return url
         }
-        return URL(string: "http://127.0.0.1:8765")!
+        guard let url = URL(string: "http://127.0.0.1:8765") else {
+            fatalError("Failed to create default backend URL")
+        }
+        return url
     }()
 
     private static let session: URLSession = {
