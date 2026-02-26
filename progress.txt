@@ -1,6 +1,6 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-25 (session 10)
+## Last Updated: 2026-02-26 (session 11)
 
 ## Branch: master
 
@@ -68,6 +68,17 @@
     stop auto-opening main window on launch (4ecff58)
   - Root cause: NSStatusItem created in init() was destroyed by WindowGroup →
     activateForWindow() → setActivationPolicy(.regular) lifecycle
+- Session 11: GitHub PR sync — merged and pulled 13 AI-generated PRs (a56c97c..d6910f7)
+  - Tests (6 PRs): SessionMemoryStore, TextSimilarityService, TranslateEngine,
+    PolishEngine guardrail, PrivateAPIClient error handling, WhisperEngine init failure
+  - Fixes (2 PRs): Silent exception swallowing in server.py, PII redaction in hallucination logs
+  - Refactors (3 PRs): TextCleanupRules model extraction, BackendAPIClient force-unwrap,
+    BackendAPIClient deduplication (generic performRequest/performGetRequest helpers)
+  - Core changes (2 PRs): finishCaptureAndTranscribe decomposed into 5 private methods,
+    AudioCaptureService OSAllocatedUnfairLock + PCM conversion off main actor, rate limiter cleanup
+  - Fix: WhisperEngine test used b"audio" (5 bytes, not int16-aligned) → bytes(32) (a56c97c)
+  - Fix: Regression clips replaced sine waves with macOS TTS (Samantha, LEI16@16000) (d6910f7)
+    "Thank you." avoided for calibration — exact match in _WHISPER_HALLUCINATION_SHORT_ONLY
 
 ## Remaining
 - Menu bar icon visibility (partial fix — see Known Issues below)
@@ -88,9 +99,10 @@
   Do NOT change working code — investigate icon visibility in isolation.
 
 ## Test Status
-- 219 Swift tests passing, 0 failures
-- 125 Python tests passing, 0 failures
-- Total: 344 tests
+- 234 Swift tests passing, 0 failures
+- 144 Python tests passing, 0 failures
+- Regression suite: 10/10 passed (TTS clips, Whisper backend)
+- Total: 388 tests
 
 ## Blockers
 - None (icon is cosmetic — core dictation pipeline fully functional)
