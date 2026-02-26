@@ -691,7 +691,8 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
     try:
         parsed = json.loads(stripped[start : end + 1])
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to parse JSON object: %s", exc)
         return {}
 
     return parsed if isinstance(parsed, dict) else {}
@@ -1147,7 +1148,8 @@ def coerce_speaker_segments(value: Any, transcript: str) -> list[dict[str, Any]]
             continue
         try:
             utterance_count = max(1, int(entry.get("utterance_count", 1)))
-        except Exception:
+        except Exception as exc:
+            logger.error("Failed to coerce utterance_count: %s", exc)
             utterance_count = 1
         rows.append({"speaker": speaker, "text": text, "utterance_count": utterance_count})
 
@@ -1168,7 +1170,8 @@ def coerce_task_owners(value: Any, action_items: list[str], transcript: str) -> 
             continue
         try:
             confidence = float(entry.get("confidence", 0.5))
-        except Exception:
+        except Exception as exc:
+            logger.error("Failed to coerce confidence: %s", exc)
             confidence = 0.5
         confidence = max(0.0, min(1.0, confidence))
         rows.append({"task": task, "owner": owner or "Unassigned", "confidence": round(confidence, 2)})
