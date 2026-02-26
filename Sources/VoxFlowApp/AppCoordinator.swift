@@ -306,7 +306,30 @@ final class AppCoordinator: ObservableObject {
             log.warning("finishCapture blocked: sessionState=\(String(describing: blockedState)), expected .recording")
             return
         }
+
         defer { state.isCommandLaneActive = false }
+        prepareForTranscription(commandLane: commandLane)
+
+        do {
+            guard let capturedAudio = try stopAndValidateAudio() else { return }
+
+            let sessionID = "session-\(sessionCounter)"
+            let transcription = try await transcribeAudio(capturedAudio, sessionID: sessionID)
+
+            recordCaptureMetrics(
+                latencyMs: transcription.latencyMs,
+                commandLane: commandLane,
+                onboardingCalibration: state.onboardingPhase == .calibrating
+            )
+
+            try await handleTranscriptionResult(transcription, sessionID: sessionID, commandLane: commandLane)
+
+        } catch {
+            handleCaptureError(error)
+        }
+    }
+
+    private func prepareForTranscription(commandLane: Bool) {
         if !commandLane {
             fnTriggeredCaptureInProgress = false
             cueSoundService.playStopCue()
@@ -317,78 +340,81 @@ final class AppCoordinator: ObservableObject {
         captureTimeoutTimer = nil
         state.sessionState = .transcribing
         state.statusLine = commandLane ? "Interpreting command..." : "Transcribing..."
+    }
 
-        do {
-            let capturedAudio = try audioCapture.stopCapture()
+    private func stopAndValidateAudio() throws -> CapturedAudio? {
+        let capturedAudio = try audioCapture.stopCapture()
+        // Guard: discard very short captures (< 0.3s) that cause Whisper hallucination
+        let minBytes = Int(capturedAudio.sampleRate * 0.3) * MemoryLayout<Int16>.size
 
-            // Guard: discard very short captures (< 0.3s) that cause Whisper hallucination
-            let minBytes = Int(capturedAudio.sampleRate * 0.3) * MemoryLayout<Int16>.size
-            if capturedAudio.pcm.count < minBytes {
-                log.info("Audio too short (\(capturedAudio.pcm.count) bytes, need \(minBytes)) — discarding")
-                state.sessionState = .idle
-                state.statusLine = "Too short — hold longer to dictate"
-                state.recordingDuration = 0
-                return
-            }
-
-            let sessionID = "session-\(sessionCounter)"
-            let transcription: TranscribeResponse
-            if state.sttBackend == .whisperKit {
-                transcription = try await whisperKitService.transcribe(capturedAudio)
-            } else {
-                transcription = try await BackendAPIClient.transcribe(
-                    sessionID: sessionID,
-                    audioPCM: capturedAudio.pcm,
-                    sampleRate: Int(capturedAudio.sampleRate),
-                    chunkIndex: 0,
-                    languageHint: "en"
-                )
-            }
-            let isCalibrationCapture = state.onboardingPhase == .calibrating
-            recordCaptureMetrics(
-                latencyMs: transcription.latencyMs,
-                commandLane: commandLane,
-                onboardingCalibration: isCalibrationCapture
-            )
-
-            let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            lastTranscriptionConfidence = transcription.confidenceEstimate
-            log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
-
-            if rawText.isEmpty || rawText.hasPrefix("[transcription") {
-                log.info("Empty or placeholder transcription — discarding")
-                state.sessionState = .idle
-                state.statusLine = rawText.isEmpty ? "No speech detected — try again" : rawText
-                state.recordingDuration = 0
-                return
-            }
-
-            if state.onboardingPhase == .calibrating {
-                onboarding.handleCalibrationResult(rawText: rawText)
-                return
-            }
-
-            if commandLane {
-                executeCommandLane(rawText: rawText)
-                return
-            }
-
-            switch state.workflowMode {
-            case .translateEnToDe:
-                try await processTranslation(sessionID: sessionID, rawText: rawText)
-            case .meeting:
-                try await processMeeting(sessionID: sessionID, rawText: rawText)
-            case .dictation:
-                try await processDictation(sessionID: sessionID, rawText: rawText)
-            case .prompt:
-                try await processPrompt(sessionID: sessionID, rawText: rawText)
-            }
-        } catch {
-            log.error("Transcription failed: \(error.localizedDescription)")
-            state.sessionState = .error
-            state.errorMessage = "Transcription failed: \(error.localizedDescription)"
-            state.statusLine = "Error. Retry capture."
+        if capturedAudio.pcm.count < minBytes {
+            log.info("Audio too short (\(capturedAudio.pcm.count) bytes, need \(minBytes)) — discarding")
+            state.sessionState = .idle
+            state.statusLine = "Too short — hold longer to dictate"
+            state.recordingDuration = 0
+            return nil
         }
+        return capturedAudio
+    }
+
+    private func transcribeAudio(_ capturedAudio: CapturedAudio, sessionID: String) async throws -> TranscribeResponse {
+        if state.sttBackend == .whisperKit {
+            return try await whisperKitService.transcribe(capturedAudio)
+        } else {
+            return try await BackendAPIClient.transcribe(
+                sessionID: sessionID,
+                audioPCM: capturedAudio.pcm,
+                sampleRate: Int(capturedAudio.sampleRate),
+                chunkIndex: 0,
+                languageHint: "en"
+            )
+        }
+    }
+
+    private func handleTranscriptionResult(_ transcription: TranscribeResponse, sessionID: String, commandLane: Bool) async throws {
+        let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastTranscriptionConfidence = transcription.confidenceEstimate
+        log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+
+        if rawText.isEmpty || rawText.hasPrefix("[transcription") {
+            log.info("Empty or placeholder transcription — discarding")
+            state.sessionState = .idle
+            state.statusLine = rawText.isEmpty ? "No speech detected — try again" : rawText
+            state.recordingDuration = 0
+            return
+        }
+
+        if state.onboardingPhase == .calibrating {
+            onboarding.handleCalibrationResult(rawText: rawText)
+            return
+        }
+
+        if commandLane {
+            executeCommandLane(rawText: rawText)
+            return
+        }
+
+        try await processWorkflow(sessionID: sessionID, rawText: rawText)
+    }
+
+    private func processWorkflow(sessionID: String, rawText: String) async throws {
+        switch state.workflowMode {
+        case .translateEnToDe:
+            try await processTranslation(sessionID: sessionID, rawText: rawText)
+        case .meeting:
+            try await processMeeting(sessionID: sessionID, rawText: rawText)
+        case .dictation:
+            try await processDictation(sessionID: sessionID, rawText: rawText)
+        case .prompt:
+            try await processPrompt(sessionID: sessionID, rawText: rawText)
+        }
+    }
+
+    private func handleCaptureError(_ error: Error) {
+        log.error("Transcription failed: \(error.localizedDescription)")
+        state.sessionState = .error
+        state.errorMessage = "Transcription failed: \(error.localizedDescription)"
+        state.statusLine = "Error. Retry capture."
     }
 
     func retryLastCapture() {
