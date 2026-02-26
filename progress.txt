@@ -1,6 +1,6 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-26 (session 11)
+## Last Updated: 2026-02-26 (session 11, continued)
 
 ## Branch: master
 
@@ -81,22 +81,19 @@
     "Thank you." avoided for calibration — exact match in _WHISPER_HALLUCINATION_SHORT_ONLY
 
 ## Remaining
-- Menu bar icon visibility (partial fix — see Known Issues below)
+- Menu bar icon visibility (fix applied — needs runtime verification, see Known Issues)
 - P6: Voice commands, streaming
 - P7: App publishing (notarization, DMG, distribution)
 
 ## Known Issues
-- Menu bar icon: NSStatusItem is created and registered (confirmed via accessibility API
-  at position 816,2, size 32x24), but only VISUALLY appears while dictation is active
-  (holding hotkey). Disappears when idle. Possible causes to investigate next session:
-  1. macOS may be auto-hiding the status item (overflow/priority behavior on Sonoma+)
-  2. The icon image may render as transparent at idle (mic.fill SF Symbol rendering issue)
-  3. The WindowGroup's auto-created window (900x732 at 372,108) may interact with
-     status item visibility despite being in .accessory policy mode
-  4. The Combine subscription in setupMenuBarPanel() that calls updateIcon() on every
-     sessionState change may be inadvertently clearing the image when returning to .idle
-  NOTE: Dictation, hotkeys, text insertion, and review panel all work correctly.
-  Do NOT change working code — investigate icon visibility in isolation.
+- Menu bar icon: fix applied in 9d26046 — NSImage(systemSymbolName:) without a
+  SymbolConfiguration has no font metric context in NSStatusBarButton, producing an
+  image that registers a non-zero frame but renders transparent. Added
+  SymbolConfiguration(scale: .medium) + explicit isTemplate = true via shared
+  menuBarImage(named:) helper in MenuBarPanelController.
+  NEEDS RUNTIME VERIFICATION — launch app at idle and confirm mic icon is visible.
+  If still invisible: next step is switching to NSStatusItem.squareLength to isolate
+  the variable-width sizing path.
 
 ## Test Status
 - 234 Swift tests passing, 0 failures
