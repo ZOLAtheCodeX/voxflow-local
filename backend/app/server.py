@@ -1578,17 +1578,37 @@ app.add_middleware(
 _rate_limit_timestamps: dict[str, list[float]] = defaultdict(list)
 _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX_REQUESTS = 120
+_LAST_CLEANUP_TIME = 0.0
+_CLEANUP_INTERVAL = 300.0  # 5 minutes
 
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    global _LAST_CLEANUP_TIME
     client = request.client.host if request.client else "unknown"
     now = time.time()
+
+    # Periodic cleanup of stale clients (every 5 minutes)
+    if now - _LAST_CLEANUP_TIME > _CLEANUP_INTERVAL:
+        stale_cutoff = now - _RATE_LIMIT_WINDOW
+        # Create a list of keys to remove to avoid modifying dict during iteration
+        stale_clients = [
+            ip for ip, timestamps in _rate_limit_timestamps.items()
+            if not timestamps or timestamps[-1] < stale_cutoff
+        ]
+        for ip in stale_clients:
+            _rate_limit_timestamps.pop(ip, None)
+        _LAST_CLEANUP_TIME = now
+
     timestamps = _rate_limit_timestamps[client]
-    _rate_limit_timestamps[client] = [ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW]
-    if len(_rate_limit_timestamps[client]) >= _RATE_LIMIT_MAX_REQUESTS:
+    # Filter only current client's timestamps
+    valid_timestamps = [ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW]
+    _rate_limit_timestamps[client] = valid_timestamps
+
+    if len(valid_timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
         return JSONResponse(status_code=429, content={"detail": "Rate limited"})
-    _rate_limit_timestamps[client].append(now)
+
+    valid_timestamps.append(now)
     return await call_next(request)
 state = RuntimeState()
 whisper_engine = WhisperEngine()

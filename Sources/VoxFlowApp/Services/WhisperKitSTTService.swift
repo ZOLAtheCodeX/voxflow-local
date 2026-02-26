@@ -38,7 +38,9 @@ final class WhisperKitSTTService {
         }
 
         let started = ContinuousClock.now
-        let floatSamples = Self.convertPCMInt16ToFloat(audio.pcm)
+        let floatSamples = await Task.detached {
+            Self.convertPCMInt16ToFloat(audio.pcm)
+        }.value
 
         let results: [TranscriptionResult] = try await pipe.transcribe(
             audioArray: floatSamples,
