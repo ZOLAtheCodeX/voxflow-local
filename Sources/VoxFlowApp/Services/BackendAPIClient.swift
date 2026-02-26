@@ -96,20 +96,36 @@ enum BackendAPIClient {
         return decoder
     }()
 
-    static func health() async throws -> [String: String] {
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/health"))
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return encoder
+    }()
+
+    private static func performRequest<Response: Decodable, Payload: Encodable>(path: String, payload: Payload) async throws -> Response {
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(payload)
+
+        let (data, _) = try await session.data(for: request)
+        return try decoder.decode(Response.self, from: data)
+    }
+
+    private static func performGetRequest<Response: Decodable>(path: String) async throws -> Response {
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = "GET"
 
         let (data, _) = try await session.data(for: request)
-        return try decoder.decode([String: String].self, from: data)
+        return try decoder.decode(Response.self, from: data)
+    }
+
+    static func health() async throws -> [String: String] {
+        return try await performGetRequest(path: "v1/health")
     }
 
     static func ready() async throws -> BackendReadinessResponse {
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/ready"))
-        request.httpMethod = "GET"
-
-        let (data, _) = try await session.data(for: request)
-        return try decoder.decode(BackendReadinessResponse.self, from: data)
+        return try await performGetRequest(path: "v1/ready")
     }
 
     static func transcribe(
@@ -120,28 +136,22 @@ enum BackendAPIClient {
         languageHint: String
     ) async throws -> TranscribeResponse {
         struct Payload: Codable {
-            let session_id: String
-            let audio_pcm16le: String
-            let sample_rate: Int
-            let language_hint: String
-            let chunk_index: Int
+            let sessionId: String
+            let audioPcm16le: String
+            let sampleRate: Int
+            let languageHint: String
+            let chunkIndex: Int
         }
 
         let payload = Payload(
-            session_id: sessionID,
-            audio_pcm16le: audioPCM.base64EncodedString(),
-            sample_rate: sampleRate,
-            language_hint: languageHint,
-            chunk_index: chunkIndex
+            sessionId: sessionID,
+            audioPcm16le: audioPCM.base64EncodedString(),
+            sampleRate: sampleRate,
+            languageHint: languageHint,
+            chunkIndex: chunkIndex
         )
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/transcribe"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, _) = try await session.data(for: request)
-        return try decoder.decode(TranscribeResponse.self, from: data)
+        return try await performRequest(path: "v1/transcribe", payload: payload)
     }
 
     static func cleanup(
@@ -154,32 +164,26 @@ enum BackendAPIClient {
         allowRaw: Bool = false
     ) async throws -> CleanupResponse {
         struct Payload: Codable {
-            let session_id: String
+            let sessionId: String
             let mode: String
-            let input_text: String
-            let tone_style: String
-            let provider_mode: String
-            let consent_token: String?
-            let allow_raw: Bool
+            let inputText: String
+            let toneStyle: String
+            let providerMode: String
+            let consentToken: String?
+            let allowRaw: Bool
         }
 
         let payload = Payload(
-            session_id: sessionID,
+            sessionId: sessionID,
             mode: mode.rawValue,
-            input_text: inputText,
-            tone_style: toneStyle.rawValue,
-            provider_mode: providerMode.rawValue,
-            consent_token: consentToken,
-            allow_raw: allowRaw
+            inputText: inputText,
+            toneStyle: toneStyle.rawValue,
+            providerMode: providerMode.rawValue,
+            consentToken: consentToken,
+            allowRaw: allowRaw
         )
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/cleanup"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, _) = try await session.data(for: request)
-        return try decoder.decode(CleanupResponse.self, from: data)
+        return try await performRequest(path: "v1/cleanup", payload: payload)
     }
 
     static func translate(
@@ -192,32 +196,26 @@ enum BackendAPIClient {
         allowRaw: Bool = false
     ) async throws -> TranslateResponse {
         struct Payload: Codable {
-            let session_id: String
-            let source_text: String
-            let source_language: String
-            let target_language: String
-            let provider_mode: String
-            let consent_token: String?
-            let allow_raw: Bool
+            let sessionId: String
+            let sourceText: String
+            let sourceLanguage: String
+            let targetLanguage: String
+            let providerMode: String
+            let consentToken: String?
+            let allowRaw: Bool
         }
 
         let payload = Payload(
-            session_id: sessionID,
-            source_text: sourceText,
-            source_language: sourceLanguage,
-            target_language: targetLanguage,
-            provider_mode: providerMode.rawValue,
-            consent_token: consentToken,
-            allow_raw: allowRaw
+            sessionId: sessionID,
+            sourceText: sourceText,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            providerMode: providerMode.rawValue,
+            consentToken: consentToken,
+            allowRaw: allowRaw
         )
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/translate"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, _) = try await session.data(for: request)
-        return try decoder.decode(TranslateResponse.self, from: data)
+        return try await performRequest(path: "v1/translate", payload: payload)
     }
 
     static func meetingSummarize(
@@ -229,30 +227,24 @@ enum BackendAPIClient {
         allowRaw: Bool = false
     ) async throws -> MeetingSummaryResponse {
         struct Payload: Codable {
-            let session_id: String
+            let sessionId: String
             let transcript: String
-            let tone_style: String
-            let provider_mode: String
-            let consent_token: String?
-            let allow_raw: Bool
+            let toneStyle: String
+            let providerMode: String
+            let consentToken: String?
+            let allowRaw: Bool
         }
 
         let payload = Payload(
-            session_id: sessionID,
+            sessionId: sessionID,
             transcript: transcript,
-            tone_style: toneStyle.rawValue,
-            provider_mode: providerMode.rawValue,
-            consent_token: consentToken,
-            allow_raw: allowRaw
+            toneStyle: toneStyle.rawValue,
+            providerMode: providerMode.rawValue,
+            consentToken: consentToken,
+            allowRaw: allowRaw
         )
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/meeting_summarize"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, _) = try await session.data(for: request)
-        return try decoder.decode(MeetingSummaryResponse.self, from: data)
+        return try await performRequest(path: "v1/meeting_summarize", payload: payload)
     }
 
     static func framePrompt(
@@ -261,24 +253,18 @@ enum BackendAPIClient {
         consentToken: String? = nil
     ) async throws -> PromptFrameResponse {
         struct Payload: Codable {
-            let session_id: String
+            let sessionId: String
             let text: String
-            let consent_token: String?
+            let consentToken: String?
         }
 
         let payload = Payload(
-            session_id: sessionID,
+            sessionId: sessionID,
             text: text,
-            consent_token: consentToken
+            consentToken: consentToken
         )
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/prompt/frame"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, _) = try await session.data(for: request)
-        return try decoder.decode(PromptFrameResponse.self, from: data)
+        return try await performRequest(path: "v1/prompt/frame", payload: payload)
     }
 
     static func privacyPreview(
@@ -287,23 +273,17 @@ enum BackendAPIClient {
         inputText: String
     ) async throws -> PrivacyPreviewResponse {
         struct Payload: Codable {
-            let session_id: String
+            let sessionId: String
             let operation: String
-            let input_text: String
+            let inputText: String
         }
 
         let payload = Payload(
-            session_id: sessionID,
+            sessionId: sessionID,
             operation: operation.rawValue,
-            input_text: inputText
+            inputText: inputText
         )
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/privacy/preview"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, _) = try await session.data(for: request)
-        return try decoder.decode(PrivacyPreviewResponse.self, from: data)
+        return try await performRequest(path: "v1/privacy/preview", payload: payload)
     }
 }
