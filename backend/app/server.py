@@ -1744,7 +1744,7 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
     is_short = audio_duration_s < 3.0
     if is_whisper_hallucination(text, short_audio=is_short):
-        logger.info("Filtered Whisper hallucination (%.1fs, short=%s): %r", audio_duration_s, is_short, text)
+        logger.info("Filtered Whisper hallucination (%.1fs, short=%s)", audio_duration_s, is_short)
         text = ""
         confidence = 0.0
 
