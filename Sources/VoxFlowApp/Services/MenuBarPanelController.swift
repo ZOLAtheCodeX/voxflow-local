@@ -21,6 +21,12 @@ final class MenuBarPanelController {
     private var cancellables = Set<AnyCancellable>()
     private var currentIconName: String
 
+    // Explicit symbol configuration for menu bar icons.
+    // NSImage(systemSymbolName:) without a configuration has no font metric
+    // context in NSStatusBarButton, producing an image that registers a frame
+    // but renders transparent. A fixed scale forces deterministic rendering.
+    private static let symbolConfig = NSImage.SymbolConfiguration(scale: .medium)
+
     var isOpen: Bool { panel.isVisible }
 
     init<Content: View>(content: Content, iconName: String = "mic.fill") {
@@ -58,7 +64,7 @@ final class MenuBarPanelController {
 
     private func configureStatusItemButton(iconName: String) {
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "VoxFlow")
+            button.image = menuBarImage(named: iconName)
             button.target = self
             button.action = #selector(statusItemClicked(_:))
         }
@@ -66,10 +72,14 @@ final class MenuBarPanelController {
 
     func updateIcon(systemName: String) {
         currentIconName = systemName
-        statusItem.button?.image = NSImage(
-            systemSymbolName: systemName,
-            accessibilityDescription: "VoxFlow"
-        )
+        statusItem.button?.image = menuBarImage(named: systemName)
+    }
+
+    private func menuBarImage(named symbolName: String) -> NSImage? {
+        guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "VoxFlow")?
+            .withSymbolConfiguration(Self.symbolConfig) else { return nil }
+        image.isTemplate = true
+        return image
     }
 
     /// Re-register the status item with NSStatusBar after an activation policy change.
