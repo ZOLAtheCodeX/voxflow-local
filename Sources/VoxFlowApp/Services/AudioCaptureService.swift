@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
+import os
 
 struct CapturedAudio {
     let pcm: Data
@@ -17,22 +18,24 @@ final class AudioCaptureService {
     static let targetSampleRate: Double = 16_000
 
     private let engine = AVAudioEngine()
-    private let bufferLock = NSLock()
-    private var pcmBuffer = Data()
+
+    private struct State: Sendable {
+        var pcmBuffer = Data()
+        var bufferLimitReached = false
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
     private var isCapturing = false
-    private var _bufferLimitReached = false
 
     var bufferLimitReached: Bool {
-        bufferLock.lock()
-        defer { bufferLock.unlock() }
-        return _bufferLimitReached
+        state.withLock { $0.bufferLimitReached }
     }
 
     func startCapture() throws {
-        bufferLock.lock()
-        pcmBuffer.removeAll(keepingCapacity: true)
-        _bufferLimitReached = false
-        bufferLock.unlock()
+        state.withLock {
+            $0.pcmBuffer.removeAll(keepingCapacity: true)
+            $0.bufferLimitReached = false
+        }
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -93,14 +96,13 @@ final class AudioCaptureService {
 
             let chunk = Data(bytes: int16Samples, count: int16Samples.count * MemoryLayout<Int16>.size)
 
-            self.bufferLock.lock()
-            guard self.pcmBuffer.count < AudioCaptureService.maxBufferBytes else {
-                self._bufferLimitReached = true
-                self.bufferLock.unlock()
-                return
+            self.state.withLock { state in
+                guard state.pcmBuffer.count < AudioCaptureService.maxBufferBytes else {
+                    state.bufferLimitReached = true
+                    return
+                }
+                state.pcmBuffer.append(chunk)
             }
-            self.pcmBuffer.append(chunk)
-            self.bufferLock.unlock()
         }
 
         engine.prepare()
@@ -115,9 +117,7 @@ final class AudioCaptureService {
         engine.stop()
         isCapturing = false
 
-        bufferLock.lock()
-        let captured = pcmBuffer
-        bufferLock.unlock()
+        let captured = state.withLock { $0.pcmBuffer }
 
         return CapturedAudio(pcm: captured, sampleRate: Self.targetSampleRate)
     }
