@@ -384,7 +384,11 @@ final class AppCoordinator: ObservableObject {
     private func handleTranscriptionResult(_ transcription: TranscribeResponse, sessionID: String, commandLane: Bool) async throws {
         let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         lastTranscriptionConfidence = transcription.confidenceEstimate
+        #if DEBUG
         log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        #else
+        log.info("Transcription: \(rawText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        #endif
 
         if rawText.isEmpty || rawText.hasPrefix("[transcription") {
             log.info("Empty or placeholder transcription — discarding")
@@ -605,7 +609,12 @@ final class AppCoordinator: ObservableObject {
         configureHotkeys(force: true)
     }
     func selectTranslationProfile(_ profile: TranslationProfile) { settings.selectTranslationProfile(profile) }
-    func selectSTTBackend(_ backend: STTBackend) { settings.selectSTTBackend(backend) }
+    func selectSTTBackend(_ backend: STTBackend) {
+        settings.selectSTTBackend(backend)
+        if backend == .whisperKit && !whisperKitService.isLoaded {
+            Task { await loadWhisperKitModel() }
+        }
+    }
     func updateLocalWhisperModel(whisperModel: String) { settings.updateLocalWhisperModel(whisperModel: whisperModel) }
     func selectProviderMode(_ mode: ProviderMode) {
         if mode == .localOnly {

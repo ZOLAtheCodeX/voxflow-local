@@ -820,6 +820,8 @@ class ConsentStore:
                 return None
             if record.session_id != session_id or record.operation != operation:
                 return None
+            # Single-use: consume the token on successful resolution
+            self._records.pop(token, None)
             return record
 
     def _prune_locked(self) -> None:

@@ -24,17 +24,14 @@ if [[ ! -x "${APP_BIN}" ]]; then
 fi
 
 mkdir -p "${RUNTIME_DIR}"
-if ! nohup "${APP_BIN}" >"${APP_LOG}" 2>&1 & then
-  echo "[voxflow] direct launch failed"
-  echo "  try running executable manually in a normal macOS terminal:"
-  echo "  ${APP_BIN}"
-  exit 1
-fi
+nohup "${APP_BIN}" >"${APP_LOG}" 2>&1 &
 APP_PID=$!
 sleep 1
 if ! kill -0 "${APP_PID}" >/dev/null 2>&1; then
   echo "[voxflow] direct launch failed (process exited immediately)"
   echo "  check log: ${APP_LOG}"
+  echo "  try running executable manually in a normal macOS terminal:"
+  echo "  ${APP_BIN}"
   exit 1
 fi
 
