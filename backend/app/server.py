@@ -27,6 +27,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from text_cleanup_rules import (
+    ALWAYS_FILLERS,
+    CASUAL_INTERJECTIONS,
+    CONTRACTIONS,
+    HEDGING_PHRASES,
+    PHRASE_FILLERS,
+    SOFTENERS,
+    SPOKEN_PUNCTUATION,
+)
+
 logger = logging.getLogger("voxflow")
 logging.basicConfig(
     level=logging.INFO,
@@ -1018,36 +1028,120 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# ── Text cleanup helpers (parity with Swift TextCleanupService) ─────
+
+
+def replace_spoken_punctuation(text: str) -> str:
+    """Convert spoken punctuation words to actual punctuation characters."""
+    result = text
+    for pattern, replacement in SPOKEN_PUNCTUATION:
+        result = pattern.sub(replacement, result)
+    return result
+
+
+def remove_repeated_words(text: str) -> str:
+    """Remove adjacent duplicate words (case-insensitive)."""
+    words = text.split()
+    if len(words) <= 1:
+        return text
+    result = [words[0]]
+    for word in words[1:]:
+        if word.lower() != result[-1].lower():
+            result.append(word)
+    return " ".join(result)
+
+
+def remove_fillers(text: str) -> str:
+    """Remove filler words and phrases.
+
+    Phase 0: Multi-word phrase fillers (regex).
+    Phase 1: Single-word always-fillers (set membership).
+    No Phase 2 (POS-aware ambiguous fillers) — accepted gap vs Swift.
+    """
+    result = text
+    # Phase 0: phrase fillers
+    for pattern, replacement in PHRASE_FILLERS:
+        result = pattern.sub(replacement, result)
+    result = normalize_whitespace(result)
+    # Phase 1: always-fillers
+    words = result.split()
+    words = [w for w in words if w.lower() not in ALWAYS_FILLERS]
+    return " ".join(words)
+
+
+def split_and_recase(text: str) -> str:
+    """Split on sentence-ending punctuation and uppercase first char of each."""
+    segments = re.split(r"(?<=[.!?])\s+", text)
+    recased = []
+    for seg in segments:
+        seg = seg.strip()
+        if seg:
+            seg = seg[0].upper() + seg[1:]
+        recased.append(seg)
+    return " ".join(recased)
+
+
+# ── Tone helpers ────────────────────────────────────────────────────
+
+
+def _apply_concise_tone(text: str) -> str:
+    result = text
+    for pattern, replacement in HEDGING_PHRASES + SOFTENERS:
+        result = pattern.sub(replacement, result)
+    return normalize_whitespace(result)
+
+
+def _apply_formal_tone(text: str) -> str:
+    result = text
+    for pattern, replacement in CONTRACTIONS + CASUAL_INTERJECTIONS:
+        result = pattern.sub(replacement, result)
+    result = normalize_whitespace(result)
+    if result and result[-1] not in ".!?":
+        result += "."
+    return result
+
+
+def _apply_friendly_tone(text: str) -> str:
+    if text and text[-1] not in ".!?":
+        return text + "!"
+    return text
+
+
 def apply_tone(text: str, tone: str) -> str:
+    """Apply tone transform. Dispatches to private helpers."""
     normalized = normalize_whitespace(text)
-
-    if tone == "neutral":
-        return normalized
     if tone == "concise":
-        return re.sub(r"\b(please|just|really|very)\b", "", normalized, flags=re.IGNORECASE).strip()
+        return _apply_concise_tone(normalized)
     if tone == "formal":
-        if normalized and normalized[-1] not in ".!?":
-            normalized += "."
-        return normalized[0:1].upper() + normalized[1:]
+        return _apply_formal_tone(normalized)
     if tone == "friendly":
-        if normalized and normalized[-1] not in ".!?":
-            normalized += "!"
-        return normalized
-
+        return _apply_friendly_tone(normalized)
+    # neutral or unknown → no transform
     return normalized
 
 
 def light_cleanup(text: str) -> str:
+    """6-step cleanup pipeline mirroring Swift TextCleanupService.cleanup(.light)."""
+    # Step 1: normalize whitespace
     cleaned = normalize_whitespace(text)
-    cleaned = re.sub(r"\b(um+|uh+|er+|ah+)\b", "", cleaned, flags=re.IGNORECASE)
+    if not cleaned:
+        return ""
+    # Step 2: spoken punctuation → actual characters
+    cleaned = replace_spoken_punctuation(cleaned)
+    # Step 3: repeated word dedup
+    cleaned = remove_repeated_words(cleaned)
+    # Step 4: sentence split + recase
+    cleaned = split_and_recase(cleaned)
+    # Step 5: filler removal
+    cleaned = remove_fillers(cleaned)
+    # Step 6: final normalization + trailing punctuation + capitalize
     cleaned = normalize_whitespace(cleaned)
-
-    if cleaned and cleaned[0].islower():
-        cleaned = cleaned[0].upper() + cleaned[1:]
-
-    if cleaned and cleaned[-1] not in ".!?":
+    if not cleaned:
+        return ""
+    if cleaned[-1] not in ".!?":
         cleaned += "."
-
+    if cleaned[0].islower():
+        cleaned = cleaned[0].upper() + cleaned[1:]
     return cleaned
 
 

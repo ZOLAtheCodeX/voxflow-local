@@ -80,14 +80,33 @@ class TestApplyTone:
 
     def test_concise_removes_filler_words(self):
         result = apply_tone("please just do this really quickly", "concise")
-        assert "please" not in result.lower()
-        assert "just" not in result.lower()
-        assert "really" not in result.lower()
+        assert "just" not in result.lower().split()
+        assert "really" not in result.lower().split()
 
-    def test_formal_capitalizes_and_adds_period(self):
+    def test_concise_removes_hedging(self):
+        result = apply_tone("I think maybe we should proceed.", "concise")
+        assert "I think maybe" not in result
+
+    def test_concise_removes_quite(self):
+        result = apply_tone("It was quite good.", "concise")
+        assert "quite" not in result.lower().split()
+
+    def test_formal_adds_period(self):
         result = apply_tone("hello world", "formal")
-        assert result[0] == "H"
         assert result.endswith(".")
+
+    def test_formal_expands_contractions(self):
+        result = apply_tone("I don't think so.", "formal")
+        assert "do not" in result
+
+    def test_formal_removes_casual_interjections(self):
+        result = apply_tone("Okay so the plan works.", "formal")
+        assert "okay so" not in result.lower()
+
+    def test_formal_yeah_to_yes(self):
+        result = apply_tone("Yeah that works.", "formal")
+        assert "yeah" not in result.lower()
+        assert "yes" in result.lower()
 
     def test_formal_preserves_existing_punctuation(self):
         result = apply_tone("Hello world!", "formal")
@@ -121,6 +140,23 @@ class TestLightCleanup:
     def test_preserves_existing_punctuation(self):
         result = light_cleanup("Hello world!")
         assert result.endswith("!")
+
+    def test_spoken_punctuation(self):
+        result = light_cleanup("hello world period")
+        assert result == "Hello world."
+
+    def test_repeated_words(self):
+        result = light_cleanup("I want to to go")
+        assert "to to" not in result
+        assert "want to go" in result
+
+    def test_phrase_fillers(self):
+        result = light_cleanup("it was you know really good")
+        assert "you know" not in result
+
+    def test_hmm_removal(self):
+        result = light_cleanup("hmm let me think")
+        assert "hmm" not in result.lower().split()
 
 
 # ── normalize_provider_mode ───────────────────────────────────────────
