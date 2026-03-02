@@ -65,7 +65,7 @@ SOFTENERS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 # ── Tone: formal ────────────────────────────────────────────────────
-# Swift has 71 entries (paired for ' and \u2019). We consolidate to 35
+# Swift has 70 entries (35 pairs for ' and \u2019). We consolidate to 35
 # using [\u2019'] character class — same match behavior, half the entries.
 
 CONTRACTIONS: list[tuple[re.Pattern[str], str]] = [
@@ -84,10 +84,10 @@ CONTRACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bhadn[\u2019']t\b", re.IGNORECASE), "had not"),
     (re.compile(r"\bdoesn[\u2019']t\b", re.IGNORECASE), "does not"),
     (re.compile(r"\bdidn[\u2019']t\b", re.IGNORECASE), "did not"),
-    (re.compile(r"\bI[\u2019']m\b"), "I am"),
-    (re.compile(r"\bI[\u2019']ve\b"), "I have"),
-    (re.compile(r"\bI[\u2019']ll\b"), "I will"),
-    (re.compile(r"\bI[\u2019']d\b"), "I would"),
+    (re.compile(r"\bI[\u2019']m\b", re.IGNORECASE), "I am"),
+    (re.compile(r"\bI[\u2019']ve\b", re.IGNORECASE), "I have"),
+    (re.compile(r"\bI[\u2019']ll\b", re.IGNORECASE), "I will"),
+    (re.compile(r"\bI[\u2019']d\b", re.IGNORECASE), "I would"),
     (re.compile(r"\bwe[\u2019']re\b", re.IGNORECASE), "we are"),
     (re.compile(r"\bwe[\u2019']ve\b", re.IGNORECASE), "we have"),
     (re.compile(r"\bwe[\u2019']ll\b", re.IGNORECASE), "we will"),

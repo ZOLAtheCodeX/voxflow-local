@@ -1070,7 +1070,13 @@ def remove_fillers(text: str) -> str:
 
 
 def split_and_recase(text: str) -> str:
-    """Split on sentence-ending punctuation and uppercase first char of each."""
+    """Split on sentence-ending punctuation and uppercase first char of each.
+
+    Intentional divergence from Swift: Python uses regex-only splitting while
+    Swift uses NLTokenizer + regex sub-splitting. This can diverge on edge
+    cases like abbreviations ("Dr.") or punctuation without following whitespace.
+    Accepted tradeoff to avoid adding nltk/spacy dependency.
+    """
     segments = re.split(r"(?<=[.!?])\s+", text)
     recased = []
     for seg in segments:
@@ -1102,6 +1108,11 @@ def _apply_formal_tone(text: str) -> str:
 
 
 def _apply_friendly_tone(text: str) -> str:
+    """Intentional divergence from Swift: Python only appends '!' when no
+    terminal punctuation exists. Swift also does POS-based imperative softening
+    ("Send X" → "Let's send X") using NLTagger. Accepted tradeoff — same
+    reasoning as POS-aware filler removal.
+    """
     if text and text[-1] not in ".!?":
         return text + "!"
     return text
@@ -1110,6 +1121,7 @@ def _apply_friendly_tone(text: str) -> str:
 def apply_tone(text: str, tone: str) -> str:
     """Apply tone transform. Dispatches to private helpers."""
     normalized = normalize_whitespace(text)
+    tone = tone.lower().strip()
     if tone == "concise":
         return _apply_concise_tone(normalized)
     if tone == "formal":

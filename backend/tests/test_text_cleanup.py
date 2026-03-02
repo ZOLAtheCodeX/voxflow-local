@@ -262,6 +262,24 @@ class TestApplyToneFormal:
         result = apply_tone("Let's go.", "formal")
         assert "let us" in result
 
+    # ── Lowercase I-contraction regression (audit finding §1) ──────
+
+    def test_lowercase_im(self):
+        result = apply_tone("i'm going.", "formal")
+        assert "I am" in result
+
+    def test_lowercase_ive(self):
+        result = apply_tone("i've seen it.", "formal")
+        assert "I have" in result
+
+    def test_lowercase_ill(self):
+        result = apply_tone("i'll be there.", "formal")
+        assert "I will" in result
+
+    def test_lowercase_id(self):
+        result = apply_tone("i'd rather not.", "formal")
+        assert "I would" in result
+
 
 # ── Tone: friendly ──────────────────────────────────────────────────
 
@@ -274,6 +292,12 @@ class TestApplyToneFriendly:
     def test_preserves_existing_terminal(self):
         result = apply_tone("I don't think so.", "friendly")
         assert result.endswith(".")
+
+    def test_no_imperative_softening(self):
+        """Python intentionally skips Swift's POS-based 'Let's' prepend."""
+        result = apply_tone("Send the report", "friendly")
+        assert "Let's" not in result
+        assert result.endswith("!")
 
 
 # ── Full light_cleanup pipeline ─────────────────────────────────────
@@ -320,3 +344,24 @@ class TestApplyToneNeutral:
 
     def test_unknown_returns_normalized(self):
         assert apply_tone("  test  input  ", "unknown") == "test input"
+
+
+# ── Tone case normalization (audit finding §3) ─────────────────────
+
+
+class TestApplyToneCaseNormalization:
+    def test_formal_capitalized(self):
+        result = apply_tone("I don't agree.", "Formal")
+        assert "do not" in result
+
+    def test_concise_uppercase(self):
+        result = apply_tone("I think maybe we should.", "CONCISE")
+        assert "I think maybe" not in result
+
+    def test_friendly_mixed_case(self):
+        result = apply_tone("great job", "Friendly")
+        assert result.endswith("!")
+
+    def test_tone_with_whitespace(self):
+        result = apply_tone("I don't agree.", "  formal  ")
+        assert "do not" in result
