@@ -763,7 +763,7 @@ Rebuild and test the full flow:
 cd /Users/zola/Documents/CODING/voxflow-local
 ./scripts/build_app_bundle.sh
 ./scripts/install_app_bundle.sh
-./scripts/launch_voxflow.sh
+./scripts/launch_voxflow_dev.sh
 ```
 
 **Step 2: Verify focus behavior**

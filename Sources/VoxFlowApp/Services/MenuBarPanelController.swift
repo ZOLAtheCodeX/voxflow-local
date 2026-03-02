@@ -82,7 +82,17 @@ final class MenuBarPanelController {
 
     func updateIcon(systemName: String) {
         currentIconName = systemName
-        statusItem.button?.image = menuBarImage(named: systemName)
+        guard let button = statusItem.button else { return }
+        if let image = menuBarImage(named: systemName) {
+            button.image = image
+        } else if let fallback = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "VoxFlow") {
+            fallback.isTemplate = true
+            button.image = fallback
+            log.warning("updateIcon: '\(systemName)' failed; using unconfigured mic.fill fallback")
+        } else {
+            button.title = "VF"
+            log.warning("updateIcon: all icon fallbacks failed; using text-only 'VF' title")
+        }
     }
 
     private func menuBarImage(named symbolName: String) -> NSImage? {

@@ -38,6 +38,7 @@ final class BackendProcessManager: @unchecked Sendable {
     private var _lastStartupFailureReason: String?
     private var lastSpawnedPID: pid_t?
     private var crashRestartCount: Int = 0
+    private var intentionalShutdown = false
     private static let maxCrashRestarts = 3
 
     var lastStartupFailureReason: String? {
@@ -84,18 +85,22 @@ final class BackendProcessManager: @unchecked Sendable {
 
     func stop() {
         syncOnWorkQueue {
+            intentionalShutdown = true
             stopOnWorkQueue()
         }
     }
 
     func stopAsync() {
         workQueue.async { [weak self] in
+            self?.intentionalShutdown = true
             self?.stopOnWorkQueue()
         }
     }
 
     private func restartOnWorkQueue(configuration: BackendLaunchConfiguration) {
+        intentionalShutdown = true
         stopOnWorkQueue()
+        intentionalShutdown = false
         startIfNeededOnWorkQueue(configuration: configuration)
     }
 
@@ -156,11 +161,16 @@ final class BackendProcessManager: @unchecked Sendable {
             _lastStartupFailureReason = nil
             log.info("Backend started (pid: \(task.processIdentifier))")
 
-            // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts
+            // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts.
+            // Skip restart if the shutdown was intentional (stop/restart called).
             task.terminationHandler = { [weak self] terminatedProcess in
                 guard terminatedProcess.terminationStatus != 0 else { return }
                 self?.workQueue.async {
                     guard let self else { return }
+                    guard !self.intentionalShutdown else {
+                        log.info("Backend exited after intentional shutdown; not auto-restarting")
+                        return
+                    }
                     guard self.crashRestartCount < Self.maxCrashRestarts else {
                         log.error("Backend crashed \(self.crashRestartCount) times; not restarting")
                         return

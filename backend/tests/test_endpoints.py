@@ -166,6 +166,43 @@ class TestTranscribe:
         })
         assert resp.status_code == 413
 
+    @pytest.mark.anyio
+    async def test_malformed_base64_returns_400(self, client: httpx.AsyncClient):
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-sess",
+            "audio_pcm16le": "!!!not-valid-base64!!!",
+            "sample_rate": 16000,
+        })
+        assert resp.status_code == 400
+        assert "Invalid audio payload" in resp.json()["detail"]
+
+    @pytest.mark.anyio
+    async def test_odd_length_pcm_returns_400(self, client: httpx.AsyncClient):
+        import base64
+        # 3 bytes is odd — invalid for int16 PCM
+        odd_bytes = base64.b64encode(b"\x00\x01\x02").decode()
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-sess",
+            "audio_pcm16le": odd_bytes,
+            "sample_rate": 16000,
+        })
+        assert resp.status_code == 400
+        assert "even byte length" in resp.json()["detail"]
+
+    @pytest.mark.anyio
+    async def test_empty_audio_returns_placeholder(self, client: httpx.AsyncClient):
+        import base64
+        empty_b64 = base64.b64encode(b"").decode()
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-sess",
+            "audio_pcm16le": empty_b64,
+            "sample_rate": 16000,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "no audio captured" in data["text"]
+        assert data["confidence_estimate"] == 0.0
+
 
 # ── Rate Limiting ────────────────────────────────────────────────────
 

@@ -77,6 +77,29 @@ class TestConsentStorePrune:
         assert store.resolve(old.token, "sess-old", "cleanup") is None
 
 
+class TestConsentStoreSingleUse:
+    """Verify that consent tokens are consumed on successful resolve (single-use)."""
+
+    def test_second_resolve_returns_none(self):
+        store = ConsentStore()
+        record = store.create("sess-1", "cleanup", "original", "redacted")
+        first = store.resolve(record.token, "sess-1", "cleanup")
+        assert first is not None
+        # Token was consumed — second resolve must fail
+        second = store.resolve(record.token, "sess-1", "cleanup")
+        assert second is None
+
+    def test_failed_resolve_does_not_consume(self):
+        store = ConsentStore()
+        record = store.create("sess-1", "cleanup", "original", "redacted")
+        # Wrong session — should fail without consuming
+        assert store.resolve(record.token, "sess-WRONG", "cleanup") is None
+        # Correct resolve should still work
+        assert store.resolve(record.token, "sess-1", "cleanup") is not None
+        # Now consumed
+        assert store.resolve(record.token, "sess-1", "cleanup") is None
+
+
 class TestConsentStoreThreadSafety:
     def test_concurrent_creates(self):
         store = ConsentStore()
