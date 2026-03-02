@@ -31,7 +31,7 @@ final class MenuBarPanelController {
 
     init<Content: View>(content: Content, iconName: String = "mic.fill") {
         // Status item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.currentIconName = iconName
 
         // Non-activating panel
@@ -64,7 +64,17 @@ final class MenuBarPanelController {
 
     private func configureStatusItemButton(iconName: String) {
         if let button = statusItem.button {
-            button.image = menuBarImage(named: iconName)
+            if let image = menuBarImage(named: iconName) {
+                button.image = image
+                log.info("Menu bar icon set: \(iconName)")
+            } else if let fallback = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "VoxFlow") {
+                fallback.isTemplate = true
+                button.image = fallback
+                log.warning("Primary icon '\(iconName)' failed; using unconfigured mic.fill fallback")
+            } else {
+                button.title = "VF"
+                log.warning("All icon fallbacks failed; using text-only 'VF' title")
+            }
             button.target = self
             button.action = #selector(statusItemClicked(_:))
         }
@@ -93,7 +103,7 @@ final class MenuBarPanelController {
         NSStatusBar.system.removeStatusItem(statusItem)
 
         // Create fresh item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         configureStatusItemButton(iconName: currentIconName)
 
         // Restore panel state
