@@ -74,6 +74,17 @@ struct BackendReadinessResponse: Codable {
     let issues: [String]
 }
 
+enum BackendError: LocalizedError {
+    case httpError(statusCode: Int, detail: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .httpError(let statusCode, let detail):
+            return "Backend error \(statusCode): \(detail)"
+        }
+    }
+}
+
 enum BackendAPIClient {
     private static let baseURL: URL = {
         if let override = ProcessInfo.processInfo.environment["VOXFLOW_BACKEND_URL"],
@@ -105,13 +116,29 @@ enum BackendAPIClient {
         return encoder
     }()
 
+    private static func checkHTTPStatus(_ response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else { return }
+        guard !(200..<300).contains(http.statusCode) else { return }
+
+        // Try to extract FastAPI's {"detail": "..."} error body
+        let detail: String
+        if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let message = errorBody["detail"] as? String {
+            detail = message
+        } else {
+            detail = String(data: data, encoding: .utf8) ?? "Unknown error"
+        }
+        throw BackendError.httpError(statusCode: http.statusCode, detail: detail)
+    }
+
     private static func performRequest<Response: Decodable, Payload: Encodable>(path: String, payload: Payload) async throws -> Response {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(payload)
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        try checkHTTPStatus(response, data: data)
         return try decoder.decode(Response.self, from: data)
     }
 
@@ -119,7 +146,8 @@ enum BackendAPIClient {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = "GET"
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        try checkHTTPStatus(response, data: data)
         return try decoder.decode(Response.self, from: data)
     }
 

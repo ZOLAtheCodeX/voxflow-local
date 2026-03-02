@@ -241,11 +241,15 @@ class WhisperEngine:
                 self._pipeline = False
 
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
-        self._load_pipeline()
-
         if not pcm:
             logger.warning("Whisper transcribe called with empty audio buffer")
             return "[transcription unavailable: no audio captured]", 0.0
+
+        if len(pcm) % 2 != 0:
+            logger.error("Whisper transcribe received odd-length PCM buffer (%d bytes)", len(pcm))
+            return "[transcription unavailable: invalid audio format]", 0.0
+
+        self._load_pipeline()
 
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -1748,12 +1752,25 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
         raise HTTPException(status_code=413, detail="Audio payload too large")
 
     try:
-        audio_bytes = base64.b64decode(payload.audio_pcm16le)
+        audio_bytes = base64.b64decode(payload.audio_pcm16le, validate=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid audio payload: {exc}") from exc
 
     if len(audio_bytes) > MAX_AUDIO_PAYLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Decoded audio exceeds size limit")
+
+    if not audio_bytes:
+        logger.warning("Transcribe called with empty audio buffer")
+        return TranscribeResponse(
+            text="[transcription unavailable: no audio captured]",
+            is_final=True,
+            latency_ms=0,
+            confidence_estimate=0.0,
+            processing_time_ms=0,
+        )
+
+    if len(audio_bytes) % 2 != 0:
+        raise HTTPException(status_code=400, detail="PCM16 audio must have even byte length")
 
     text, confidence = provider_router.transcribe(audio_bytes, payload.sample_rate, payload.language_hint)
     latency_ms = int((time.perf_counter() - started) * 1000)

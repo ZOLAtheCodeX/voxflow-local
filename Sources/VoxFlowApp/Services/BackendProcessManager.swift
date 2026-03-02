@@ -36,6 +36,9 @@ final class BackendProcessManager: @unchecked Sendable {
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
     private var _lastStartupFailureReason: String?
+    private var lastSpawnedPID: pid_t?
+    private var crashRestartCount: Int = 0
+    private static let maxCrashRestarts = 3
 
     var lastStartupFailureReason: String? {
         syncOnWorkQueue { _lastStartupFailureReason }
@@ -53,24 +56,28 @@ final class BackendProcessManager: @unchecked Sendable {
 
     func startIfNeeded(configuration: BackendLaunchConfiguration) {
         syncOnWorkQueue {
+            crashRestartCount = 0
             startIfNeededOnWorkQueue(configuration: configuration)
         }
     }
 
     func startIfNeededAsync(configuration: BackendLaunchConfiguration) {
         workQueue.async { [weak self] in
+            self?.crashRestartCount = 0
             self?.startIfNeededOnWorkQueue(configuration: configuration)
         }
     }
 
     func restart(configuration: BackendLaunchConfiguration) {
         syncOnWorkQueue {
+            crashRestartCount = 0
             restartOnWorkQueue(configuration: configuration)
         }
     }
 
     func restartAsync(configuration: BackendLaunchConfiguration) {
         workQueue.async { [weak self] in
+            self?.crashRestartCount = 0
             self?.restartOnWorkQueue(configuration: configuration)
         }
     }
@@ -145,8 +152,26 @@ final class BackendProcessManager: @unchecked Sendable {
             try task.run()
             process = task
             activeConfiguration = configuration
+            lastSpawnedPID = task.processIdentifier
             _lastStartupFailureReason = nil
             log.info("Backend started (pid: \(task.processIdentifier))")
+
+            // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts
+            task.terminationHandler = { [weak self] terminatedProcess in
+                guard terminatedProcess.terminationStatus != 0 else { return }
+                self?.workQueue.async {
+                    guard let self else { return }
+                    guard self.crashRestartCount < Self.maxCrashRestarts else {
+                        log.error("Backend crashed \(self.crashRestartCount) times; not restarting")
+                        return
+                    }
+                    self.crashRestartCount += 1
+                    log.warning("Backend crashed (exit \(terminatedProcess.terminationStatus)); auto-restart \(self.crashRestartCount)/\(Self.maxCrashRestarts)")
+                    self.process = nil
+                    self.clearPipeHandlers()
+                    self.startIfNeededOnWorkQueue(configuration: configuration)
+                }
+            }
         } catch {
             log.error("Failed to start backend: \(error.localizedDescription)")
             _lastStartupFailureReason = "Failed to start backend process: \(error.localizedDescription)"
@@ -374,15 +399,30 @@ final class BackendProcessManager: @unchecked Sendable {
         pids.removeAll { $0 == getpid() }
         guard !pids.isEmpty else { return true }
 
-        log.warning("Port \(port) is in use; attempting recovery for backend startup")
-        terminatePIDs(pids, signal: SIGTERM)
-        usleep(400_000)
+        // Only kill PIDs that we previously spawned. If an unknown process
+        // holds the port, log a warning and fail rather than force-killing.
+        if let ownPID = lastSpawnedPID {
+            let ownPIDs = pids.filter { $0 == ownPID }
+            let foreignPIDs = pids.filter { $0 != ownPID }
 
-        pids = listeningPIDs(onPort: port)
-        pids.removeAll { $0 == getpid() }
-        if !pids.isEmpty {
-            terminatePIDs(pids, signal: SIGKILL)
-            usleep(250_000)
+            if !foreignPIDs.isEmpty {
+                log.warning("Port \(port) held by unknown process(es): \(foreignPIDs). Not killing.")
+            }
+
+            if !ownPIDs.isEmpty {
+                log.warning("Port \(port) held by previous backend (pid \(ownPID)); terminating")
+                terminatePIDs(ownPIDs, signal: SIGTERM)
+                usleep(400_000)
+
+                // Check again — force-kill only our own PID if still alive
+                let remaining = listeningPIDs(onPort: port).filter { $0 == ownPID }
+                if !remaining.isEmpty {
+                    terminatePIDs(remaining, signal: SIGKILL)
+                    usleep(250_000)
+                }
+            }
+        } else {
+            log.warning("Port \(port) in use by \(pids) but no previously spawned PID to match")
         }
 
         pids = listeningPIDs(onPort: port)
