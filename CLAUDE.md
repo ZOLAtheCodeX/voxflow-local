@@ -22,7 +22,8 @@ Sources/VoxFlowApp/        Swift frontend (SwiftUI, MenuBarExtra)
   State/AppState.swift      Published app state (~50 @Published properties)
   Views/                    SwiftUI views
 backend/app/
-  server.py                 FastAPI server (~1700 lines, all endpoints)
+  server.py                 FastAPI server (~1900 lines, all endpoints)
+  text_cleanup_rules.py     Pre-compiled regex patterns for text cleanup (spoken punctuation, fillers, tones)
 scripts/                    Shell scripts (bootstrap, test, run, doctor, launcher, release)
 models/                     Pre-downloaded ML models (~24GB, not in git)
   whisperkit-coreml__openai_whisper-small.en/  Pre-downloaded WhisperKit CoreML model
@@ -103,11 +104,12 @@ swift run VoxFlowLocal
 - **Rate limiting**: 120 requests per 60 seconds per IP
 - **CORS**: Restricted to localhost origins only
 - **STT chunking**: WhisperEngine uses `chunk_length_s=30` with `stride_length_s=[5, 1]` for long-form transcription (30-45s)
+- **Text cleanup pipeline**: `light_cleanup()` is a 6-step pipeline (normalize → spoken punctuation → dedup → split/recase → fillers → finalize) mirroring Swift `TextCleanupService`. `apply_tone()` dispatches to concise/formal/friendly helpers. Rules live in `text_cleanup_rules.py`.
 - **Logging**: Use `logging.getLogger("voxflow")`, never bare `print()`
 
 ## Testing
 
-- Test coverage: 344 tests (219 Swift + 125 Python) covering models, parsing, coordinators, prompt framing, hallucination filter, confidence badge, backend utilities
+- Test coverage: 457 tests (234 Swift + 223 Python) covering models, parsing, coordinators, prompt framing, hallucination filter, confidence badge, text cleanup pipeline, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`

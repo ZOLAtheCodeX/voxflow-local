@@ -1,105 +1,43 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-02-26 (session 11, continued)
+## Last Updated: 2026-03-01 (session 13)
 
-## Branch: master
+## Branch: master @ cf3b10d
 
-## Completed
-- P1: WhisperKit native STT integration (7 commits: 9b8c370..22da0c0)
-  - Task 1: WhisperKit SPM dependency (9b8c370)
-  - Task 2: HallucinationFilter Swift port (25e53db)
-  - Task 3: STTBackend.whisperKit enum case (d1df39a)
-  - Task 4: WhisperKitSTTService (45ce777)
-  - Task 5: AppCoordinator wiring (5251e5b)
-  - Task 6: Model download script (66f9ebb)
-  - Task 7: CLAUDE.md + README.md updates (22da0c0)
-- P2: Focus bug fix (prior session)
-- P3: Extended dictation (prior session)
-- P4: Clear history (prior session)
-- P5/P6: Per-app profiles (prior session)
-- Task 8 (P1): WhisperKit model download + smoke test (383987c)
-  - Fixed download script: venv CLI priority, case-sensitive --local-dir-use-symlinks flag
-  - Downloaded 19 CoreML model files (AudioEncoder, MelSpectrogram, TextDecoder)
-  - Smoke test passed: dictation works with WhisperKit backend, no Python backend needed
-- P5: NLP-Lite Cleanup Engine — Swift-native (8 commits)
-  - Task 1: Spoken punctuation converter (replaceSpokenPunctuation)
-  - Task 2: Repeated word removal (removeRepeatedWords)
-  - Task 3: NLTokenizer sentence splitting + recasing (splitAndRecase)
-  - Task 4: NLTagger POS-aware filler detection (removeFillers)
-  - Task 5: Tone transforms — concise, formal, friendly (applyTone)
-  - Task 6: Full pipeline entry point (cleanup mode/tone routing)
-  - Task 7: AppCoordinator wiring (WhisperKit path bypasses Python backend)
-  - Task 8: CLAUDE.md + progress.txt updates
-- Cleanup: Remove Voxtral dead code (8 commits on refactor/remove-voxtral-dead-code)
-  - Removed STTBackend.voxtral enum case, default → .whisperKit (Swift) / whisper (Python)
-  - Deleted VoxtralEngine class (~94 lines), rewired ProviderRouter → WhisperEngine
-  - Removed safe mode toggle, voxtral model TextField, voice commands
-  - Cleaned 9 Swift files, 1 Python file, 4 shell scripts, 2 test files
-- Prompt Mode — 4th workflow mode (10 commits on feature/prompt-mode, merged to master)
-  - Task 1-10: Full implementation (domain types → framing service → coordinator → views → backend → tests)
-- Bugfix/Cleanup batch (5 commits on bugfix/ui-hallucination-hotkey-cleanup, merged to master)
-  - Fix: Add hello/hi/hey to HallucinationFilter short-audio filter (46db25a)
-  - Fix: Make menu bar panel opaque with readable backgrounds (21ab7be)
-  - Feat: Add Fn + Command + Space dictation hotkey preset (3584e82)
-  - Docs: Remove stale Voxtral references from README (c3aba3f)
-  - Docs: Update progress.txt and CLAUDE.md (520abf5)
-- Code review hardening (1 commit on master)
-  - Fix: Hotkey conflict guard in SettingsCoordinator — reject duplicate key combos (3dcb196)
-  - Fix: Unicode hallucination entries (U+266B, U+266C, U+2026) + Unicode-aware split (3dcb196)
-  - Fix: GlobalHotkeyService returns eventNotHandledErr on guard failures + LocalizedError (3dcb196)
-  - Fix: Panel Dark Mode appearance inheritance + corner radius (3dcb196)
-  - Tests: 5 new edge case tests (Unicode, greeting variants, whitespace trimming) (3dcb196)
-- Confidence Indicator UI (2 commits on master)
-  - Docs: Confidence indicator design doc (3b48a89)
-  - Feat: Color-coded confidence badge in review card + Recent tab (0116d6d)
-    - Added confidence field to TranscriptCandidate, threaded through 5 construction sites
-    - New ConfidenceBadge view: green >= 0.7, yellow >= 0.4, red < 0.4
-    - 8 new tests for threshold boundaries and data storage
-- Bundle model path fix (b2ee3e3)
-  - WhisperKit model path falls back to Bundle.main.resourcePath when launched from Launchpad
-- Review panel auto-open fix (f97c638)
-  - Panel now auto-opens when entering .review state (was only toggle-on-click before)
-  - Root cause: insertBehavior persisted as .alwaysReview in UserDefaults survived reinstalls,
-    text went to review state but panel never auto-opened → silent failure
-- Menu bar icon fix — activation policy resilience (3 commits: 31e1634..4ecff58)
-  - Refactor: Extract configureStatusItemButton() helper, make statusItem mutable (31e1634)
-  - Feat: Add refreshStatusItem() to re-register after policy transitions (5e8abd5)
-  - Fix: Defer panel setup to after app lifecycle, refresh after policy revert,
-    stop auto-opening main window on launch (4ecff58)
-  - Root cause: NSStatusItem created in init() was destroyed by WindowGroup →
-    activateForWindow() → setActivationPolicy(.regular) lifecycle
-- Session 11: GitHub PR sync — merged and pulled 13 AI-generated PRs (a56c97c..d6910f7)
-  - Tests (6 PRs): SessionMemoryStore, TextSimilarityService, TranslateEngine,
-    PolishEngine guardrail, PrivateAPIClient error handling, WhisperEngine init failure
-  - Fixes (2 PRs): Silent exception swallowing in server.py, PII redaction in hallucination logs
-  - Refactors (3 PRs): TextCleanupRules model extraction, BackendAPIClient force-unwrap,
-    BackendAPIClient deduplication (generic performRequest/performGetRequest helpers)
-  - Core changes (2 PRs): finishCaptureAndTranscribe decomposed into 5 private methods,
-    AudioCaptureService OSAllocatedUnfairLock + PCM conversion off main actor, rate limiter cleanup
-  - Fix: WhisperEngine test used b"audio" (5 bytes, not int16-aligned) → bytes(32) (a56c97c)
-  - Fix: Regression clips replaced sine waves with macOS TTS (Samantha, LEI16@16000) (d6910f7)
-    "Thank you." avoided for calibration — exact match in _WHISPER_HALLUCINATION_SHORT_ONLY
+## Completed (this session)
+- Python text cleanup parity with Swift TextCleanupService
+  - Created text_cleanup_rules.py: 7 pre-compiled regex pattern groups
+  - Rewrote light_cleanup() as 6-step pipeline matching Swift cleanup(.light)
+  - Rewrote apply_tone() with concise/formal/friendly helpers
+  - 65 new tests in test_text_cleanup.py, 7 expanded in test_utils.py
+  - Accepted gap: POS-aware ambiguous fillers skipped (no nltk/spacy dep)
+- Updated CLAUDE.md: architecture, test count, Python cleanup docs
+
+## Completed (prior sessions)
+- P1: WhisperKit native STT integration
+- P2: Focus bug fix
+- P3: Extended dictation
+- P4: Clear history
+- P5: NLP-Lite Cleanup Engine (Swift-native)
+- P5/P6: Per-app profiles
+- Prompt Mode (4th workflow)
+- Bugfix/cleanup batch (hallucination filter, hotkeys, panel)
+- Code review hardening
+- Confidence indicator UI
+- Bundle model path fix
+- Review panel auto-open fix
+- Menu bar icon fix (activation policy resilience)
+- Session 11: GitHub PR sync (13 PRs merged)
+- Session 12: Stability fixes (12 issues, PR #14 merged)
 
 ## Remaining
-- Menu bar icon visibility (fix applied — needs runtime verification, see Known Issues)
 - P6: Voice commands, streaming
 - P7: App publishing (notarization, DMG, distribution)
 
-## Known Issues
-- Menu bar icon: fix applied in 9d26046 — NSImage(systemSymbolName:) without a
-  SymbolConfiguration has no font metric context in NSStatusBarButton, producing an
-  image that registers a non-zero frame but renders transparent. Added
-  SymbolConfiguration(scale: .medium) + explicit isTemplate = true via shared
-  menuBarImage(named:) helper in MenuBarPanelController.
-  NEEDS RUNTIME VERIFICATION — launch app at idle and confirm mic icon is visible.
-  If still invisible: next step is switching to NSStatusItem.squareLength to isolate
-  the variable-width sizing path.
-
 ## Test Status
 - 234 Swift tests passing, 0 failures
-- 144 Python tests passing, 0 failures
-- Regression suite: 10/10 passed (TTS clips, Whisper backend)
-- Total: 388 tests
+- 223 Python tests passing, 0 failures
+- Total: 457 tests
 
 ## Blockers
-- None (icon is cosmetic — core dictation pipeline fully functional)
+- None
