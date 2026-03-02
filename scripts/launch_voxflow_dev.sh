@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEV ONLY — launches raw debug binary without bundle context.
+# No Info.plist, no LSUIElement, no NSMicrophoneUsageDescription.
+# For production use: ./scripts/reinstall_and_launch.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

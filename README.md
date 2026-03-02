@@ -78,7 +78,7 @@ Mac-native, local-only dictation app with WhisperKit/Whisper STT, post-capture c
 - `scripts/run_backend.sh`: run backend server
 - `scripts/test_all.sh`: run Swift tests + backend tests via `.venv`
 - `scripts/download_models.py`: optional model pre-download
-- `scripts/launch_voxflow.sh`: one-command launcher (backend + app)
+- `scripts/launch_voxflow_dev.sh`: dev-only launcher (raw binary, no bundle context)
 - `scripts/stop_voxflow.sh`: stop app and backend
 - `scripts/build_app_bundle.sh`: build a native `.app` bundle with icon (`dist/VoxFlow.app`)
 - `scripts/install_app_bundle.sh`: install bundle into `~/Applications` with validation + LaunchServices registration
@@ -184,10 +184,10 @@ This launcher automatically falls back to direct binary start and writes logs to
 ./.runtime/app-direct.log
 ```
 
-Or launch both backend + app in one command:
+Or launch both backend + app in one command (dev only, raw binary):
 
 ```bash
-./scripts/launch_voxflow.sh
+./scripts/launch_voxflow_dev.sh
 ```
 
 5. Run tests:

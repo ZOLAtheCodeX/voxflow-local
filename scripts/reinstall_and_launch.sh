@@ -10,6 +10,9 @@ echo "[voxflow] building bundle..."
 echo "[voxflow] installing bundle..."
 "${ROOT_DIR}/scripts/install_app_bundle.sh"
 
+echo "[voxflow] creating desktop launcher..."
+"${ROOT_DIR}/scripts/create_desktop_launcher.sh"
+
 echo "[voxflow] launching..."
 if ! open "${DEST_APP}"; then
   echo "[voxflow] launchservices open failed; launching executable directly..."

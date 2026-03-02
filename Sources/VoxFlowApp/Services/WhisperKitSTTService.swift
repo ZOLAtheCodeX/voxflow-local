@@ -65,7 +65,11 @@ final class WhisperKitSTTService {
         let audioDurationS = Double(audio.pcm.count) / (audio.sampleRate * 2.0) // 2 bytes per Int16 sample
         let isShort = audioDurationS < 3.0
         if HallucinationFilter.isLikelyHallucination(text, shortAudio: isShort) {
+            #if DEBUG
             log.info("Filtered hallucination (\(String(format: "%.1f", audioDurationS))s, short=\(isShort)): '\(text.prefix(60))'")
+            #else
+            log.info("Filtered hallucination (\(String(format: "%.1f", audioDurationS))s, short=\(isShort)): \(text.count) chars")
+            #endif
             return TranscribeResponse(
                 text: "",
                 isFinal: true,
@@ -75,7 +79,11 @@ final class WhisperKitSTTService {
             )
         }
 
+        #if DEBUG
         log.info("Transcribed in \(latencyMs)ms: '\(text.prefix(80))' (confidence=\(String(format: "%.2f", confidence)))")
+        #else
+        log.info("Transcribed in \(latencyMs)ms: \(text.count) chars (confidence=\(String(format: "%.2f", confidence)))")
+        #endif
 
         return TranscribeResponse(
             text: text,

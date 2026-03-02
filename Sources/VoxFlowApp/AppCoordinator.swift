@@ -38,6 +38,7 @@ final class AppCoordinator: ObservableObject {
     private var captureTimeoutTimer: Timer?
     private var sessionCounter: Int = 0
     private var hotkeysRegistered = false
+    private var didFinishLaunching = false
     private var fnTriggeredCaptureInProgress = false
     private var capturedTargetApp: NSRunningApplication?
     private var lastTranscriptionConfidence: Double = 0.0
@@ -69,19 +70,28 @@ final class AppCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Defer panel setup until after the app lifecycle settles.
+        // Defer panel setup until after the activation policy has settled.
         // WindowGroup auto-opens a window which triggers activateForWindow() →
-        // setActivationPolicy(.regular). Creating the status item before that
-        // would cause macOS to tear down its menu bar slot during the policy change.
+        // setActivationPolicy(.regular). Creating the status item during that
+        // window causes macOS to tear down its menu bar slot.
+        //
+        // Strategy: set a flag on didFinishLaunching, then let
+        // checkAndRevertActivationPolicy() create the panel after reverting
+        // to .accessory. If no window ever opens (cold start), a short
+        // fallback timer sets it up directly.
         NotificationCenter.default.addObserver(
             forName: NSApplication.didFinishLaunchingNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                guard let self, self.menuBarPanel == nil else { return }
+            guard let self else { return }
+            self.didFinishLaunching = true
+            // Fallback: if no managed window opens, set up panel after
+            // a brief delay (0.1s) — activation policy is already .accessory.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                guard self.menuBarPanel == nil else { return }
                 self.setupMenuBarPanel()
-                self.log.info("Menu bar panel setup (deferred)")
+                self.log.info("Menu bar panel setup (cold start fallback)")
             }
         }
     }
@@ -374,7 +384,11 @@ final class AppCoordinator: ObservableObject {
     private func handleTranscriptionResult(_ transcription: TranscribeResponse, sessionID: String, commandLane: Bool) async throws {
         let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         lastTranscriptionConfidence = transcription.confidenceEstimate
+        #if DEBUG
         log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        #else
+        log.info("Transcription: \(rawText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        #endif
 
         if rawText.isEmpty || rawText.hasPrefix("[transcription") {
             log.info("Empty or placeholder transcription — discarding")
@@ -595,7 +609,12 @@ final class AppCoordinator: ObservableObject {
         configureHotkeys(force: true)
     }
     func selectTranslationProfile(_ profile: TranslationProfile) { settings.selectTranslationProfile(profile) }
-    func selectSTTBackend(_ backend: STTBackend) { settings.selectSTTBackend(backend) }
+    func selectSTTBackend(_ backend: STTBackend) {
+        settings.selectSTTBackend(backend)
+        if backend == .whisperKit && !whisperKitService.isLoaded {
+            Task { await loadWhisperKitModel() }
+        }
+    }
     func updateLocalWhisperModel(whisperModel: String) { settings.updateLocalWhisperModel(whisperModel: whisperModel) }
     func selectProviderMode(_ mode: ProviderMode) {
         if mode == .localOnly {
@@ -1099,9 +1118,16 @@ final class AppCoordinator: ObservableObject {
         }
         if !hasManagedWindows {
             NSApp.setActivationPolicy(.accessory)
-            // Re-register status item — the .regular -> .accessory round-trip
-            // may have invalidated its menu bar slot.
-            menuBarPanel?.refreshStatusItem()
+            if menuBarPanel == nil && didFinishLaunching {
+                // First revert after launch — create the panel now that
+                // the activation policy has settled to .accessory.
+                setupMenuBarPanel()
+                log.info("Menu bar panel setup (after policy revert)")
+            } else {
+                // Re-register status item — the .regular -> .accessory round-trip
+                // may have invalidated its menu bar slot.
+                menuBarPanel?.refreshStatusItem()
+            }
             if let observer = windowCloseObserver {
                 NotificationCenter.default.removeObserver(observer)
                 windowCloseObserver = nil
