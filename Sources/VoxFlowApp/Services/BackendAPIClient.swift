@@ -86,7 +86,7 @@ enum BackendError: LocalizedError {
 }
 
 enum BackendAPIClient {
-    private static let baseURL: URL = {
+    static var baseURL: URL = {
         if let override = ProcessInfo.processInfo.environment["VOXFLOW_BACKEND_URL"],
            let url = URL(string: override) {
             return url
@@ -97,7 +97,7 @@ enum BackendAPIClient {
         return url
     }()
 
-    private static let session: URLSession = {
+    static var session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120
         config.timeoutIntervalForResource = 120
