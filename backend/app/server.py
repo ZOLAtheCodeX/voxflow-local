@@ -1737,7 +1737,7 @@ app = FastAPI(title="VoxFlow Local Backend", version="0.1.0", lifespan=app_lifes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1", "http://localhost"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
