@@ -1220,6 +1220,9 @@ def split_sentences(text: str) -> list[str]:
     return [normalized]
 
 
+SPEAKER_PATTERN = re.compile(r"^\s*(?P<speaker>[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?|Speaker\s+\d+)\s*[:\-]\s*(?P<text>.+)$")
+
+
 def infer_speaker_segments(transcript: str) -> list[dict[str, Any]]:
     normalized = transcript.strip()
     if not normalized:
@@ -1227,13 +1230,12 @@ def infer_speaker_segments(transcript: str) -> list[dict[str, Any]]:
 
     segments: list[dict[str, Any]] = []
     by_speaker: dict[str, list[str]] = {}
-    speaker_pattern = re.compile(r"^\s*(?P<speaker>[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?|Speaker\s+\d+)\s*[:\-]\s*(?P<text>.+)$")
 
     for line in transcript.splitlines():
         line = line.strip()
         if not line:
             continue
-        match = speaker_pattern.match(line)
+        match = SPEAKER_PATTERN.match(line)
         if not match:
             continue
         speaker = normalize_whitespace(match.group("speaker"))
