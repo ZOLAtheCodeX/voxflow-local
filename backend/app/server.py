@@ -1778,10 +1778,6 @@ def stt_fallback_active() -> bool:
     return provider_router.stt_fallback_active()
 
 
-def transcribe_with_active_backend(pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
-    return provider_router.transcribe(pcm, sample_rate, language_hint)
-
-
 def readiness_snapshot() -> ReadyResponse:
     state.stt_backend = current_stt_backend()
     state.model_loaded = active_stt_model_loaded()
