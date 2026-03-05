@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 from server import (
     build_meeting_summary,
+    coerce_task_owners,
     infer_speaker_segments,
     infer_task_owners,
     render_meeting_markdown_export,
@@ -192,3 +193,37 @@ class TestRenderMeetingNotion:
             task_owners=[],
         )
         assert "- [ ] Review code" in notion
+
+
+# ── coerce_task_owners ───────────────────────────────────────────────
+
+class TestCoerceTaskOwners:
+    def test_coerce_task_owners_invalid_confidence(self):
+        items = ["Alice will do the task"]
+        transcript = "Alice: I'll do it."
+        value = [
+            {
+                "task": "Alice will do the task",
+                "owner": "Alice",
+                "confidence": "not-a-number"
+            }
+        ]
+        result = coerce_task_owners(value, items, transcript)
+        assert len(result) == 1
+        assert result[0]["task"] == "Alice will do the task"
+        assert result[0]["owner"] == "Alice"
+        assert result[0]["confidence"] == 0.5
+
+    def test_coerce_task_owners_valid_confidence(self):
+        items = ["Alice will do the task"]
+        transcript = "Alice: I'll do it."
+        value = [
+            {
+                "task": "Alice will do the task",
+                "owner": "Alice",
+                "confidence": "0.95"
+            }
+        ]
+        result = coerce_task_owners(value, items, transcript)
+        assert len(result) == 1
+        assert result[0]["confidence"] == 0.95
