@@ -78,4 +78,4 @@ if lsof -nP -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
   fi
 fi
 
-exec uvicorn server:app --host "${BACKEND_HOST}" --port "${BACKEND_PORT}"
+exec uvicorn server:app --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" --timeout-graceful-shutdown 4

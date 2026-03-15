@@ -9,7 +9,6 @@ MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 ICONSET_DIR="${DIST_DIR}/VoxFlow.iconset"
 ICNS_PATH="${RESOURCES_DIR}/VoxFlow.icns"
-PRODUCT_BIN="${ROOT_DIR}/.build/release/VoxFlowLocal"
 COPY_VENV=1
 BUILD_CONFIGURATION="debug"
 SKIP_BUILD=0
@@ -184,6 +183,8 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <string>VoxFlow records microphone audio for dictation and transcription.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>VoxFlow uses accessibility insertion and app detection to place dictated text in focused fields.</string>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>VoxFlow uses Accessibility to insert dictated text into focused fields.</string>
 </dict>
 </plist>
 PLIST

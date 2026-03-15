@@ -36,20 +36,44 @@ class TestPolishEngineGuardrail:
         # Length ratio: 2/10 = 0.2 < 0.6
         assert PolishEngine._guardrail_triggered(original, candidate) is True
 
-    def test_long_length_ratio_triggers_guardrail(self):
-        """Should return True if candidate is much longer (> 1.8 ratio)."""
-        original = "one two"
-        candidate = "one two three four five six seven eight nine ten"
-        # Length ratio: 10/2 = 5.0 > 1.8
+    def test_long_length_ratio_triggers_guardrail_for_long_input(self):
+        """Should return True if candidate is much longer for inputs > 10 words."""
+        original = "one two three four five six seven eight nine ten eleven"
+        candidate = (
+            "one two three four five six seven eight nine ten eleven "
+            "twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty-one"
+        )
+        # 11 words -> 21 words = ratio 1.9 > 1.8
         assert PolishEngine._guardrail_triggered(original, candidate) is True
+
+    def test_short_input_skips_length_ratio(self):
+        """Short inputs (<= 5 words) should skip length ratio check entirely."""
+        # 3-word input expanding to 6 words — ratio 2.0 would trigger old guardrail,
+        # but short inputs are exempt from length ratio
+        original = "send the report"
+        candidate = "Please send the report today."
+        assert PolishEngine._guardrail_triggered(original, candidate) is False
+
+        # Short input but completely different content — similarity still catches it
+        original = "fix bug"
+        candidate = "The weather is nice today and I like it."
+        assert PolishEngine._guardrail_triggered(original, candidate) is True
+
+    def test_medium_input_wider_length_tolerance(self):
+        """Inputs 6-10 words get wider tolerance (max ratio 2.5 instead of 1.8)."""
+        original = "send the report to the team"
+        candidate = "Please send the report to the team by end of day today."
+        # 6 words -> 12 words = ratio 2.0. Under old rules: > 1.8 = triggered.
+        # Under new rules: <= 10 words, max ratio 2.5, so 2.0 passes.
+        assert PolishEngine._guardrail_triggered(original, candidate) is False
 
     def test_boundary_length_ratio_passes(self):
         """Test just within bounds to ensure exact boundary handling."""
         # Ratio 0.6 should pass (logic is < 0.6)
-        original = "one two three four five"
-        candidate = "one two three"
-        # Length ratio: 3/5 = 0.6. Not < 0.6.
-        # Similarity should be high enough (~0.72 > 0.55)
+        original = "one two three four five six"
+        candidate = "one two three four"
+        # Length ratio: 4/6 = 0.67. Not < 0.6.
+        # Similarity should be high enough
         assert PolishEngine._guardrail_triggered(original, candidate) is False
 
     def test_minor_typo_fix_passes(self):
@@ -60,11 +84,29 @@ class TestPolishEngineGuardrail:
 
     def test_empty_original_handled(self):
         """Should handle empty original string gracefully."""
-        # If original is empty, length is max(1, 0) = 1.
+        # Empty original = 1 word (max(1,0)), so <= 5 words — length ratio skipped.
+        # But similarity check still catches completely different content.
         original = ""
         candidate = "some text"
-        # Length ratio: 2/1 = 2.0 > 1.8 -> True
+        # similarity between "" and "some text" is 0.0 < 0.55 -> True
         assert PolishEngine._guardrail_triggered(original, candidate) is True
 
         # Both empty -> Candidate empty check triggers first
         assert PolishEngine._guardrail_triggered("", "") is True
+
+
+class TestPolishEngineEchoDetection:
+    def test_exact_echo(self):
+        assert PolishEngine._is_echo("hello world", "hello world") is True
+
+    def test_echo_with_punctuation_diff(self):
+        assert PolishEngine._is_echo("hello world", "Hello world.") is True
+
+    def test_echo_with_case_diff(self):
+        assert PolishEngine._is_echo("HELLO WORLD", "hello world") is True
+
+    def test_not_echo(self):
+        assert PolishEngine._is_echo("hello world", "greetings everyone") is False
+
+    def test_minor_edit_not_echo(self):
+        assert PolishEngine._is_echo("send the report", "Please send the report.") is False

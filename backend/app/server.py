@@ -224,14 +224,19 @@ class WhisperEngine:
         self.model_id = resolve_model_ref(model_ref)
         self._pipeline = None
         self._active_model_id = ""
+        self._load_failed = False
         self._lock = Lock()
 
     def _load_pipeline(self) -> None:
         if self._pipeline is not None:
             return
+        if self._load_failed:
+            return
 
         with self._lock:
             if self._pipeline is not None:
+                return
+            if self._load_failed:
                 return
             try:
                 from transformers import pipeline
@@ -248,7 +253,12 @@ class WhisperEngine:
                 logger.info("Loaded Whisper model: %s", self.model_id)
             except Exception as exc:
                 logger.error("Failed to load Whisper model %s: %s", self.model_id, exc)
-                self._pipeline = False
+                self._load_failed = True
+
+    def retry_load(self) -> None:
+        """Reset failure state to allow retrying model load."""
+        self._load_failed = False
+        self._load_pipeline()
 
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
         if not pcm:
@@ -264,6 +274,8 @@ class WhisperEngine:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
         if not self._pipeline:
+            if self._load_failed:
+                return "[transcription unavailable: local Whisper model failed to load]", 0.0
             return "[transcription unavailable: local Whisper model not loaded]", 0.0
 
         try:
@@ -281,12 +293,10 @@ class WhisperEngine:
 
     @property
     def model_loaded(self) -> bool:
-        self._load_pipeline()
-        return bool(self._pipeline)
+        return self._pipeline is not None
 
     @property
     def active_model_id(self) -> str:
-        self._load_pipeline()
         return self._active_model_id or self.model_id
 
 
@@ -422,14 +432,19 @@ class PolishEngine:
         model_ref = os.environ.get("VOXFLOW_POLISH_MODEL", "google/flan-t5-small")
         self.model_id = resolve_model_ref(model_ref)
         self._pipeline = None
+        self._load_failed = False
         self._lock = Lock()
 
     def _load_pipeline(self) -> None:
         if self._pipeline is not None:
             return
+        if self._load_failed:
+            return
 
         with self._lock:
             if self._pipeline is not None:
+                return
+            if self._load_failed:
                 return
             try:
                 from transformers import pipeline
@@ -442,7 +457,19 @@ class PolishEngine:
                 logger.info("Loaded polish model: %s", self.model_id)
             except Exception as exc:
                 logger.error("Failed to load polish model %s: %s", self.model_id, exc)
-                self._pipeline = False
+                self._load_failed = True
+
+    def retry_load(self) -> None:
+        """Reset failure state to allow retrying model load."""
+        self._load_failed = False
+        self._load_pipeline()
+
+    _TONE_INSTRUCTIONS = {
+        "concise": "Remove unnecessary words. Be direct and brief.",
+        "formal": "Use professional language. Avoid contractions and slang.",
+        "friendly": "Use warm, approachable language.",
+        "neutral": "Use clear, natural language.",
+    }
 
     def polish(self, text: str, tone: str) -> tuple[str, bool]:
         self._load_pipeline()
@@ -451,16 +478,20 @@ class PolishEngine:
             return "", False
 
         if self._pipeline:
+            tone_instruction = self._TONE_INSTRUCTIONS.get(tone.lower(), self._TONE_INSTRUCTIONS["neutral"])
             prompt = (
-                "Rewrite this transcript preserving meaning exactly. "
-                f"Tone: {tone}. Transcript: {text}"
+                f"Rewrite this spoken transcript as clean written text. "
+                f"Do not add new information. {tone_instruction} "
+                f"Transcript: {text}"
             )
+            word_count = len(text.split())
+            max_tokens = min(200, max(60, word_count * 3))
             try:
-                result = self._pipeline(prompt, max_new_tokens=120)[0]["generated_text"].strip()
+                result = self._pipeline(prompt, max_new_tokens=max_tokens)[0]["generated_text"].strip()
                 if self._guardrail_triggered(text, result):
                     return apply_tone(light_cleanup(text), tone), True
                 # If model echoed the input unchanged, apply light_cleanup as floor
-                if result.strip().lower() == text.strip().lower():
+                if self._is_echo(text, result):
                     return apply_tone(light_cleanup(text), tone), False
                 return result, False
             except Exception as exc:
@@ -469,16 +500,32 @@ class PolishEngine:
         return apply_tone(light_cleanup(text), tone), False
 
     @staticmethod
+    def _is_echo(original: str, candidate: str) -> bool:
+        """Check if the model just echoed the input back (possibly with minor punctuation changes)."""
+        def _normalize(s: str) -> str:
+            return re.sub(r"[^\w\s]", "", s.strip().lower())
+        return _normalize(original) == _normalize(candidate)
+
+    @staticmethod
     def _guardrail_triggered(original: str, candidate: str) -> bool:
         if not candidate.strip():
             return True
 
         similarity = SequenceMatcher(None, original.lower(), candidate.lower()).ratio()
+        if similarity < 0.55:
+            return True
+
         original_length = max(1, len(original.split()))
         candidate_length = len(candidate.split())
         length_ratio = candidate_length / original_length
 
-        return similarity < 0.55 or length_ratio < 0.6 or length_ratio > 1.8
+        # Short inputs (<=5 words) naturally expand when polished — skip length ratio
+        if original_length <= 5:
+            return False
+
+        # Medium inputs (6-10 words) get wider tolerance
+        max_ratio = 2.5 if original_length <= 10 else 1.8
+        return length_ratio < 0.6 or length_ratio > max_ratio
 
 
 class TranslateEngine:
@@ -748,6 +795,13 @@ _WHISPER_HALLUCINATION_ALWAYS = frozenset(
         "♪♪",
         "♪♪♪",
         "...",
+        # Common Whisper silence hallucinations — filtered at any duration
+        "Hello.",
+        "Hello",
+        "Hi.",
+        "Hi",
+        "Hey.",
+        "Hey",
     ]
 )
 
@@ -1668,6 +1722,9 @@ def initialize_runtime_state() -> None:
         state.mps_available = False
 
     state.stt_backend = current_stt_backend()
+    # Eagerly load the STT model at startup so health polls don't trigger loading
+    if state.stt_backend == "whisper":
+        whisper_engine._load_pipeline()
     state.model_loaded = active_stt_model_loaded()
 
 

@@ -93,12 +93,13 @@ final class AccessibilityInsertService {
         // Re-activate the target app — focus may have shifted during transcription
         if let app = targetApp, !app.isActive {
             app.activate()
-            // Give macOS time to bring the app window forward
-            usleep(150_000) // 150ms
+            // Give macOS time to bring the app window forward.
+            // Uses Thread.sleep on this thread (already off main for auto-insert,
+            // or quick enough for manual insert).
+            Thread.sleep(forTimeInterval: 0.10) // 100ms
         } else {
-            // Small delay even without activation — Electron apps need time
-            // to register clipboard changes before Cmd+V arrives
-            usleep(50_000) // 50ms
+            // Brief delay for Electron apps to register clipboard changes before Cmd+V
+            Thread.sleep(forTimeInterval: 0.03) // 30ms
         }
 
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)

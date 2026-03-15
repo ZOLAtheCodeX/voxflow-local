@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct VoxFlowLocalApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @ObservedObject var coordinator = AppCoordinator.shared
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
@@ -41,6 +42,13 @@ struct VoxFlowLocalApp: App {
                     activateAndOpenWindow(id: "setup")
                 }
                 .keyboardShortcut("1", modifiers: [.command])
+
+                Divider()
+
+                Button("Quit VoxFlow") {
+                    NSApp.terminate(nil)
+                }
+                .keyboardShortcut("q", modifiers: [.command])
             }
         }
 

@@ -52,7 +52,7 @@ final class WhisperKitSTTService {
 
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         let elapsed = started.duration(to: .now)
-        let latencyMs = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+        let latencyMs = Int(elapsed.components.seconds) * 1000 + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
 
         let confidence: Double = {
             guard let first = results.first, let seg = first.segments.first else { return 0.0 }

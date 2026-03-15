@@ -298,8 +298,14 @@ class TestIsWhisperHallucination:
     def test_normal_speech(self):
         assert is_whisper_hallucination("I need to schedule a meeting for tomorrow") is False
 
+    def test_hello_always_filtered(self):
+        assert is_whisper_hallucination("hello") is True
+        assert is_whisper_hallucination("hello", short_audio=False) is True
+        assert is_whisper_hallucination("Hi") is True
+        assert is_whisper_hallucination("hey.") is True
+
     def test_short_real_word(self):
-        assert is_whisper_hallucination("hello") is False
+        assert is_whisper_hallucination("okay") is False
 
     def test_real_sentence_with_thank_you(self):
         assert is_whisper_hallucination("Thank you for helping me with this project") is False

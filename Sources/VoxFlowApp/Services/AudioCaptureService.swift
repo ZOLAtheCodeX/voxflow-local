@@ -5,6 +5,27 @@ import os
 struct CapturedAudio {
     let pcm: Data
     let sampleRate: Double
+
+    /// RMS energy of the PCM16 buffer, normalized to 0.0–1.0.
+    /// Silence is typically < 0.005; speech is > 0.02.
+    var rmsEnergy: Double {
+        let sampleCount = pcm.count / MemoryLayout<Int16>.size
+        guard sampleCount > 0 else { return 0 }
+        return pcm.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            var sumSquares: Double = 0
+            for i in 0..<sampleCount {
+                let normalized = Double(samples[i]) / Double(Int16.max)
+                sumSquares += normalized * normalized
+            }
+            return (sumSquares / Double(sampleCount)).squareRoot()
+        }
+    }
+
+    /// True if the audio is below the silence threshold (RMS < 0.008).
+    var isSilent: Bool {
+        rmsEnergy < 0.008
+    }
 }
 
 enum AudioCaptureError: Error {
@@ -106,7 +127,12 @@ final class AudioCaptureService {
         }
 
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            throw error
+        }
         isCapturing = true
     }
 

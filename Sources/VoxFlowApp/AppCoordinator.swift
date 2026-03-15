@@ -364,6 +364,14 @@ final class AppCoordinator: ObservableObject {
             state.recordingDuration = 0
             return nil
         }
+
+        if capturedAudio.isSilent {
+            log.info("Audio is silence (RMS \(String(format: "%.4f", capturedAudio.rmsEnergy))) — discarding")
+            state.sessionState = .idle
+            state.statusLine = "No speech detected — try again"
+            state.recordingDuration = 0
+            return nil
+        }
         return capturedAudio
     }
 
@@ -394,6 +402,15 @@ final class AppCoordinator: ObservableObject {
             log.info("Empty or placeholder transcription — discarding")
             state.sessionState = .idle
             state.statusLine = rawText.isEmpty ? "No speech detected — try again" : rawText
+            state.recordingDuration = 0
+            return
+        }
+
+        // Discard very low confidence results — likely silence hallucinations
+        if transcription.confidenceEstimate < 0.15 && rawText.split(whereSeparator: \.isWhitespace).count <= 2 {
+            log.info("Low confidence (\(String(format: "%.2f", transcription.confidenceEstimate))) short text — discarding as likely hallucination")
+            state.sessionState = .idle
+            state.statusLine = "No speech detected — try again"
             state.recordingDuration = 0
             return
         }
@@ -1133,6 +1150,11 @@ final class AppCoordinator: ObservableObject {
                 windowCloseObserver = nil
             }
         }
+    }
+
+    /// Called from AppDelegate.applicationWillTerminate to cleanly stop the backend.
+    func shutdownBackend() {
+        backendManager.stop()
     }
 
     private func startFocusMonitoring() {

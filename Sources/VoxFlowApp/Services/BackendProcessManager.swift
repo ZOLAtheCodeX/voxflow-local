@@ -3,6 +3,7 @@ import os.log
 import Darwin
 
 private let log = Logger(subsystem: "local.voxflow.app", category: "BackendProcessManager")
+private let pidFilePath = NSTemporaryDirectory() + "voxflow-backend.pid"
 
 struct BackendLaunchConfiguration: Equatable {
     let sttBackend: String
@@ -160,6 +161,7 @@ final class BackendProcessManager: @unchecked Sendable {
             lastSpawnedPID = task.processIdentifier
             _lastStartupFailureReason = nil
             log.info("Backend started (pid: \(task.processIdentifier))")
+            Self.writePIDFile(task.processIdentifier)
 
             // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts.
             // Skip restart if the shutdown was intentional (stop/restart called).
@@ -173,6 +175,7 @@ final class BackendProcessManager: @unchecked Sendable {
                     }
                     guard self.crashRestartCount < Self.maxCrashRestarts else {
                         log.error("Backend crashed \(self.crashRestartCount) times; not restarting")
+                        self._lastStartupFailureReason = "Backend crashed \(Self.maxCrashRestarts) times — restart manually in Settings"
                         return
                     }
                     self.crashRestartCount += 1
@@ -219,6 +222,7 @@ final class BackendProcessManager: @unchecked Sendable {
         activeConfiguration = nil
         _lastStartupFailureReason = nil
         clearPipeHandlers()
+        Self.removePIDFile()
     }
 
     private func isOnWorkQueue() -> Bool {
@@ -409,9 +413,10 @@ final class BackendProcessManager: @unchecked Sendable {
         pids.removeAll { $0 == getpid() }
         guard !pids.isEmpty else { return true }
 
-        // Only kill PIDs that we previously spawned. If an unknown process
-        // holds the port, log a warning and fail rather than force-killing.
-        if let ownPID = lastSpawnedPID {
+        // Only kill PIDs that we previously spawned (in-memory or from PID file).
+        // If an unknown process holds the port, log a warning and fail rather than force-killing.
+        let stalePID = Self.readPIDFile()
+        if let ownPID = lastSpawnedPID ?? stalePID {
             let ownPIDs = pids.filter { $0 == ownPID }
             let foreignPIDs = pids.filter { $0 != ownPID }
 
@@ -446,10 +451,47 @@ final class BackendProcessManager: @unchecked Sendable {
         }
     }
 
+    // MARK: - PID file persistence
+
+    static func writePIDFile(_ pid: pid_t) {
+        do {
+            try "\(pid)".write(toFile: pidFilePath, atomically: true, encoding: .utf8)
+        } catch {
+            log.warning("Failed to write PID file: \(error.localizedDescription)")
+        }
+    }
+
+    static func removePIDFile() {
+        try? FileManager.default.removeItem(atPath: pidFilePath)
+    }
+
+    static func readPIDFile() -> pid_t? {
+        guard let contents = try? String(contentsOfFile: pidFilePath, encoding: .utf8),
+              let pid = pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid > 0 else {
+            return nil
+        }
+        // Check if process is still alive (signal 0 = existence check)
+        guard kill(pid, 0) == 0 else {
+            removePIDFile()
+            return nil
+        }
+        return pid
+    }
+
+    /// Kill any stale backend from a previous app session. Called from atexit/terminate handlers
+    /// as a last-resort cleanup when the normal stop() path didn't run.
+    static func killStaleBackend() {
+        guard let pid = readPIDFile() else { return }
+        log.info("Killing stale backend (pid \(pid)) from PID file")
+        kill(pid, SIGTERM)
+        removePIDFile()
+    }
+
     private func listeningPIDs(onPort port: Int) -> [pid_t] {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-ti", "tcp:\(port)"]
+        task.arguments = ["-ti", "tcp:\(port)", "-sTCP:LISTEN"]
 
         let stdout = Pipe()
         task.standardOutput = stdout

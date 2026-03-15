@@ -48,8 +48,9 @@ def test_load_pipeline_failure():
     # Action
     engine._load_pipeline()
 
-    # Assert
-    assert engine._pipeline is False
+    # Assert — pipeline stays None, _load_failed flag is set
+    assert engine._pipeline is None
+    assert engine._load_failed is True
     sys.modules["transformers"].pipeline.assert_called_once()
 
 def test_load_pipeline_success():

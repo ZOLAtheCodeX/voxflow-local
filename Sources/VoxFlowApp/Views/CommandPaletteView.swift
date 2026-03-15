@@ -92,7 +92,7 @@ struct CommandPaletteView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 6) {
-                Text(state.backendReadyForDictation ? "Ready" : "Not Ready")
+                Text(dictationReady ? "Ready" : "Not Ready")
                     .font(VF.captionFont.weight(.semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
@@ -810,7 +810,11 @@ struct CommandPaletteView: View {
         }
     }
 
+    private var dictationReady: Bool {
+        state.backendReadyForDictation || (state.sttBackend == .whisperKit && state.whisperKitReady)
+    }
+
     private var readinessBadgeColor: Color {
-        state.backendReadyForDictation ? .green : .orange
+        dictationReady ? .green : .orange
     }
 }
