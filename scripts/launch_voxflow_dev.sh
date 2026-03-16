@@ -14,6 +14,9 @@ find_app_pids() {
   pgrep -f "${APP_BIN}" 2>/dev/null || true
 }
 
+export VOXFLOW_PROJECT_ROOT="${ROOT_DIR}"
+export VOXFLOW_MODELS_DIR="${ROOT_DIR}/models"
+
 mkdir -p "${RUNTIME_DIR}"
 
 if ! lsof -nP -iTCP:8765 -sTCP:LISTEN >/dev/null 2>&1; then
