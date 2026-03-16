@@ -332,7 +332,7 @@ final class AppCoordinator: ObservableObject {
                 onboardingCalibration: state.onboardingPhase == .calibrating
             )
 
-            try await handleTranscriptionResult(transcription, sessionID: sessionID, commandLane: commandLane)
+            try await handleTranscriptionResult(transcription, capturedAudio: capturedAudio, sessionID: sessionID, commandLane: commandLane)
 
         } catch {
             handleCaptureError(error)
@@ -389,7 +389,7 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    private func handleTranscriptionResult(_ transcription: TranscribeResponse, sessionID: String, commandLane: Bool) async throws {
+    private func handleTranscriptionResult(_ transcription: TranscribeResponse, capturedAudio: CapturedAudio, sessionID: String, commandLane: Bool) async throws {
         let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         lastTranscriptionConfidence = transcription.confidenceEstimate
         #if DEBUG
@@ -406,9 +406,16 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        // Discard very low confidence results — likely silence hallucinations
-        if transcription.confidenceEstimate < 0.15 && rawText.split(whereSeparator: \.isWhitespace).count <= 2 {
-            log.info("Low confidence (\(String(format: "%.2f", transcription.confidenceEstimate))) short text — discarding as likely hallucination")
+        // Discard low-confidence short text — likely silence/noise hallucinations.
+        // Single-word results are checked at any duration (Whisper often hallucinates
+        // a lone "hello" on long silent/noisy clips). Two-word results only on short audio.
+        let wordCount = rawText.split(whereSeparator: \.isWhitespace).count
+        let audioDurationSec = Double(capturedAudio.pcm.count) / (capturedAudio.sampleRate * Double(MemoryLayout<Int16>.size))
+        let isShortAudio = audioDurationSec < 3.0
+        let isSuspect = (wordCount == 1 && transcription.confidenceEstimate < 0.15)
+            || (isShortAudio && wordCount <= 2 && transcription.confidenceEstimate < 0.08)
+        if isSuspect {
+            log.info("Low confidence (\(String(format: "%.2f", transcription.confidenceEstimate))) \(wordCount)-word text (duration=\(String(format: "%.1f", audioDurationSec))s) — discarding as likely hallucination")
             state.sessionState = .idle
             state.statusLine = "No speech detected — try again"
             state.recordingDuration = 0

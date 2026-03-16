@@ -41,10 +41,11 @@ final class HallucinationFilterTests: XCTestCase {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hey", shortAudio: true))
     }
 
-    func testGreetingsFilteredOnLongAudio() {
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hi", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hey.", shortAudio: false))
+    func testGreetingsPassOnLongAudio() {
+        // Greetings in long audio are likely real speech (e.g., dictating an email opening)
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hello", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hi", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("hey.", shortAudio: false))
     }
 
     func testShortOnlyPassedOnLongAudio() {

@@ -22,9 +22,10 @@ struct CapturedAudio {
         }
     }
 
-    /// True if the audio is below the silence threshold (RMS < 0.008).
+    /// True if the audio is below the silence threshold (RMS < 0.003).
+    /// Conservative: catches dead-air silence without rejecting quiet speakers.
     var isSilent: Bool {
-        rmsEnergy < 0.008
+        rmsEnergy < 0.003
     }
 }
 
