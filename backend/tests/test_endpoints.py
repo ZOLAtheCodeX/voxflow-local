@@ -232,6 +232,8 @@ class TestCORS:
         )
         # CORS preflight should include allow-origin
         assert "access-control-allow-origin" in resp.headers
+        # Security hardening: credentials should NOT be allowed
+        assert resp.headers.get("access-control-allow-credentials") is None
 
 
 # ── Transcribe Chunking ──────────────────────────────────────────────
