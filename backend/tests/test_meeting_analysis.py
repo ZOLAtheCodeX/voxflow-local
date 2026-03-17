@@ -104,23 +104,71 @@ class TestInferTaskOwners:
 # ── coerce_speaker_segments ──────────────────────────────────────────
 
 class TestCoerceSpeakerSegments:
-    def test_string_utterance_count_defaults_to_one(self):
-        """Non-numeric string triggers except branch, defaults to 1."""
-        items = [{"speaker": "Alice", "text": "Hello", "utterance_count": "invalid"}]
-        result = coerce_speaker_segments(items, "Alice: Hello")
+    def test_valid_list(self):
+        value = [
+            {"speaker": "Alice", "text": "Hello", "utterance_count": 2},
+            {"speaker": "Bob", "text": "Hi", "utterance_count": "1"}
+        ]
+        result = coerce_speaker_segments(value, "fallback")
+        assert len(result) == 2
+        assert result[0] == {"speaker": "Alice", "text": "Hello", "utterance_count": 2}
+        assert result[1] == {"speaker": "Bob", "text": "Hi", "utterance_count": 1}
+
+    def test_invalid_type_fallback(self):
+        result = coerce_speaker_segments("not a list", "Alice: Test.")
+        assert len(result) == 1
+        assert result[0]["speaker"] == "Alice"
+        assert result[0]["text"] == "Test."
+
+    def test_ignores_non_dict_entries(self):
+        value = ["string", {"speaker": "Alice", "text": "Hello"}, 123]
+        result = coerce_speaker_segments(value, "fallback")
+        assert len(result) == 1
+        assert result[0]["speaker"] == "Alice"
+
+    def test_skips_empty_text(self):
+        value = [
+            {"speaker": "Alice", "text": ""},
+            {"speaker": "Bob", "text": "Hi"}
+        ]
+        result = coerce_speaker_segments(value, "fallback")
+        assert len(result) == 1
+        assert result[0]["speaker"] == "Bob"
+
+    def test_non_numeric_utterance_count_defaults_to_one(self):
+        """Non-numeric string triggers except branch (ValueError), defaults to 1."""
+        value = [{"speaker": "Alice", "text": "Hello", "utterance_count": "invalid"}]
+        result = coerce_speaker_segments(value, "fallback")
         assert result[0]["utterance_count"] == 1
 
     def test_none_utterance_count_defaults_to_one(self):
         """None triggers except branch (int(None) raises TypeError), defaults to 1."""
-        items = [{"speaker": "Bob", "text": "World", "utterance_count": None}]
-        result = coerce_speaker_segments(items, "Bob: World")
+        value = [{"speaker": "Bob", "text": "World", "utterance_count": None}]
+        result = coerce_speaker_segments(value, "Bob: World")
         assert result[0]["utterance_count"] == 1
 
     def test_dict_utterance_count_defaults_to_one(self):
         """Dict triggers except branch (int({}) raises TypeError), defaults to 1."""
-        items = [{"speaker": "Charlie", "text": "Hey", "utterance_count": {"count": 5}}]
-        result = coerce_speaker_segments(items, "Charlie: Hey")
+        value = [{"speaker": "Charlie", "text": "Hey", "utterance_count": {"count": 5}}]
+        result = coerce_speaker_segments(value, "Charlie: Hey")
         assert result[0]["utterance_count"] == 1
+
+    def test_negative_utterance_count_clamped_to_one(self):
+        """Negative int goes through max(1, int(-5)) clamp path, not except."""
+        value = [{"speaker": "Bob", "text": "Hi", "utterance_count": -5}]
+        result = coerce_speaker_segments(value, "fallback")
+        assert result[0]["utterance_count"] == 1
+
+    def test_limits_to_six_entries(self):
+        value = [{"speaker": f"Speaker {i}", "text": "Hello"} for i in range(10)]
+        result = coerce_speaker_segments(value, "fallback")
+        assert len(result) == 6
+
+    def test_empty_list_fallback(self):
+        value = [{"speaker": "Alice", "text": ""}, "invalid"]
+        result = coerce_speaker_segments(value, "Alice: Test.")
+        assert len(result) == 1
+        assert result[0]["speaker"] == "Alice"
 
 
 # ── build_meeting_summary ────────────────────────────────────────────
