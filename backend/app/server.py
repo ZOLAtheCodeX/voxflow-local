@@ -1049,7 +1049,7 @@ class PrivateAPIClient:
         action_items = coerce_string_list(parsed.get("action_items"), 6)
         follow_ups = coerce_string_list(parsed.get("follow_ups"), 4)
         speaker_segments = coerce_speaker_segments(parsed.get("speaker_segments"), transcript)
-        task_owners = coerce_task_owners(parsed.get("task_owners"), action_items, transcript)
+        task_owners = coerce_task_owners(parsed.get("task_owners"), action_items, transcript, speaker_segments)
 
         markdown_export = render_meeting_markdown_export(
             summary=normalize_whitespace(str(parsed.get("summary", ""))),
@@ -1261,13 +1261,18 @@ def infer_speaker_segments(transcript: str) -> list[dict[str, Any]]:
     return [{"speaker": "Speaker 1", "text": fallback_excerpt, "utterance_count": 1}]
 
 
-def infer_task_owners(action_items: list[str], transcript: str) -> list[dict[str, Any]]:
+def infer_task_owners(
+    action_items: list[str],
+    transcript: str,
+    speaker_segments: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     if not action_items:
         return []
 
     results: list[dict[str, Any]] = []
 
-    known_speakers = {segment["speaker"] for segment in infer_speaker_segments(transcript) if segment.get("speaker")}
+    segments = speaker_segments if speaker_segments is not None else infer_speaker_segments(transcript)
+    known_speakers = {segment["speaker"] for segment in segments if segment.get("speaker")}
 
     for item in action_items[:10]:
         cleaned_item = normalize_whitespace(item)
@@ -1317,9 +1322,14 @@ def coerce_speaker_segments(value: Any, transcript: str) -> list[dict[str, Any]]
     return rows or infer_speaker_segments(transcript)
 
 
-def coerce_task_owners(value: Any, action_items: list[str], transcript: str) -> list[dict[str, Any]]:
+def coerce_task_owners(
+    value: Any,
+    action_items: list[str],
+    transcript: str,
+    speaker_segments: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
-        return infer_task_owners(action_items, transcript)
+        return infer_task_owners(action_items, transcript, speaker_segments)
 
     rows: list[dict[str, Any]] = []
     for entry in value[:10]:
@@ -1337,7 +1347,7 @@ def coerce_task_owners(value: Any, action_items: list[str], transcript: str) -> 
         confidence = max(0.0, min(1.0, confidence))
         rows.append({"task": task, "owner": owner or "Unassigned", "confidence": round(confidence, 2)})
 
-    return rows or infer_task_owners(action_items, transcript)
+    return rows or infer_task_owners(action_items, transcript, speaker_segments)
 
 
 def render_meeting_markdown_export(
@@ -1455,7 +1465,7 @@ def build_meeting_summary(transcript: str, tone: str) -> dict[str, Any]:
         follow_ups = action_items[:1]
 
     speaker_segments = infer_speaker_segments(transcript)
-    task_owners = infer_task_owners(action_items, transcript)
+    task_owners = infer_task_owners(action_items, transcript, speaker_segments)
     markdown_export = render_meeting_markdown_export(
         summary=summary,
         decisions=decisions[:5],
@@ -2018,17 +2028,20 @@ def meeting_summarize(payload: MeetingRequest) -> MeetingSummaryResponse:
         payload_length=len(effective_text),
         redacted=resolved.redacted,
     )
+    action_items = coerce_string_list(structured.get("action_items"), 6)
+    speaker_segments = coerce_speaker_segments(structured.get("speaker_segments"), effective_text)
     return MeetingSummaryResponse(
         transcript=normalize_whitespace(effective_text),
         summary=normalize_whitespace(str(structured.get("summary", ""))),
         decisions=coerce_string_list(structured.get("decisions"), 5),
-        action_items=coerce_string_list(structured.get("action_items"), 6),
+        action_items=action_items,
         follow_ups=coerce_string_list(structured.get("follow_ups"), 4),
-        speaker_segments=coerce_speaker_segments(structured.get("speaker_segments"), effective_text),
+        speaker_segments=speaker_segments,
         task_owners=coerce_task_owners(
             structured.get("task_owners"),
-            coerce_string_list(structured.get("action_items"), 6),
+            action_items,
             effective_text,
+            speaker_segments,
         ),
         markdown_export=str(structured.get("markdown_export", "")).strip(),
         notion_export=str(structured.get("notion_export", "")).strip(),

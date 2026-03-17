@@ -1,3 +1,4 @@
+import Accelerate
 @preconcurrency import AVFoundation
 import Foundation
 import os
@@ -40,6 +41,7 @@ final class AudioCaptureService {
     static let targetSampleRate: Double = 16_000
 
     private let engine = AVAudioEngine()
+    private let logger = Logger(subsystem: "local.voxflow.app", category: "AudioCaptureService")
 
     private struct State: Sendable {
         var pcmBuffer = Data()
@@ -105,18 +107,35 @@ final class AudioCaptureService {
 
             if error != nil || outputBuffer.frameLength == 0 { return }
 
-            // Convert float32 samples to Int16 PCM
+            // Convert float32 samples to Int16 PCM via vDSP (vectorized)
             guard let floatData = outputBuffer.floatChannelData else { return }
             let frameLength = Int(outputBuffer.frameLength)
-            var int16Samples = [Int16]()
-            int16Samples.reserveCapacity(frameLength)
+            guard frameLength > 0 else { return }
 
-            for i in 0..<frameLength {
-                let clamped = max(-1.0, min(1.0, floatData[0][i]))
-                int16Samples.append(Int16(clamped * Float(Int16.max)))
+            let vLen = vDSP_Length(frameLength)
+            var scale = Float(Int16.max)
+            var lo = -Float(Int16.max)
+            var hi = Float(Int16.max)
+
+            // Build Int16 array via vDSP: scale → clamp → convert
+            let int16Samples = [Int16](unsafeUninitializedCapacity: frameLength) { buf, count in
+                guard let int16Ptr = buf.baseAddress else { count = 0; return }
+                let scaled = [Float](unsafeUninitializedCapacity: frameLength) { fbuf, fcount in
+                    guard let fptr = fbuf.baseAddress else { fcount = 0; return }
+                    vDSP_vsmul(floatData[0], 1, &scale, fptr, 1, vLen)
+                    vDSP_vclip(fptr, 1, &lo, &hi, fptr, 1, vLen)
+                    vDSP_vfix16(fptr, 1, int16Ptr, 1, vLen)
+                    fcount = frameLength
+                }
+                count = scaled.count == frameLength ? frameLength : 0
             }
 
-            let chunk = Data(bytes: int16Samples, count: int16Samples.count * MemoryLayout<Int16>.size)
+            guard int16Samples.count == frameLength else {
+                self.logger.error("vDSP float-to-Int16 conversion failed — discarding chunk")
+                return
+            }
+
+            let chunk = int16Samples.withUnsafeBufferPointer { Data(buffer: $0) }
 
             self.state.withLock { state in
                 guard state.pcmBuffer.count < AudioCaptureService.maxBufferBytes else {
