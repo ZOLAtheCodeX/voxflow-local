@@ -37,6 +37,9 @@ final class AudioCaptureServiceTests: XCTestCase {
                     captureError == .noInputNode || captureError == .converterSetupFailed,
                     "Should throw a known AudioCaptureError"
                 )
+            } else {
+                let isNSError = error is NSError
+                XCTAssertTrue(isNSError, "Expected either AudioCaptureError or NSError, got \(type(of: error))")
             }
         }
     }
