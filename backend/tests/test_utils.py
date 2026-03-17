@@ -213,6 +213,17 @@ class TestExtractJsonObject:
         result = extract_json_object('Here is the result: {"a": 1} done.')
         assert result == {"a": 1}
 
+    def test_unbalanced_braces(self):
+        # Case from rationale: missing closing brace
+        result = extract_json_object('{"a": 1')
+        assert result == {}
+
+    def test_malformed_json_triggers_except(self):
+        # Balanced braces but invalid content (e.g. trailing comma)
+        # This should trigger the try-except block in extract_json_object
+        result = extract_json_object('{"a": 1,}')
+        assert result == {}
+
 
 # ── coerce_string_list ───────────────────────────────────────────────
 
