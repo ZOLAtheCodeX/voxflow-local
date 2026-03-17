@@ -2,7 +2,7 @@ import XCTest
 @testable import VoxFlowApp
 
 class MockURLProtocol: URLProtocol {
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool {
         return true
@@ -62,7 +62,7 @@ final class BackendAPIClientTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "GET")
 
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let data = try! JSONSerialization.data(withJSONObject: expectedDictionary)
+            let data = try JSONSerialization.data(withJSONObject: expectedDictionary)
             return (response, data)
         }
 
@@ -94,7 +94,7 @@ final class BackendAPIClientTests: XCTestCase {
         }
 
         // Act
-        let audioData = "dummy audio".data(using: .utf8)!
+        let audioData = Data(count: 32)
         let result = try await BackendAPIClient.transcribe(
             sessionID: "test-session",
             audioPCM: audioData,
