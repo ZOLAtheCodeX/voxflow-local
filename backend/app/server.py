@@ -32,8 +32,11 @@ from text_cleanup_rules import (
     CASUAL_INTERJECTIONS,
     CONTRACTIONS,
     HEDGING_PHRASES,
+    NAME_ANY_PATTERN,
+    NAME_LEAD_PATTERN,
     PHRASE_FILLERS,
     SOFTENERS,
+    SPEAKER_PATTERN,
     SPOKEN_PUNCTUATION,
 )
 
@@ -1220,9 +1223,6 @@ def split_sentences(text: str) -> list[str]:
     return [normalized]
 
 
-SPEAKER_PATTERN = re.compile(r"^\s*(?P<speaker>[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?|Speaker\s+\d+)\s*[:\-]\s*(?P<text>.+)$")
-
-
 def infer_speaker_segments(transcript: str) -> list[dict[str, Any]]:
     normalized = transcript.strip()
     if not normalized:
@@ -1266,8 +1266,6 @@ def infer_task_owners(action_items: list[str], transcript: str) -> list[dict[str
         return []
 
     results: list[dict[str, Any]] = []
-    name_lead_pattern = re.compile(r"^(?P<owner>[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(will|to|should|needs to|is going to)\b")
-    name_any_pattern = re.compile(r"\b(?P<owner>[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(will|to|should|needs to|is going to)\b")
 
     known_speakers = {segment["speaker"] for segment in infer_speaker_segments(transcript) if segment.get("speaker")}
 
@@ -1276,12 +1274,12 @@ def infer_task_owners(action_items: list[str], transcript: str) -> list[dict[str
         owner = "Unassigned"
         confidence = 0.35
 
-        lead_match = name_lead_pattern.search(cleaned_item)
+        lead_match = NAME_LEAD_PATTERN.search(cleaned_item)
         if lead_match:
             owner = normalize_whitespace(lead_match.group("owner"))
             confidence = 0.92
         else:
-            any_match = name_any_pattern.search(cleaned_item)
+            any_match = NAME_ANY_PATTERN.search(cleaned_item)
             if any_match:
                 owner = normalize_whitespace(any_match.group("owner"))
                 confidence = 0.78

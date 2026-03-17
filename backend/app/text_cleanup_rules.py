@@ -113,3 +113,9 @@ CASUAL_INTERJECTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\byeah\b", re.IGNORECASE), "yes"),
     (re.compile(r"\bnope\b", re.IGNORECASE), "no"),
 ]
+
+# ── Meeting Analysis ───────────────────────────────────────────────────
+
+SPEAKER_PATTERN: re.Pattern[str] = re.compile(r"^\s*(?P<speaker>[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?|Speaker\s+\d+)\s*[:\-]\s*(?P<text>.+)$")
+NAME_LEAD_PATTERN: re.Pattern[str] = re.compile(r"^(?P<owner>[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(will|to|should|needs to|is going to)\b")
+NAME_ANY_PATTERN: re.Pattern[str] = re.compile(r"\b(?P<owner>[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(will|to|should|needs to|is going to)\b")
