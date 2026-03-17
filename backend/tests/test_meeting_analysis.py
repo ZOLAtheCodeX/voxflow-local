@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 from server import (
     build_meeting_summary,
+    coerce_speaker_segments,
     coerce_task_owners,
     infer_speaker_segments,
     infer_task_owners,
@@ -98,6 +99,28 @@ class TestInferTaskOwners:
         items = [f"Task {i}" for i in range(15)]
         result = infer_task_owners(items, "")
         assert len(result) == 10
+
+
+# ── coerce_speaker_segments ──────────────────────────────────────────
+
+class TestCoerceSpeakerSegments:
+    def test_string_utterance_count_defaults_to_one(self):
+        """Non-numeric string triggers except branch, defaults to 1."""
+        items = [{"speaker": "Alice", "text": "Hello", "utterance_count": "invalid"}]
+        result = coerce_speaker_segments(items, "Alice: Hello")
+        assert result[0]["utterance_count"] == 1
+
+    def test_none_utterance_count_defaults_to_one(self):
+        """None triggers except branch (int(None) raises TypeError), defaults to 1."""
+        items = [{"speaker": "Bob", "text": "World", "utterance_count": None}]
+        result = coerce_speaker_segments(items, "Bob: World")
+        assert result[0]["utterance_count"] == 1
+
+    def test_dict_utterance_count_defaults_to_one(self):
+        """Dict triggers except branch (int({}) raises TypeError), defaults to 1."""
+        items = [{"speaker": "Charlie", "text": "Hey", "utterance_count": {"count": 5}}]
+        result = coerce_speaker_segments(items, "Charlie: Hey")
+        assert result[0]["utterance_count"] == 1
 
 
 # ── build_meeting_summary ────────────────────────────────────────────
