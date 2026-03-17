@@ -266,6 +266,15 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
+        // Workflows beyond basic dictation require the backend even when WhisperKit handles STT
+        let workflowNeedsBackend = state.workflowMode != .dictation || state.providerMode == .privateAPI
+        if workflowNeedsBackend && !state.backendReadyForDictation {
+            let modeName = state.workflowMode.displayName
+            log.warning("startCapture blocked: \(modeName) requires backend but backend not ready")
+            state.statusLine = "\(modeName) requires backend — wait for model warmup"
+            return
+        }
+
         if !commandLane && state.onboardingPhase != .calibrating && !state.canStartCaptureForDictation {
             let canStart = state.canStartCaptureForDictation
             log.warning("startCapture blocked: no focused text target (canStart=\(canStart))")
@@ -296,7 +305,7 @@ final class AppCoordinator: ObservableObject {
                 Task { @MainActor [weak self] in
                     guard let self, self.state.sessionState == .recording else { return }
                     self.log.warning("Capture timeout reached (\(Self.maxCaptureDuration)s) — auto-stopping")
-                    await self.finishCaptureAndTranscribe()
+                    await self.finishCaptureAndTranscribe(commandLane: commandLane)
                 }
             }
             if !commandLane {
@@ -859,14 +868,17 @@ final class AppCoordinator: ObservableObject {
                 toneStyle: effectiveTone, providerMode: providerMode,
                 consentToken: consentToken, allowRaw: allowRaw
             ).outputText
+            // Private-API: default to .light so the redacted/cleaned version
+            // is shown first — .raw would expose the unredacted original.
+            let defaultMode: CleanupMode = providerMode == .privateAPI ? .light : .raw
             let candidate = TranscriptCandidate(
                 rawText: rawText, lightText: lightText,
-                polishText: polishText, selectedMode: .raw,
+                polishText: polishText, selectedMode: defaultMode,
                 confidence: self.lastTranscriptionConfidence,
                 timestamp: Date()
             )
             self.state.transcriptCandidate = candidate
-            self.state.selectedMode = .raw
+            self.state.selectedMode = defaultMode
             if providerMode == .localOnly { self.pushToSessionMemory(candidate) }
 
             // Auto-insert light/polish

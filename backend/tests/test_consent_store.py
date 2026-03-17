@@ -77,17 +77,30 @@ class TestConsentStorePrune:
         assert store.resolve(old.token, "sess-old", "cleanup") is None
 
 
-class TestConsentStoreSingleUse:
-    """Verify that consent tokens are consumed on successful resolve (single-use)."""
+class TestConsentStoreBoundedUse:
+    """Verify that consent tokens are consumed after max_uses resolves."""
 
-    def test_second_resolve_returns_none(self):
+    def test_single_use_default(self):
         store = ConsentStore()
         record = store.create("sess-1", "cleanup", "original", "redacted")
         first = store.resolve(record.token, "sess-1", "cleanup")
         assert first is not None
-        # Token was consumed — second resolve must fail
+        # Default max_uses=1: second resolve must fail
         second = store.resolve(record.token, "sess-1", "cleanup")
         assert second is None
+
+    def test_multi_use_cleanup_token(self):
+        store = ConsentStore()
+        record = store.create("sess-1", "cleanup", "original", "redacted", max_uses=2)
+        # First resolve (light cleanup) succeeds
+        first = store.resolve(record.token, "sess-1", "cleanup")
+        assert first is not None
+        # Second resolve (polish cleanup) succeeds
+        second = store.resolve(record.token, "sess-1", "cleanup")
+        assert second is not None
+        # Third resolve fails — max_uses exhausted
+        third = store.resolve(record.token, "sess-1", "cleanup")
+        assert third is None
 
     def test_failed_resolve_does_not_consume(self):
         store = ConsentStore()
@@ -96,8 +109,13 @@ class TestConsentStoreSingleUse:
         assert store.resolve(record.token, "sess-WRONG", "cleanup") is None
         # Correct resolve should still work
         assert store.resolve(record.token, "sess-1", "cleanup") is not None
-        # Now consumed
+        # Now consumed (max_uses=1 default)
         assert store.resolve(record.token, "sess-1", "cleanup") is None
+
+    def test_max_uses_floor_is_one(self):
+        store = ConsentStore()
+        record = store.create("sess-1", "cleanup", "original", "redacted", max_uses=0)
+        assert record.max_uses == 1
 
 
 class TestConsentStoreThreadSafety:

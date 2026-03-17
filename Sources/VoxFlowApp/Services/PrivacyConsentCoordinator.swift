@@ -18,6 +18,7 @@ typealias PrivacyWorkflowContinuation = @MainActor (String, Bool) async throws -
 final class PrivacyConsentCoordinator: PrivacyConsentCoordinating {
     private let state: AppState
     private var pendingContinuation: PrivacyWorkflowContinuation?
+    private var activeApprovalTask: Task<Void, Never>?
 
     init(state: AppState) {
         self.state = state
@@ -59,10 +60,12 @@ final class PrivacyConsentCoordinator: PrivacyConsentCoordinating {
 
         state.statusLine = sendRaw ? "Sending approved raw text to private API..." : "Sending redacted text to private API..."
 
-        Task { @MainActor [weak self] in
+        activeApprovalTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
+                try Task.checkCancellation()
                 try await continuation(preview.token, sendRaw)
+                guard !Task.isCancelled else { return }
                 if sendRaw {
                     state.privacyApproveRawCount += 1
                 } else {
@@ -70,7 +73,10 @@ final class PrivacyConsentCoordinator: PrivacyConsentCoordinating {
                 }
                 state.privacyPreview = nil
                 pendingContinuation = nil
+            } catch is CancellationError {
+                // New capture started — stale approval silently discarded
             } catch {
+                guard !Task.isCancelled else { return }
                 state.errorMessage = "Private API processing failed: \(error.localizedDescription)"
                 state.sessionState = .error
                 state.privacyPreview = nil
@@ -80,6 +86,8 @@ final class PrivacyConsentCoordinator: PrivacyConsentCoordinating {
     }
 
     func cancelPrivacyPreview() {
+        activeApprovalTask?.cancel()
+        activeApprovalTask = nil
         state.privacyPreview = nil
         pendingContinuation = nil
         state.statusLine = "Private API request cancelled"
@@ -87,6 +95,8 @@ final class PrivacyConsentCoordinator: PrivacyConsentCoordinating {
     }
 
     func clearPendingOperation() {
+        activeApprovalTask?.cancel()
+        activeApprovalTask = nil
         pendingContinuation = nil
     }
 

@@ -77,19 +77,18 @@ class TestInferTaskOwners:
         assert result[0]["owner"] == "Bob"
         assert result[0]["confidence"] == 0.78
 
-    def test_known_speaker_fallback(self):
+    def test_no_pattern_match_stays_unassigned(self):
         items = ["Update the documentation"]
         result = infer_task_owners(items, "Alice: Let me check.\nBob: Sure.")
-        # No "Name will/to/should" pattern → falls back to first known speaker
-        assert result[0]["confidence"] == 0.45
+        # No "Name will/to/should" pattern → stays Unassigned (no fabrication)
+        assert result[0]["owner"] == "Unassigned"
+        assert result[0]["confidence"] == 0.35
 
-    def test_fallback_speaker_when_no_named_speakers(self):
-        # Even without named speakers, infer_speaker_segments returns a "Speaker 1"
-        # fallback, so known_speakers is never empty. The owner becomes that fallback.
+    def test_no_named_speakers_stays_unassigned(self):
         items = ["Update the documentation"]
         result = infer_task_owners(items, "Just a plain transcript.")
-        assert result[0]["owner"] == "Speaker 1"
-        assert result[0]["confidence"] == 0.45
+        assert result[0]["owner"] == "Unassigned"
+        assert result[0]["confidence"] == 0.35
 
     def test_empty_items(self):
         assert infer_task_owners([], "Some transcript") == []

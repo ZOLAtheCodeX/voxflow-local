@@ -853,6 +853,8 @@ class ConsentRecord:
     original_text: str
     redacted_text: str
     created_at: float
+    max_uses: int = 1
+    use_count: int = 0
 
 
 class ConsentStore:
@@ -861,7 +863,7 @@ class ConsentStore:
         self._records: dict[str, ConsentRecord] = {}
         self._lock = Lock()
 
-    def create(self, session_id: str, operation: str, original_text: str, redacted_text: str) -> ConsentRecord:
+    def create(self, session_id: str, operation: str, original_text: str, redacted_text: str, max_uses: int = 1) -> ConsentRecord:
         token = secrets.token_urlsafe(20)
         record = ConsentRecord(
             token=token,
@@ -870,6 +872,7 @@ class ConsentStore:
             original_text=original_text,
             redacted_text=redacted_text,
             created_at=time.time(),
+            max_uses=max(1, max_uses),
         )
         with self._lock:
             self._prune_locked()
@@ -884,8 +887,10 @@ class ConsentStore:
                 return None
             if record.session_id != session_id or record.operation != operation:
                 return None
-            # Single-use: consume the token on successful resolution
-            self._records.pop(token, None)
+            # Bounded-use: increment counter, consume when limit reached
+            record.use_count += 1
+            if record.use_count >= record.max_uses:
+                self._records.pop(token, None)
             return record
 
     def _prune_locked(self) -> None:
@@ -1285,9 +1290,6 @@ def infer_task_owners(action_items: list[str], transcript: str) -> list[dict[str
             if any_match:
                 owner = normalize_whitespace(any_match.group("owner"))
                 confidence = 0.78
-            elif known_speakers:
-                owner = sorted(known_speakers)[0]
-                confidence = 0.45
 
         results.append(
             {
@@ -1630,11 +1632,14 @@ class ProviderRouter:
             raise HTTPException(status_code=400, detail="input_text is empty")
 
         redacted = original if is_placeholder_text(original) else redact_sensitive_text(original)
+        # Cleanup needs 2 uses (light + polish); translate/meeting need 1
+        uses = 2 if operation == "cleanup" else 1
         record = self._consent_store.create(
             session_id=payload.session_id,
             operation=operation,
             original_text=original,
             redacted_text=redacted,
+            max_uses=uses,
         )
         return PrivacyPreviewResponse(
             operation=operation,
@@ -1940,15 +1945,17 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     text, confidence = provider_router.transcribe(audio_bytes, payload.sample_rate, payload.language_hint)
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    # Two-tier hallucination filter:
+    # Two-tier hallucination filter (Whisper-only — OpenAI API does its own filtering):
     # - Known YouTube/podcast phrases: filtered at ANY duration (never real dictation)
     # - Single words, repeated words: filtered only on short audio (< 3s)
-    audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
-    is_short = audio_duration_s < 3.0
-    if is_whisper_hallucination(text, short_audio=is_short):
-        logger.info("Filtered Whisper hallucination (%.1fs, short=%s)", audio_duration_s, is_short)
-        text = ""
-        confidence = 0.0
+    stt_backend = current_stt_backend()
+    if stt_backend != "openai":
+        audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
+        is_short = audio_duration_s < 3.0
+        if is_whisper_hallucination(text, short_audio=is_short):
+            logger.info("Filtered Whisper hallucination (%.1fs, short=%s, backend=%s)", audio_duration_s, is_short, stt_backend)
+            text = ""
+            confidence = 0.0
 
     return TranscribeResponse(
         text=text,
