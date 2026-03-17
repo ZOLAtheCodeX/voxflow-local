@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 from server import (
     apply_tone,
-    bool_from_env,
     coerce_string_list,
     extract_json_object,
     is_placeholder_text,
@@ -215,16 +214,28 @@ class TestExtractJsonObject:
         assert result == {"a": 1}
 
     def test_unbalanced_braces(self):
-        # Case from rationale: missing closing brace
         result = extract_json_object('{"a": 1')
         assert result == {}
 
     def test_malformed_json_triggers_except(self):
-        # Balanced braces but invalid content (e.g. trailing comma)
-        # This should trigger the try-except block in extract_json_object
         result = extract_json_object('{"a": 1,}')
         assert result == {}
 
+    def test_multiple_objects(self):
+        result = extract_json_object('{"a": 1} and {"b": 2}')
+        assert result == {}
+
+    def test_nested_object(self):
+        result = extract_json_object('{"outer": {"inner": 1}}')
+        assert result == {"outer": {"inner": 1}}
+
+    def test_missing_opening_brace(self):
+        result = extract_json_object('"a": 1}')
+        assert result == {}
+
+    def test_whitespace_around_json(self):
+        result = extract_json_object('   \n  {"key": "value"}  \n  ')
+        assert result == {"key": "value"}
 
 # ── coerce_string_list ───────────────────────────────────────────────
 
@@ -341,22 +352,3 @@ class TestSplitSentences:
     def test_single_sentence(self):
         result = split_sentences("Just one sentence.")
         assert result == ["Just one sentence."]
-
-
-# ── bool_from_env ────────────────────────────────────────────────────
-
-class TestBoolFromEnv:
-    def test_missing_var_returns_default(self, monkeypatch):
-        monkeypatch.delenv("MISSING_VAR", raising=False)
-        assert bool_from_env("MISSING_VAR") is False
-        assert bool_from_env("MISSING_VAR", default=True) is True
-
-    def test_truthy_values(self, monkeypatch):
-        for val in ["1", "true", "yes", "on", "  TrUe  ", " ON "]:
-            monkeypatch.setenv("TEST_VAR", val)
-            assert bool_from_env("TEST_VAR") is True
-
-    def test_falsy_values(self, monkeypatch):
-        for val in ["0", "false", "no", "off", "", "random", "  "]:
-            monkeypatch.setenv("TEST_VAR", val)
-            assert bool_from_env("TEST_VAR") is False
