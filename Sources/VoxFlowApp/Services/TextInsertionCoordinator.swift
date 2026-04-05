@@ -3,10 +3,10 @@ import Foundation
 import os.log
 
 @MainActor protocol TextInsertionCoordinating {
-    func insertCurrentText()
-    func insertCurrentText(targetApp: NSRunningApplication?)
-    func insertText(_ text: String, statusSuffix: String) -> Bool
-    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) -> Bool
+    func insertCurrentText() async
+    func insertCurrentText(targetApp: NSRunningApplication?) async
+    func insertText(_ text: String, statusSuffix: String) async -> Bool
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) async -> Bool
     func copyCurrentText()
     func copyMeetingMarkdownTemplate()
     func copyMeetingNotionTemplate()
@@ -23,11 +23,11 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         self.insertService = insertService
     }
 
-    func insertCurrentText() {
-        insertCurrentText(targetApp: nil)
+    func insertCurrentText() async {
+        await insertCurrentText(targetApp: nil)
     }
 
-    func insertCurrentText(targetApp: NSRunningApplication?) {
+    func insertCurrentText(targetApp: NSRunningApplication?) async {
         guard !state.displayText.isEmpty else { return }
 
         if state.privacyPreview != nil {
@@ -48,7 +48,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         state.sessionState = .inserting
         let appName = state.focusTarget.appName ?? "Unknown App"
         let started = ContinuousClock.now
-        let result = insertService.insert(text: state.displayText, targetApp: targetApp)
+        let result = await insertService.insert(text: state.displayText, targetApp: targetApp)
         let elapsedMs = Self.elapsedMilliseconds(since: started)
         log.info("insertCurrentText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
@@ -75,17 +75,17 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     }
 
     @discardableResult
-    func insertText(_ text: String, statusSuffix: String) -> Bool {
-        insertText(text, statusSuffix: statusSuffix, targetApp: nil)
+    func insertText(_ text: String, statusSuffix: String) async -> Bool {
+        await insertText(text, statusSuffix: statusSuffix, targetApp: nil)
     }
 
     @discardableResult
-    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) -> Bool {
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) async -> Bool {
         guard !text.isEmpty else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
         let started = ContinuousClock.now
-        let result = insertService.insert(text: text, targetApp: targetApp)
+        let result = await insertService.insert(text: text, targetApp: targetApp)
         let elapsedMs = Self.elapsedMilliseconds(since: started)
         log.info("insertText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result

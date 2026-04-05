@@ -347,6 +347,108 @@ class TestIsWhisperHallucination:
     def test_real_sentence_with_thank_you(self):
         assert is_whisper_hallucination("Thank you for helping me with this project") is False
 
+    # --- punctuation variant normalization (hello bug fix) ---
+    def test_greeting_punctuation_variants_filtered(self):
+        assert is_whisper_hallucination("hello!") is True
+        assert is_whisper_hallucination("Hello?") is True
+        assert is_whisper_hallucination("hello,") is True
+        assert is_whisper_hallucination("Hello;") is True
+        assert is_whisper_hallucination("hello...") is True
+        assert is_whisper_hallucination("Hi!") is True
+        assert is_whisper_hallucination("Hey?") is True
+
+    def test_greeting_variants_filtered_on_long_audio(self):
+        assert is_whisper_hallucination("hello!", short_audio=False) is True
+        assert is_whisper_hallucination("Hello?", short_audio=False) is True
+        assert is_whisper_hallucination("Hey,", short_audio=False) is True
+
+    def test_short_only_punctuation_variants(self):
+        assert is_whisper_hallucination("Thanks!", short_audio=True) is True
+        assert is_whisper_hallucination("Bye!", short_audio=True) is True
+        # Short-only variants should NOT be filtered on long audio
+        assert is_whisper_hallucination("Thanks!", short_audio=False) is False
+
+    def test_quoted_greeting_variants_filtered(self):
+        assert is_whisper_hallucination('"hello"') is True
+        assert is_whisper_hallucination('"Hello"', short_audio=False) is True
+        assert is_whisper_hallucination("'hey'") is True
+
+    def test_multi_word_phrases_not_affected(self):
+        assert is_whisper_hallucination("Hello world!") is False
+        assert is_whisper_hallucination("Hey, can you help me?") is False
+        assert is_whisper_hallucination("Hi there.") is False
+
+
+# ── WhisperEngine._estimate_confidence ───────────────────────────────
+
+class TestEstimateConfidence:
+    """Tests for WhisperEngine confidence estimation (replaces hardcoded 0.9)."""
+
+    @staticmethod
+    def _estimate(text, audio_duration_s=5.0, chunks=None, sample_rate=16000):
+        from server import WhisperEngine
+
+        # Use a plain list as a stand-in for a numpy array — only len() is needed
+        audio_len = int(audio_duration_s * sample_rate)
+
+        class FakeAudio:
+            """Minimal stand-in for np.ndarray — _estimate_confidence only uses len()."""
+            def __init__(self, n):
+                self._n = n
+            def __len__(self):
+                return self._n
+
+        output = {"text": text, "chunks": chunks or []}
+        return WhisperEngine._estimate_confidence(output, text, FakeAudio(audio_len), sample_rate)
+
+    def test_empty_text_returns_zero(self):
+        assert self._estimate("") == 0.0
+
+    def test_short_text_long_audio_low_confidence(self):
+        # "hello" from 5s of audio — classic hallucination
+        conf = self._estimate("hello", audio_duration_s=5.0)
+        assert conf <= 0.1, f"Expected <= 0.1, got {conf}"
+
+    def test_short_text_short_audio_higher_confidence(self):
+        # "hello" from 0.5s of audio with matching chunk — plausible
+        chunks = [{"text": "hello", "timestamp": (0.0, 0.4)}]
+        conf = self._estimate("hello", audio_duration_s=0.5, chunks=chunks)
+        assert conf > 0.1, f"Expected > 0.1, got {conf}"
+
+    def test_full_sentence_good_coverage(self):
+        text = "I need to schedule a meeting for tomorrow"
+        chunks = [{"text": text, "timestamp": (0.2, 3.8)}]
+        conf = self._estimate(text, audio_duration_s=4.0, chunks=chunks)
+        assert conf >= 0.8, f"Expected >= 0.8, got {conf}"
+
+    def test_no_chunks_falls_back_to_word_rate(self):
+        # 10 words from 4s audio — ~2.5 words/sec, good coverage
+        text = "one two three four five six seven eight nine ten"
+        conf = self._estimate(text, audio_duration_s=4.0, chunks=[])
+        assert conf >= 0.8, f"Expected >= 0.8, got {conf}"
+
+    def test_no_chunks_single_word_long_audio(self):
+        # 1 word from 5s audio — should be very low
+        conf = self._estimate("hello", audio_duration_s=5.0, chunks=[])
+        assert conf <= 0.1, f"Expected <= 0.1, got {conf}"
+
+    def test_legitimate_single_word_long_audio_with_good_coverage(self):
+        # Real "yes" spoken for 1.1s in a 3s clip — coverage ≈ 0.37, above 0.3 threshold
+        chunks = [{"text": "yes", "timestamp": (0.5, 1.6)}]
+        conf = self._estimate("yes", audio_duration_s=3.0, chunks=chunks)
+        assert conf > 0.15, f"Legitimate single-word with strong coverage should not be crushed: {conf}"
+
+    def test_hallucinated_single_word_long_audio_weak_coverage(self):
+        # "hello" with no real spoken segment from 5s of noise — low coverage, SHOULD be penalized
+        conf = self._estimate("hello", audio_duration_s=5.0)
+        assert conf <= 0.1, f"Hallucinated word from long audio should be low: {conf}"
+
+    def test_confidence_never_exceeds_095(self):
+        text = "a b c d e f g h i j k l m n o p"
+        chunks = [{"text": text, "timestamp": (0.0, 4.0)}]
+        conf = self._estimate(text, audio_duration_s=4.0, chunks=chunks)
+        assert conf <= 0.95
+
 
 # ── split_sentences ──────────────────────────────────────────────────
 

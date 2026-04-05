@@ -84,7 +84,7 @@ final class PromptWorkflowCoordinator: PromptWorkflowCoordinating {
         if request.insertBehavior.cleanupMode != nil && request.providerMode == .localOnly {
             let appLabel = state.focusTarget.appName ?? "app"
             let insertStarted = ContinuousClock.now
-            if textInsertion.insertText(
+            if await textInsertion.insertText(
                 framedPrompt,
                 statusSuffix: "Prompt inserted (\(intent.displayName) — \(appLabel))",
                 targetApp: request.targetApp

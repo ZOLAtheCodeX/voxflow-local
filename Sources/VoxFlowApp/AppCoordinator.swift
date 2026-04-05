@@ -90,7 +90,7 @@ final class AppCoordinator: ObservableObject {
     private let whisperKitService = WhisperKitSTTService()
     private lazy var focusMonitor = FocusContextMonitor(insertService: insertService)
 
-    private(set) lazy var settings: SettingsCoordinating = SettingsCoordinator(state: state, backendManager: backendManager)
+    private(set) var settings: SettingsCoordinating!
     private(set) lazy var onboarding: OnboardingCoordinating = OnboardingCoordinator(state: state)
     private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService)
     private(set) lazy var benchmark: TranslationBenchmarkCoordinating = TranslationBenchmarkCoordinator(state: state, backendManager: backendManager, settings: settings)
@@ -661,6 +661,8 @@ final class AppCoordinator: ObservableObject {
 
     func cancelActiveCapture() {
         timer?.invalidate()
+        captureTimeoutTimer?.invalidate()
+        captureTimeoutTimer = nil
 
         if state.sessionState == .recording {
             _ = try? audioCapture.stopCapture()
@@ -688,7 +690,7 @@ final class AppCoordinator: ObservableObject {
     func copyCurrentText() { textInsertion.copyCurrentText() }
     func copyMeetingMarkdownTemplate() { textInsertion.copyMeetingMarkdownTemplate() }
     func copyMeetingNotionTemplate() { textInsertion.copyMeetingNotionTemplate() }
-    func insertCurrentText() { textInsertion.insertCurrentText(targetApp: capturedTargetApp) }
+    func insertCurrentText() { Task { await textInsertion.insertCurrentText(targetApp: capturedTargetApp) } }
 
     func approveTranslation() {
         guard var translation = state.translationCandidate else { return }
@@ -1038,13 +1040,17 @@ final class AppCoordinator: ObservableObject {
     func insertRecentDictation(_ candidate: TranscriptCandidate) {
         let text = candidate.text(for: candidate.selectedMode)
         let appLabel = state.focusTarget.appName ?? "app"
-        if textInsertion.insertText(text, statusSuffix: "Re-inserted — \(appLabel)") {
-            state.sessionState = .idle
+        Task {
+            if await textInsertion.insertText(text, statusSuffix: "Re-inserted — \(appLabel)") {
+                state.sessionState = .idle
+            }
         }
     }
 
     private func resolveEffectiveProfile() -> AppProfile? {
-        let bundleID = state.focusTarget.bundleID ?? ""
+        let bundleID = capturedTargetApp?.bundleIdentifier
+            ?? state.focusTarget.bundleID
+            ?? ""
         return state.appProfiles[bundleID]
             ?? SettingsCoordinator.defaultAppProfiles[bundleID]
     }
@@ -1097,7 +1103,7 @@ final class AppCoordinator: ObservableObject {
                 self.pushToSessionMemory(candidate)
                 let appLabel = self.state.focusTarget.appName ?? "app"
                 let insertStarted = ContinuousClock.now
-                if self.textInsertion.insertText(rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: self.capturedTargetApp) {
+                if await self.textInsertion.insertText(rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: self.capturedTargetApp) {
                     trace.recordStage("insert", startedAt: insertStarted, detail: "mode=raw")
                     self.state.sessionState = .idle
                 } else {
@@ -1132,7 +1138,7 @@ final class AppCoordinator: ObservableObject {
                     let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
                     let appLabel = self.state.focusTarget.appName ?? "app"
                     let insertStarted = ContinuousClock.now
-                    if self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
+                    if await self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
                         trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue)")
                         self.state.sessionState = .idle
                     } else {
@@ -1181,7 +1187,7 @@ final class AppCoordinator: ObservableObject {
                 let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
                 let appLabel = self.state.focusTarget.appName ?? "app"
                 let insertStarted = ContinuousClock.now
-                if self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
+                if await self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
                     trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue)")
                     self.state.sessionState = .idle
                 } else {
@@ -1259,10 +1265,12 @@ final class AppCoordinator: ObservableObject {
             sessionID: sessionID, operation: .meeting, inputText: rawText, trace: trace
         ) { [weak self] providerMode, consentToken, allowRaw in
             guard let self else { return }
+            let profile = self.resolveEffectiveProfile()
+            let effectiveTone = profile?.tone ?? self.state.toneStyle
             let summaryStarted = ContinuousClock.now
             let response = try await BackendAPIClient.meetingSummarize(
                 sessionID: sessionID, transcript: rawText,
-                toneStyle: self.state.toneStyle, providerMode: providerMode,
+                toneStyle: effectiveTone, providerMode: providerMode,
                 consentToken: consentToken, allowRaw: allowRaw
             )
             trace.recordStage("meeting_summary", startedAt: summaryStarted, detail: "provider=\(providerMode.rawValue)")

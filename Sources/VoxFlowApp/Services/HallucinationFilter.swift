@@ -39,6 +39,17 @@ enum HallucinationFilter {
         "you",
     ])
 
+    /// Characters that Whisper may append to hallucinated greetings.
+    private static let trailingPunctuation = CharacterSet(charactersIn: ".!?,;:…\"'")
+
+    /// Pre-computed normalized (punctuation-stripped) versions for O(1) lookup.
+    private static let alwaysFilteredNormalized: Set<String> = Set(
+        alwaysFiltered.map { $0.trimmingCharacters(in: trailingPunctuation) }.filter { !$0.isEmpty }
+    )
+    private static let shortOnlyFilteredNormalized: Set<String> = Set(
+        shortOnlyFiltered.map { $0.trimmingCharacters(in: trailingPunctuation) }.filter { !$0.isEmpty }
+    )
+
     static func isLikelyHallucination(_ text: String, shortAudio: Bool) -> Bool {
         let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !stripped.isEmpty else { return true }
@@ -48,8 +59,14 @@ enum HallucinationFilter {
             return true
         }
 
+        // Normalize trailing punctuation so "hello!", "hello?", "hello," etc. match
+        let normalized = lowered.trimmingCharacters(in: trailingPunctuation)
+        if !normalized.isEmpty, normalized != lowered, alwaysFilteredNormalized.contains(normalized) {
+            return true
+        }
+
         if shortAudio {
-            if shortOnlyFiltered.contains(lowered) {
+            if shortOnlyFiltered.contains(lowered) || shortOnlyFilteredNormalized.contains(normalized) {
                 return true
             }
             let words = lowered.split(whereSeparator: { $0.isWhitespace })

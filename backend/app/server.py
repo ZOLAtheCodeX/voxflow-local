@@ -293,6 +293,48 @@ class WhisperEngine:
         self._warmed_up = False
         self._load_pipeline()
 
+    @staticmethod
+    def _estimate_confidence(output: dict, text: str, audio: "np.ndarray", sample_rate: int) -> float:
+        """Derive confidence from pipeline output instead of hardcoding 0.9.
+
+        Uses chunk timestamps to estimate how much of the audio was actually
+        spoken. A lone "hello" from 5 seconds of noise will have very low
+        coverage and thus low confidence — matching WhisperKit's avgLogprob
+        behavior for hallucinated greetings.
+        """
+        if not text:
+            return 0.0
+
+        audio_duration = len(audio) / max(sample_rate, 1)
+        word_count = len(text.split())
+        chunks = output.get("chunks", [])
+
+        # Compute spoken duration from chunk timestamps
+        spoken_duration = 0.0
+        for chunk in chunks:
+            ts = chunk.get("timestamp")
+            if ts and len(ts) == 2 and ts[0] is not None and ts[1] is not None:
+                spoken_duration += max(0.0, ts[1] - ts[0])
+
+        if spoken_duration > 0 and audio_duration > 0:
+            coverage = min(1.0, spoken_duration / audio_duration)
+        else:
+            # No timestamp data — fall back to word-rate heuristic
+            # Normal speech is ~2.5 words/sec; hallucinations have far fewer
+            expected_words = audio_duration * 2.5
+            coverage = min(1.0, word_count / max(expected_words, 1.0))
+
+        # Base confidence from coverage (cap at 0.95)
+        confidence = min(0.95, max(0.05, coverage))
+
+        # Penalty for very short text from longer audio with weak coverage —
+        # classic hallucination pattern. Skip penalty when timestamps show
+        # strong spoken coverage (legitimate short utterance in longer clip).
+        if word_count <= 2 and audio_duration > 2.0 and coverage < 0.3:
+            confidence = min(confidence, 0.1)
+
+        return round(confidence, 3)
+
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> STTExecutionResult:
         stage_timings_ms: dict[str, int] = {}
         model_loaded_before_request = self.model_loaded
@@ -355,7 +397,7 @@ class WhisperEngine:
             )
             stage_timings_ms["stt_inference"] = int((time.perf_counter() - inference_started) * 1000)
             text = str(output.get("text", "")).strip()
-            confidence = 0.9 if text else 0.0
+            confidence = self._estimate_confidence(output, text, audio, sample_rate)
             return STTExecutionResult(
                 text=text,
                 confidence=confidence,
@@ -637,6 +679,7 @@ class TranslateEngine:
         configured_backend = os.environ.get("VOXFLOW_TRANSLATE_BACKEND", "auto").lower()
         self.backend = self._resolve_backend(configured_backend, self.model_id)
         self._pipeline = None
+        self._load_failed = False
         self._lock = Lock()
 
     @staticmethod
@@ -647,11 +690,11 @@ class TranslateEngine:
         return "translategemma" if "translategemma" in model_id.lower() else "marian"
 
     def _load_pipeline(self) -> None:
-        if self._pipeline is not None:
+        if self._pipeline is not None or self._load_failed:
             return
 
         with self._lock:
-            if self._pipeline is not None:
+            if self._pipeline is not None or self._load_failed:
                 return
             try:
                 from transformers import pipeline
@@ -668,7 +711,7 @@ class TranslateEngine:
                 logger.info("Loaded translate model: %s (backend=%s)", self.model_id, self.backend)
             except Exception as exc:
                 logger.error("Failed to load translate model %s: %s", self.model_id, exc)
-                self._pipeline = False
+                self._load_failed = True
 
     def translate(self, text: str) -> str:
         self._load_pipeline()
@@ -921,6 +964,17 @@ _WHISPER_HALLUCINATION_SHORT_ONLY = frozenset(
 )
 
 
+_BOUNDARY_PUNCTUATION_RE = re.compile(r"^[.!?,;:…\"']+|[.!?,;:…\"']+$")
+
+# Pre-computed normalized (punctuation-stripped) versions for O(1) lookup
+_WHISPER_HALLUCINATION_ALWAYS_NORMALIZED = frozenset(
+    _BOUNDARY_PUNCTUATION_RE.sub("", p) for p in _WHISPER_HALLUCINATION_ALWAYS if _BOUNDARY_PUNCTUATION_RE.sub("", p)
+)
+_WHISPER_HALLUCINATION_SHORT_NORMALIZED = frozenset(
+    _BOUNDARY_PUNCTUATION_RE.sub("", p) for p in _WHISPER_HALLUCINATION_SHORT_ONLY if _BOUNDARY_PUNCTUATION_RE.sub("", p)
+)
+
+
 def is_whisper_hallucination(text: str, short_audio: bool = True) -> bool:
     """Detect common Whisper hallucination patterns.
 
@@ -936,9 +990,13 @@ def is_whisper_hallucination(text: str, short_audio: bool = True) -> bool:
     # Always-filter phrases (never real dictation)
     if lowered in _WHISPER_HALLUCINATION_ALWAYS:
         return True
+    # Normalize boundary punctuation so "hello!", "hello?", '"hello"' etc. match
+    normalized = _BOUNDARY_PUNCTUATION_RE.sub("", lowered)
+    if normalized and normalized != lowered and normalized in _WHISPER_HALLUCINATION_ALWAYS_NORMALIZED:
+        return True
     # Short-audio-only filters
     if short_audio:
-        if lowered in _WHISPER_HALLUCINATION_SHORT_ONLY:
+        if lowered in _WHISPER_HALLUCINATION_SHORT_ONLY or normalized in _WHISPER_HALLUCINATION_SHORT_NORMALIZED:
             return True
         # Repeated single word (e.g., "you you you")
         words = lowered.split()

@@ -102,7 +102,8 @@ def test_transcribe_success():
     # Assert
     assert isinstance(result, STTExecutionResult)
     assert result.text == "Hello world"
-    assert result.confidence == 0.9
+    # Mock has no chunks and near-zero audio duration → word-rate heuristic saturates to cap
+    assert result.confidence == 0.95
 
     # Verify pipeline was called (engine calls pipeline(...) internally)
     mock_pipeline_instance.assert_called_once()

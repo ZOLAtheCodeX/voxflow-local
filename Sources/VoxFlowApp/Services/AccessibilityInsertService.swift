@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 
+@MainActor
 final class AccessibilityInsertService {
     private let systemWide = AXUIElementCreateSystemWide()
 
@@ -33,18 +34,18 @@ final class AccessibilityInsertService {
         )
     }
 
-    func insert(text: String) -> InsertResult {
-        insert(text: text, targetApp: nil)
+    func insert(text: String) async -> InsertResult {
+        await insert(text: text, targetApp: nil)
     }
 
-    func insert(text: String, targetApp: NSRunningApplication?) -> InsertResult {
+    func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
         let effectiveTarget = targetApp ?? NSWorkspace.shared.frontmostApplication
 
         if insertDirectly(text: text) {
             return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
         }
 
-        if simulatePaste(text: text, targetApp: effectiveTarget) {
+        if await simulatePaste(text: text, targetApp: effectiveTarget) {
             return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
         }
 
@@ -81,7 +82,7 @@ final class AccessibilityInsertService {
         return false
     }
 
-    private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil) -> Bool {
+    private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil) async -> Bool {
         let pasteboard = NSPasteboard.general
 
         // Save the user's current clipboard so we can restore it after pasting
@@ -90,16 +91,15 @@ final class AccessibilityInsertService {
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else { return false }
 
-        // Re-activate the target app — focus may have shifted during transcription
+        // Re-activate the target app — focus may have shifted during transcription.
+        // Uses Task.sleep to yield the main thread during the wait.
         if let app = targetApp, !app.isActive {
             app.activate()
             // Give macOS time to bring the app window forward.
-            // Uses Thread.sleep on this thread (already off main for auto-insert,
-            // or quick enough for manual insert).
-            Thread.sleep(forTimeInterval: 0.10) // 100ms
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
         } else {
             // Brief delay for Electron apps to register clipboard changes before Cmd+V
-            Thread.sleep(forTimeInterval: 0.03) // 30ms
+            try? await Task.sleep(nanoseconds: 30_000_000) // 30ms
         }
 
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)

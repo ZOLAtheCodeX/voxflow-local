@@ -12,7 +12,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testInsertBlockedWhenPrivacyPreviewActive() {
+    func testInsertBlockedWhenPrivacyPreviewActive() async {
         let (sut, state) = makeSUT()
         state.transcriptCandidate = TranscriptCandidate(
             rawText: "test", lightText: "test", polishText: "test", selectedMode: .raw
@@ -21,27 +21,27 @@ final class TextInsertionCoordinatorTests: XCTestCase {
             operation: .cleanup, token: "tok", originalText: "a", redactedText: "b"
         )
 
-        sut.insertCurrentText()
+        await sut.insertCurrentText()
 
         XCTAssertEqual(state.statusLine, "Approve privacy review before inserting")
         XCTAssertNotEqual(state.sessionState, .inserting)
     }
 
     @MainActor
-    func testInsertBlockedWhenTranslationNotApproved() {
+    func testInsertBlockedWhenTranslationNotApproved() async {
         let (sut, state) = makeSUT()
         state.workflowMode = .translateEnToDe
         state.translationCandidate = TranslationCandidate(
             sourceEnglish: "hello", targetGerman: "hallo", approved: false
         )
 
-        sut.insertCurrentText()
+        await sut.insertCurrentText()
 
         XCTAssertEqual(state.statusLine, "Approve translation before inserting")
     }
 
     @MainActor
-    func testInsertBlockedWhenMeetingNotApproved() {
+    func testInsertBlockedWhenMeetingNotApproved() async {
         let (sut, state) = makeSUT()
         state.workflowMode = .meeting
         state.meetingCandidate = MeetingCandidate(
@@ -50,7 +50,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
             markdownExport: "", notionExport: "", approved: false
         )
 
-        sut.insertCurrentText()
+        await sut.insertCurrentText()
 
         XCTAssertEqual(state.statusLine, "Approve meeting notes before inserting")
     }
@@ -69,25 +69,25 @@ final class TextInsertionCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testInsertEmptyTextIsNoOp() {
+    func testInsertEmptyTextIsNoOp() async {
         let (sut, state) = makeSUT()
         // No transcript, displayText is empty
         state.transcriptCandidate = nil
 
-        sut.insertCurrentText()
+        await sut.insertCurrentText()
 
         XCTAssertNotEqual(state.sessionState, .inserting)
         XCTAssertEqual(state.successfulInsertCount, 0)
     }
 
     @MainActor
-    func testInsertTextAcceptsTargetApp() {
+    func testInsertTextAcceptsTargetApp() async {
         let (sut, state) = makeSUT()
         state.transcriptCandidate = TranscriptCandidate(
             rawText: "hello", lightText: "hello", polishText: "hello", selectedMode: .raw
         )
         // Should compile and not crash — targetApp is optional
-        _ = sut.insertText("hello", statusSuffix: "test", targetApp: nil)
+        _ = await sut.insertText("hello", statusSuffix: "test", targetApp: nil)
         // Insert may fail (no AX context in test), but it should not crash
         XCTAssertNotNil(state.lastInsertResult)
     }

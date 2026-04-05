@@ -60,15 +60,15 @@ if lsof -nP -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
     exit 0
   fi
   echo "[backend] port ${BACKEND_PORT} is in use but runtime readiness failed: ${READINESS_URL}"
-  CONFLICT_PIDS="$(lsof -ti "tcp:${BACKEND_PORT}" || true)"
-  if [[ -n "${CONFLICT_PIDS}" ]]; then
-    echo "[backend] attempting to stop conflicting process(es): ${CONFLICT_PIDS}"
-    kill ${CONFLICT_PIDS} >/dev/null 2>&1 || true
+  mapfile -t CONFLICT_PIDS < <(lsof -ti "tcp:${BACKEND_PORT}" || true)
+  if [[ ${#CONFLICT_PIDS[@]} -gt 0 ]]; then
+    echo "[backend] attempting to stop conflicting process(es): ${CONFLICT_PIDS[*]}"
+    kill "${CONFLICT_PIDS[@]}" >/dev/null 2>&1 || true
     sleep 1
   fi
   if lsof -nP -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-    if [[ -n "${CONFLICT_PIDS}" ]]; then
-      kill -9 ${CONFLICT_PIDS} >/dev/null 2>&1 || true
+    if [[ ${#CONFLICT_PIDS[@]} -gt 0 ]]; then
+      kill -9 "${CONFLICT_PIDS[@]}" >/dev/null 2>&1 || true
       sleep 1
     fi
   fi

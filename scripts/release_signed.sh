@@ -102,7 +102,6 @@ ZIP_PATH="${VERSION_OUT}/VoxFlow-${VERSION}.zip"
 CHECKSUM_PATH="${VERSION_OUT}/checksums.txt"
 
 ditto "${APP_PATH}" "${APP_ARCHIVE}"
-ditto -c -k --sequesterRsrc --keepParent "${APP_ARCHIVE}" "${ZIP_PATH}"
 
 echo "[release] creating DMG..."
 hdiutil create -volname "VoxFlow" -srcfolder "${APP_ARCHIVE}" -ov -format UDZO "${DMG_PATH}" >/dev/null
@@ -113,6 +112,9 @@ xcrun notarytool submit "${DMG_PATH}" --keychain-profile "${NOTARY_PROFILE}" --w
 echo "[release] stapling notarization..."
 xcrun stapler staple "${APP_ARCHIVE}"
 xcrun stapler staple "${DMG_PATH}"
+
+echo "[release] creating ZIP from stapled archive..."
+ditto -c -k --sequesterRsrc --keepParent "${APP_ARCHIVE}" "${ZIP_PATH}"
 
 echo "[release] writing checksums..."
 (cd "${VERSION_OUT}" && shasum -a 256 "$(basename "${DMG_PATH}")" "$(basename "${ZIP_PATH}")" > "${CHECKSUM_PATH}")

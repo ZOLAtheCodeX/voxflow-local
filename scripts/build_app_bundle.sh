@@ -128,7 +128,11 @@ else
 fi
 
 echo "[bundle] generating app icon..."
-python3 "${ROOT_DIR}/scripts/generate_app_icon.py" --output "${ICONSET_DIR}"
+ICON_PYTHON="${ROOT_DIR}/.venv/bin/python3"
+if [[ ! -x "${ICON_PYTHON}" ]]; then
+  ICON_PYTHON="python3"
+fi
+"${ICON_PYTHON}" "${ROOT_DIR}/scripts/generate_app_icon.py" --output "${ICONSET_DIR}"
 if ! TMPDIR="${ICON_TMP_DIR}" iconutil -c icns "${ICONSET_DIR}" -o "${ICNS_PATH}"; then
   FALLBACK_ICON="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns"
   echo "[bundle] warning: iconutil failed; falling back to system icon."

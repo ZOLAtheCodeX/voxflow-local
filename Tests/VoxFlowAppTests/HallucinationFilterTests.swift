@@ -102,4 +102,31 @@ final class HallucinationFilterTests: XCTestCase {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination(" hello ", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("  Thank you for watching.  ", shortAudio: false))
     }
+
+    // MARK: - Punctuation variant normalization (Fix for returning "hello" bug)
+
+    func testGreetingPunctuationVariantsFiltered() {
+        // These bypass exact-match but should be caught by normalization
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello!", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello?", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello,", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello;", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello...", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hi!", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hey?", shortAudio: false))
+    }
+
+    func testShortOnlyPunctuationVariantsFiltered() {
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Thanks!", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Bye!", shortAudio: true))
+        // Short-only variants should NOT be filtered on long audio
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Thanks!", shortAudio: false))
+    }
+
+    func testMultiWordPhrasesNotAffectedByNormalization() {
+        // Punctuation stripping should not cause false positives on real speech
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hello world!", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hey, can you help me?", shortAudio: true))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hi there.", shortAudio: false))
+    }
 }

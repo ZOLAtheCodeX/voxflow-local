@@ -10,6 +10,12 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+PYTHON_VERSION="$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
+if ! python3 -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null; then
+  echo "[bootstrap] error: Python 3.11+ required (found ${PYTHON_VERSION})"
+  exit 1
+fi
+
 echo "[bootstrap] creating virtual environment at ${VENV_DIR}..."
 if ! python3 -m venv "${VENV_DIR}"; then
   echo "[bootstrap] error: failed to create virtual environment"
