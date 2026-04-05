@@ -1,0 +1,26 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.4, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/zola/Documents/CODING/voxflow-local
+plugins: asyncio-1.3.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 267 items
+
+backend/tests/test_consent_store.py ............                         [  4%]
+backend/tests/test_endpoints.py ....................                     [ 11%]
+backend/tests/test_meeting_analysis.py ................................. [ 24%]
+                                                                         [ 24%]
+backend/tests/test_polish_engine.py ...............                      [ 29%]
+backend/tests/test_privacy_token_flow.py .....                           [ 31%]
+backend/tests/test_private_api_client.py .                               [ 32%]
+backend/tests/test_prompt_framing.py ...............                     [ 37%]
+backend/tests/test_regression_suite.py ..                                [ 38%]
+backend/tests/test_regression_utils.py ....                              [ 40%]
+backend/tests/test_security_logging.py .                                 [ 40%]
+backend/tests/test_text_cleanup.py ..................................... [ 54%]
+.....................................                                    [ 68%]
+backend/tests/test_translate_engine.py .....                             [ 70%]
+backend/tests/test_utils.py ............................................ [ 86%]
+................................                                         [ 98%]
+backend/tests/test_whisper_engine.py ....                                [100%]
+
+============================= 267 passed in 0.54s ==============================
