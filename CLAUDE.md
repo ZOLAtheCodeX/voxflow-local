@@ -77,6 +77,7 @@ swift run VoxFlowLocal
 | `VOXFLOW_STT_BACKEND` | STT engine: `whisper`, `whisperKit`, `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model name | `small` |
 | `VOXFLOW_OFFLINE` | Disable network model downloads | `1` |
+| `VOXFLOW_SIGN_IDENTITY` | Code signing identity override | auto-detected Apple Development cert |
 
 ## Key Patterns
 
@@ -126,6 +127,8 @@ swift run VoxFlowLocal
 | `ModuleNotFoundError: No module named 'fastapi'` | Broken venv after project move | `rm -rf .venv && ./scripts/bootstrap_backend.sh` |
 | `conditional downcast to CoreFoundation type` error | Swift 6.2 CF type bridging | Use `CFGetTypeID` guard + `as!` (not `as?`) |
 | Backend unreachable | Backend not running or wrong port | Run `./scripts/run_backend.sh`, check port 8765 |
+| Accessibility permission won't stick | Ad-hoc signing (`--sign -`) anchors TCC on CDHash, which changes every rebuild | Build scripts auto-detect Apple Development cert; override with `VOXFLOW_SIGN_IDENTITY`. Remove old entry in System Settings and re-add |
+| Accessibility shows "Missing" after granting | SettingsView checked before user approved in System Settings | Click "Request" again — polling now auto-updates within 2s |
 
 ## Git
 
@@ -150,3 +153,5 @@ swift run VoxFlowLocal
 - Hardcode confidence values in `WhisperEngine.transcribe()` — use `_estimate_confidence()` which derives from chunk timestamps
 - Add hallucination filter entries to only one side — both `HallucinationFilter.swift` and `server.py` must stay synchronized (dual-filter drift risk)
 - Use `Thread.sleep` in the insertion stack — paste fallback uses async `Task.sleep` to avoid blocking the main thread
+- Launch the raw Mach-O binary directly for AX features — always launch via `open ~/Applications/VoxFlow.app` so TCC sees a consistent app identity
+- Use `codesign --sign -` (ad-hoc) for installed builds — use the auto-detected Apple Development certificate so accessibility grants persist across rebuilds

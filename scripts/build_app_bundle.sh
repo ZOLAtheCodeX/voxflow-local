@@ -204,14 +204,30 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
 </plist>
 PLIST
 
+SIGN_IDENTITY="${VOXFLOW_SIGN_IDENTITY:-}"
+if [[ -z "${SIGN_IDENTITY}" ]]; then
+  SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
+fi
+
 if command -v codesign >/dev/null 2>&1; then
-  echo "[bundle] applying ad-hoc signature..."
-  if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
-    if ! codesign --force --sign - --entitlements "${ENTITLEMENTS_FILE}" "${APP_DIR}" >/dev/null 2>&1; then
-      echo "[bundle] warning: ad-hoc signing failed; launcher may reject the app bundle."
+  if [[ -n "${SIGN_IDENTITY}" ]]; then
+    echo "[bundle] signing with identity: ${SIGN_IDENTITY}"
+    if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
+      if ! codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENTITLEMENTS_FILE}" "${APP_DIR}" >/dev/null 2>&1; then
+        echo "[bundle] warning: identity signing failed; falling back to ad-hoc."
+        codesign --force --sign - --entitlements "${ENTITLEMENTS_FILE}" "${APP_DIR}" >/dev/null 2>&1 || true
+      fi
+    elif ! codesign --force --sign "${SIGN_IDENTITY}" "${APP_DIR}" >/dev/null 2>&1; then
+      echo "[bundle] warning: identity signing failed; falling back to ad-hoc."
+      codesign --force --sign - "${APP_DIR}" >/dev/null 2>&1 || true
     fi
-  elif ! codesign --force --sign - "${APP_DIR}" >/dev/null 2>&1; then
-    echo "[bundle] warning: ad-hoc signing failed; launcher may reject the app bundle."
+  else
+    echo "[bundle] no signing identity found; applying ad-hoc signature..."
+    if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
+      codesign --force --sign - --entitlements "${ENTITLEMENTS_FILE}" "${APP_DIR}" >/dev/null 2>&1 || true
+    else
+      codesign --force --sign - "${APP_DIR}" >/dev/null 2>&1 || true
+    fi
   fi
 fi
 

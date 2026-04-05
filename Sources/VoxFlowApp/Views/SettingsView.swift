@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
     @State private var permissions = PermissionSnapshot(microphoneAuthorized: false, accessibilityAuthorized: false)
+    @State private var permissionPollTimer: Timer?
     @State private var privateAPIBaseURLDraft = ""
     @State private var privateAPIModelDraft = ""
     @State private var privateAPIKeyDraft = ""
@@ -36,7 +37,7 @@ struct SettingsView: View {
                         .foregroundStyle(permissions.accessibilityAuthorized ? .green : .orange)
                     Button("Request") {
                         coordinator.requestAccessibilityPermission()
-                        refreshPermissions()
+                        startPermissionPolling()
                     }
                 }
 
@@ -413,6 +414,10 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding(16)
+        .onDisappear {
+            permissionPollTimer?.invalidate()
+            permissionPollTimer = nil
+        }
         .onAppear {
             refreshPermissions()
             privateAPIBaseURLDraft = state.privateAPIBaseURL
@@ -507,5 +512,21 @@ struct SettingsView: View {
 
     private func refreshPermissions() {
         permissions = coordinator.permissionSnapshot()
+    }
+
+    private func startPermissionPolling() {
+        permissionPollTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            Task { @MainActor in
+                let snap = coordinator.permissionSnapshot()
+                permissions = snap
+                if snap.accessibilityAuthorized {
+                    permissionPollTimer?.invalidate()
+                    permissionPollTimer = nil
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        permissionPollTimer = timer
     }
 }

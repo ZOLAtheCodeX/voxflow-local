@@ -15,9 +15,12 @@ echo "[voxflow] creating desktop launcher..."
 
 echo "[voxflow] launching..."
 if ! open "${DEST_APP}"; then
-  echo "[voxflow] launchservices open failed; launching executable directly..."
-  nohup "${DEST_APP}/Contents/MacOS/VoxFlowLocal" >"${HOME}/Library/Logs/VoxFlow.log" 2>&1 &
-  disown || true
-  echo "[voxflow] direct launch attempted"
-  echo "  log: ${HOME}/Library/Logs/VoxFlow.log"
+  echo "[voxflow] launchservices open failed."
+  echo ""
+  echo "  Do NOT launch the raw executable directly — it registers as a"
+  echo "  different TCC client and Accessibility permissions will not persist."
+  echo ""
+  echo "  Try: open ${DEST_APP}"
+  echo "  If that fails, check quarantine: xattr -cr ${DEST_APP}"
+  exit 1
 fi
