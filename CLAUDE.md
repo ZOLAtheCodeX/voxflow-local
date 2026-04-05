@@ -8,21 +8,24 @@ VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Pytho
 
 ```
 Sources/VoxFlowApp/        Swift frontend (SwiftUI, MenuBarExtra)
-  AppCoordinator.swift      Central orchestrator (~580 lines, @MainActor)
+  AppCoordinator.swift      Central orchestrator (~1500 lines, @MainActor)
   Services/                 Extracted coordinators + backend services
     SettingsCoordinator.swift           Provider, STT, insert behavior, app tone overrides + persistence
     OnboardingCoordinator.swift         Calibration flow lifecycle
-    TextInsertionCoordinator.swift      AX insert, clipboard copy/bridge, per-app stats
+    TextInsertionCoordinator.swift      Async AX insert, clipboard copy/bridge, per-app stats
     TranslationBenchmarkCoordinator.swift  Profile benchmarking + history
+    TranslationWorkflowCoordinator.swift   Translation workflow (extracted from AppCoordinator)
+    PromptWorkflowCoordinator.swift     Prompt workflow (extracted from AppCoordinator)
     PrivacyConsentCoordinator.swift     Privacy preview + closure-based continuation
-    AccessibilityInsertService.swift    AX text insertion + bundleID-aware app info
+    AccessibilityInsertService.swift    @MainActor AX text insertion + async paste fallback
+    HallucinationFilter.swift           Two-tier Whisper hallucination filter with punctuation normalization
     SessionMemoryStore.swift            Ring buffer for recent dictations (recent/push/count)
     MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem for menu bar palette
   Models/AppModels.swift    All domain types (enums, structs, InsertBehavior, FocusTargetSnapshot)
   State/AppState.swift      Published app state (~50 @Published properties)
   Views/                    SwiftUI views
 backend/app/
-  server.py                 FastAPI server (~1900 lines, all endpoints)
+  server.py                 FastAPI server (~2270 lines, all endpoints)
   text_cleanup_rules.py     Pre-compiled regex patterns for text cleanup (spoken punctuation, fillers, tones)
 scripts/                    Shell scripts (bootstrap, test, run, doctor, launcher, release)
 models/                     Pre-downloaded ML models (~24GB, not in git)
@@ -79,17 +82,17 @@ swift run VoxFlowLocal
 
 ### Swift
 
-- **`@MainActor` coordinator pattern**: `AppCoordinator` orchestrates audio capture and workflow routing; 5 extracted coordinators handle settings, onboarding, text insertion, benchmarking, and privacy consent via protocol-typed properties. Views observe `AppCoordinator.state` unchanged.
+- **`@MainActor` coordinator pattern**: `AppCoordinator` orchestrates audio capture and workflow routing; 7 extracted coordinators handle settings, onboarding, text insertion, benchmarking, privacy consent, translation workflow, and prompt workflow via protocol-typed properties. Views observe `AppCoordinator.state` unchanged.
 - **Privacy gate helper**: `processWithPrivacyGate` centralizes the `privateAPI` vs `localOnly` branch for all four workflow processors (`processDictation`, `processTranslation`, `processMeeting`, `processPrompt`)
 - **Auto-insert mode**: `InsertBehavior` enum (`.alwaysReview`, `.autoInsertRaw/Light/Polish`) controls whether dictation skips the review step. Persisted via `SettingsCoordinator`.
 - **Feature gates**: Dictation core remains always-on; translation, meeting, and prompt workflows are experimental toggles (`translationModeEnabled`, `meetingModeEnabled`, `promptModeEnabled`) surfaced through Settings and workflow picker filtering.
-- **Per-app profile resolution**: `resolveEffectiveProfile()` checks `state.appProfiles[bundleID]` → `SettingsCoordinator.defaultAppProfiles[bundleID]` → `nil` (callers fall back to global settings). Profiles include tone, cleanup mode, and insert behavior. Persisted as JSON `[String: AppProfile]` in UserDefaults.
+- **Per-app profile resolution**: `resolveEffectiveProfile()` checks `capturedTargetApp?.bundleIdentifier` → `state.focusTarget.bundleID` → `""`, then looks up `state.appProfiles[bundleID]` → `SettingsCoordinator.defaultAppProfiles[bundleID]` → `nil` (callers fall back to global settings). Profiles include tone, cleanup mode, and insert behavior. Persisted as JSON `[String: AppProfile]` in UserDefaults. Used by all four workflow processors.
 - **Clipboard bridge**: After successful AX direct insert, text is also copied to clipboard for recoverability. Skipped when paste fallback already uses clipboard.
 - **Session memory**: `SessionMemoryStore` ring buffer exposed via `AppState.recentDictations` with re-insert and copy actions in the "Recent" tab.
 - **Keychain for secrets**: API keys stored via `KeychainService` (not UserDefaults)
 - **CF type bridging**: Use `CFGetTypeID()` guard + `as!` for AXUIElement/AXValue casts (Swift 6.2 rejects `as?` on CF types)
 - **os.Logger**: Use `Logger(subsystem: "local.voxflow.app", category: "...")` for logging
-- **Accessibility API**: `AccessibilityInsertService` handles text insertion via AX direct write or simulated paste fallback; returns `(name, bundleID)` tuple from `focusedAppInfo`
+- **Accessibility API**: `AccessibilityInsertService` (`@MainActor`) handles async text insertion via AX direct write or simulated paste fallback (cooperative `Task.sleep` during paste delays); returns `(name, bundleID)` tuple from `focusedAppInfo`
 - **Non-activating panel**: Menu bar palette uses `NSPanel` with `.nonactivatingPanel` style mask and `.floating` level via `MenuBarPanelController`. Never steals focus from the target app.
 - **Target snapshot**: `capturedTargetApp` is frozen at `startCapture()` time and threaded through the pipeline to `insert(text:targetApp:)`. `FocusContextMonitor` freezes during active sessions via `freeze()`/`unfreeze()`.
 - **Dynamic activation policy**: `activateForWindow()` toggles between `.regular` (Dock visible) and `.accessory` (menu-bar-only) based on whether managed windows are open. `LSUIElement = true` in Info.plist.
@@ -103,13 +106,13 @@ swift run VoxFlowLocal
 - **Privacy redaction**: Regex-based PII redaction with preview before insertion
 - **Rate limiting**: 120 requests per 60 seconds per IP
 - **CORS**: Restricted to localhost origins only
-- **STT chunking**: WhisperEngine uses `chunk_length_s=30` with `stride_length_s=[5, 1]` for long-form transcription (30-45s)
+- **STT chunking**: WhisperEngine uses `chunk_length_s=30` with `stride_length_s=[5, 1]` for long-form transcription (30-45s). Confidence is derived from chunk timestamp coverage (not hardcoded) — short text from long audio with weak coverage gets penalized.
 - **Text cleanup pipeline**: `light_cleanup()` is a 6-step pipeline (normalize → spoken punctuation → dedup → split/recase → fillers → finalize) mirroring Swift `TextCleanupService`. `apply_tone()` dispatches to concise/formal/friendly helpers. Rules live in `text_cleanup_rules.py`.
 - **Logging**: Use `logging.getLogger("voxflow")`, never bare `print()`
 
 ## Testing
 
-- Test coverage: 457 tests (234 Swift + 223 Python) covering models, parsing, coordinators, prompt framing, hallucination filter, confidence badge, text cleanup pipeline, backend utilities
+- Test coverage: 537 tests (256 Swift + 281 Python) covering models, parsing, coordinators, prompt framing, hallucination filter (with punctuation normalization), confidence estimation, text cleanup pipeline, backend utilities
 - Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`
 - Run Swift tests: `swift test`
 - Run backend tests (venv): `./.venv/bin/python -m pytest backend/tests`
@@ -144,3 +147,6 @@ swift run VoxFlowLocal
 - Call `NSApp.activate(ignoringOtherApps: true)` directly — use `activateForWindow()` which manages the activation policy toggle
 - Read `NSWorkspace.shared.frontmostApplication` at insert time — use the frozen `capturedTargetApp` from `startCapture()`
 - Use `WhisperKit()` default init (it phones home to HuggingFace) — always use `WhisperKitConfig(modelFolder:, download: false)`
+- Hardcode confidence values in `WhisperEngine.transcribe()` — use `_estimate_confidence()` which derives from chunk timestamps
+- Add hallucination filter entries to only one side — both `HallucinationFilter.swift` and `server.py` must stay synchronized (dual-filter drift risk)
+- Use `Thread.sleep` in the insertion stack — paste fallback uses async `Task.sleep` to avoid blocking the main thread
