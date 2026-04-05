@@ -318,11 +318,38 @@ struct SettingsView: View {
                     coordinator.refreshReadiness()
                 }
 
-                Text(state.backendReadyForDictation
-                     ? "Backend ready for dictation."
-                     : "Backend not ready: \(state.backendReadinessIssue ?? "unknown issue")")
-                    .font(.system(size: 11))
-                    .foregroundStyle(state.backendReadyForDictation ? .green : .orange)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(backendStatusColor)
+                            .frame(width: 8, height: 8)
+                        Text(state.backendStatusSummary)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(backendStatusColor)
+                    }
+
+                    if state.backendWarmupInProgress {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Backend process is running and waiting to answer readiness checks.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !state.backendActiveSTTModel.isEmpty {
+                        Text("Active STT path: \(state.backendActiveSTTModel)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let issue = state.backendReadinessIssue, !issue.isEmpty {
+                        Text("Issue: \(issue)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section("Benchmark") {
@@ -422,6 +449,19 @@ struct SettingsView: View {
         case .openAI:
             return "OpenAI STT sends microphone audio to your configured OpenAI endpoint."
         }
+    }
+
+    private var backendStatusColor: Color {
+        if !state.backendShouldRun && !state.backendProcessRunning && !state.backendWarmupInProgress {
+            return .secondary
+        }
+        if state.backendReadyForDictation {
+            return .green
+        }
+        if state.backendWarmupInProgress {
+            return .orange
+        }
+        return .red
     }
 
     private func profileRow(_ profile: TranslationProfile) -> some View {

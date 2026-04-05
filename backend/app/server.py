@@ -80,6 +80,16 @@ class RuntimeState:
     stt_backend: str = "whisper"
 
 
+@dataclass
+class STTExecutionResult:
+    text: str
+    confidence: float
+    stage_timings_ms: dict[str, int]
+    model_loaded_before_request: bool | None = None
+    model_loaded_after_request: bool | None = None
+    cold_start: bool = False
+
+
 class TranscribeRequest(BaseModel):
     session_id: str
     audio_pcm16le: str
@@ -94,6 +104,10 @@ class TranscribeResponse(BaseModel):
     latency_ms: int
     confidence_estimate: float
     processing_time_ms: int = 0
+    stage_timings_ms: dict[str, int] = Field(default_factory=dict)
+    model_loaded_before_request: bool | None = None
+    model_loaded_after_request: bool | None = None
+    cold_start: bool = False
 
 
 class CleanupRequest(BaseModel):
@@ -221,6 +235,7 @@ class WhisperEngine:
         self._pipeline = None
         self._active_model_id = ""
         self._load_failed = False
+        self._warmed_up = False
         self._lock = Lock()
 
     def _load_pipeline(self) -> None:
@@ -251,41 +266,114 @@ class WhisperEngine:
                 logger.error("Failed to load Whisper model %s: %s", self.model_id, exc)
                 self._load_failed = True
 
+    def warmup_inference(self, sample_rate: int = 16000, duration_ms: int = 250) -> int:
+        if self._pipeline is None or self._warmed_up:
+            return 0
+
+        warmup_samples = max(1, int(sample_rate * duration_ms / 1000))
+        warmup_audio = np.zeros(warmup_samples, dtype=np.float32)
+        started = time.perf_counter()
+        try:
+            self._pipeline(
+                {"array": warmup_audio, "sampling_rate": sample_rate},
+                generate_kwargs={"language": "en"},
+                return_timestamps=True,
+            )
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            self._warmed_up = True
+            logger.info("Whisper inference warmup completed in %dms", elapsed_ms)
+            return elapsed_ms
+        except Exception as exc:
+            logger.warning("Whisper inference warmup failed: %s", exc)
+            return 0
+
     def retry_load(self) -> None:
         """Reset failure state to allow retrying model load."""
         self._load_failed = False
+        self._warmed_up = False
         self._load_pipeline()
 
-    def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
+    def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> STTExecutionResult:
+        stage_timings_ms: dict[str, int] = {}
+        model_loaded_before_request = self.model_loaded
         if not pcm:
             logger.warning("Whisper transcribe called with empty audio buffer")
-            return "[transcription unavailable: no audio captured]", 0.0
+            return STTExecutionResult(
+                text="[transcription unavailable: no audio captured]",
+                confidence=0.0,
+                stage_timings_ms=stage_timings_ms,
+                model_loaded_before_request=model_loaded_before_request,
+                model_loaded_after_request=self.model_loaded,
+                cold_start=False,
+            )
 
         if len(pcm) % 2 != 0:
             logger.error("Whisper transcribe received odd-length PCM buffer (%d bytes)", len(pcm))
-            return "[transcription unavailable: invalid audio format]", 0.0
+            return STTExecutionResult(
+                text="[transcription unavailable: invalid audio format]",
+                confidence=0.0,
+                stage_timings_ms=stage_timings_ms,
+                model_loaded_before_request=model_loaded_before_request,
+                model_loaded_after_request=self.model_loaded,
+                cold_start=False,
+            )
 
+        load_started = time.perf_counter()
         self._load_pipeline()
+        if not model_loaded_before_request:
+            stage_timings_ms["model_load"] = int((time.perf_counter() - load_started) * 1000)
 
+        conversion_started = time.perf_counter()
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        stage_timings_ms["pcm_to_float"] = int((time.perf_counter() - conversion_started) * 1000)
 
         if not self._pipeline:
             if self._load_failed:
-                return "[transcription unavailable: local Whisper model failed to load]", 0.0
-            return "[transcription unavailable: local Whisper model not loaded]", 0.0
+                return STTExecutionResult(
+                    text="[transcription unavailable: local Whisper model failed to load]",
+                    confidence=0.0,
+                    stage_timings_ms=stage_timings_ms,
+                    model_loaded_before_request=model_loaded_before_request,
+                    model_loaded_after_request=self.model_loaded,
+                    cold_start=False,
+                )
+            return STTExecutionResult(
+                text="[transcription unavailable: local Whisper model not loaded]",
+                confidence=0.0,
+                stage_timings_ms=stage_timings_ms,
+                model_loaded_before_request=model_loaded_before_request,
+                model_loaded_after_request=self.model_loaded,
+                cold_start=False,
+            )
 
         try:
+            inference_started = time.perf_counter()
             output = self._pipeline(
                 {"array": audio, "sampling_rate": sample_rate},
                 generate_kwargs={"language": language_hint},
                 return_timestamps=True,
             )
+            stage_timings_ms["stt_inference"] = int((time.perf_counter() - inference_started) * 1000)
             text = str(output.get("text", "")).strip()
             confidence = 0.9 if text else 0.0
-            return text, confidence
+            return STTExecutionResult(
+                text=text,
+                confidence=confidence,
+                stage_timings_ms=stage_timings_ms,
+                model_loaded_before_request=model_loaded_before_request,
+                model_loaded_after_request=self.model_loaded,
+                cold_start=(not model_loaded_before_request and self.model_loaded),
+            )
         except Exception as exc:
             logger.error("Whisper transcription failed: %s", exc)
-            return f"[transcription failed: {exc}]", 0.0
+            return STTExecutionResult(
+                text=f"[transcription failed: {exc}]",
+                confidence=0.0,
+                stage_timings_ms=stage_timings_ms,
+                model_loaded_before_request=model_loaded_before_request,
+                model_loaded_after_request=self.model_loaded,
+                cold_start=False,
+            )
 
     @property
     def model_loaded(self) -> bool:
@@ -353,11 +441,20 @@ class OpenAIAudioClient:
 
         return b"".join(chunks), boundary
 
-    def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
+    def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> STTExecutionResult:
         if not self.configured:
-            return "[transcription unavailable: OpenAI API key not configured]", 0.0
+            return STTExecutionResult(
+                text="[transcription unavailable: OpenAI API key not configured]",
+                confidence=0.0,
+                stage_timings_ms={},
+                model_loaded_before_request=False,
+                model_loaded_after_request=False,
+                cold_start=False,
+            )
 
+        wav_encode_started = time.perf_counter()
         wav_bytes = self._wav_from_pcm16(pcm, sample_rate)
+        stage_timings_ms = {"wav_encode": int((time.perf_counter() - wav_encode_started) * 1000)}
         body, boundary = self._multipart_body(
             fields={"model": self.stt_model, "language": language_hint},
             file_field="file",
@@ -377,8 +474,10 @@ class OpenAIAudioClient:
         )
 
         try:
+            request_started = time.perf_counter()
             with urlrequest.urlopen(request, timeout=40) as response:
                 payload = response.read().decode("utf-8")
+            stage_timings_ms["stt_request"] = int((time.perf_counter() - request_started) * 1000)
         except urlerror.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise HTTPException(status_code=502, detail=f"OpenAI STT HTTP error: {detail[:160]}") from exc
@@ -388,7 +487,14 @@ class OpenAIAudioClient:
         try:
             parsed = json.loads(payload)
             text = normalize_whitespace(str(parsed.get("text", "")))
-            return text, 0.88 if text else 0.0
+            return STTExecutionResult(
+                text=text,
+                confidence=0.88 if text else 0.0,
+                stage_timings_ms=stage_timings_ms,
+                model_loaded_before_request=True,
+                model_loaded_after_request=True,
+                cold_start=False,
+            )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"OpenAI STT parse failure: {exc}") from exc
 
@@ -712,7 +818,7 @@ def normalize_provider_mode(provider_mode: str) -> str:
 
 def normalize_stt_backend(raw: str) -> str:
     normalized = raw.strip().lower()
-    if normalized in {"whisper", "openai"}:
+    if normalized in {"whisper", "whisperkit", "openai"}:
         return normalized
     return "whisper"
 
@@ -1568,6 +1674,8 @@ class ProviderRouter:
         backend = self.current_stt_backend()
         if backend == "whisper":
             return self._whisper_engine.model_loaded
+        if backend == "whisperkit":
+            return True
         if backend == "openai":
             return self._openai_audio_client.configured
         return self._whisper_engine.model_loaded
@@ -1576,6 +1684,8 @@ class ProviderRouter:
         backend = self.current_stt_backend()
         if backend == "whisper":
             return self._whisper_engine.active_model_id
+        if backend == "whisperkit":
+            return "whisperkit (in-app)"
         if backend == "openai":
             return self._openai_audio_client.stt_model
         return self._whisper_engine.active_model_id
@@ -1583,10 +1693,19 @@ class ProviderRouter:
     def stt_fallback_active(self) -> bool:
         return False
 
-    def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> tuple[str, float]:
+    def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> STTExecutionResult:
         backend = self.current_stt_backend()
         if backend == "whisper":
             return self._whisper_engine.transcribe(pcm, sample_rate, language_hint)
+        if backend == "whisperkit":
+            return STTExecutionResult(
+                text="[transcription unavailable: WhisperKit runs in the app process]",
+                confidence=0.0,
+                stage_timings_ms={},
+                model_loaded_before_request=True,
+                model_loaded_after_request=True,
+                cold_start=False,
+            )
         if backend == "openai":
             return self._openai_audio_client.transcribe(pcm, sample_rate, language_hint)
         return self._whisper_engine.transcribe(pcm, sample_rate, language_hint)
@@ -1733,6 +1852,7 @@ def initialize_runtime_state() -> None:
     # Eagerly load the STT model at startup so health polls don't trigger loading
     if state.stt_backend == "whisper":
         whisper_engine._load_pipeline()
+        whisper_engine.warmup_inference()
     state.model_loaded = active_stt_model_loaded()
 
 
@@ -1916,12 +2036,15 @@ def ready() -> ReadyResponse:
 @app.post("/v1/transcribe", response_model=TranscribeResponse)
 def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     started = time.perf_counter()
+    stage_timings_ms: dict[str, int] = {}
 
     if len(payload.audio_pcm16le) > MAX_AUDIO_BASE64_CHARS:
         raise HTTPException(status_code=413, detail="Audio payload too large")
 
     try:
+        decode_started = time.perf_counter()
         audio_bytes = base64.b64decode(payload.audio_pcm16le, validate=True)
+        stage_timings_ms["request_decode"] = int((time.perf_counter() - decode_started) * 1000)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid audio payload: {exc}") from exc
 
@@ -1936,18 +2059,22 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
             latency_ms=0,
             confidence_estimate=0.0,
             processing_time_ms=0,
+            stage_timings_ms=stage_timings_ms,
         )
 
     if len(audio_bytes) % 2 != 0:
         raise HTTPException(status_code=400, detail="PCM16 audio must have even byte length")
 
-    text, confidence = provider_router.transcribe(audio_bytes, payload.sample_rate, payload.language_hint)
+    result = provider_router.transcribe(audio_bytes, payload.sample_rate, payload.language_hint)
+    stage_timings_ms.update(result.stage_timings_ms)
     latency_ms = int((time.perf_counter() - started) * 1000)
 
     # Two-tier hallucination filter (Whisper-only — OpenAI API does its own filtering):
     # - Known YouTube/podcast phrases: filtered at ANY duration (never real dictation)
     # - Single words, repeated words: filtered only on short audio (< 3s)
     stt_backend = current_stt_backend()
+    text = result.text
+    confidence = result.confidence
     if stt_backend != "openai":
         audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
         is_short = audio_duration_s < 3.0
@@ -1962,6 +2089,10 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
         latency_ms=latency_ms,
         confidence_estimate=confidence,
         processing_time_ms=latency_ms,
+        stage_timings_ms=stage_timings_ms,
+        model_loaded_before_request=result.model_loaded_before_request,
+        model_loaded_after_request=result.model_loaded_after_request,
+        cold_start=result.cold_start,
     )
 
 

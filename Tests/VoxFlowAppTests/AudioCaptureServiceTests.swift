@@ -38,8 +38,8 @@ final class AudioCaptureServiceTests: XCTestCase {
                     "Should throw a known AudioCaptureError"
                 )
             } else {
-                let isNSError = error is NSError
-                XCTAssertTrue(isNSError, "Expected either AudioCaptureError or NSError, got \(type(of: error))")
+                let nsError = error as NSError
+                XCTAssertFalse(nsError.domain.isEmpty, "Unexpected non-NSError failure: \(type(of: error))")
             }
         }
     }

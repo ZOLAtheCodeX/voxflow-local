@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
+import tempfile
 import wave
 from pathlib import Path
 
@@ -13,8 +15,8 @@ FIXTURE_DIR = ROOT_DIR / "backend/tests/fixtures/golden_clips"
 SAMPLE_RATE = 16_000
 
 # Each entry: (filename, tts_phrase).
-# Phrases satisfy the regression manifest's must_include_any: ["you", "thank", "beep"].
-# Distinct content per clip keeps them meaningful as separate test cases.
+# These fixtures are intentionally simple because they are generated from the
+# local macOS TTS stack and need to remain stable across runs.
 CLIPS: list[tuple[str, str]] = [
     ("calibration_phrase.wav", "Thank you for joining us."),
     ("schedule_phrase.wav",    "Thank you for your help."),
@@ -38,11 +40,24 @@ def _valid_wav(path: Path) -> bool:
 
 
 def _write_tts_wav(path: Path, phrase: str) -> None:
-    """Generate a speech WAV clip using macOS `say`."""
-    subprocess.run(
-        ["say", "-v", TTS_VOICE, "-o", str(path), "--data-format=LEI16@16000", phrase],
-        check=True,
-    )
+    """Generate a speech WAV clip using macOS `say`.
+
+    `say -o foo.wav --data-format=...` can silently emit a header-only WAV on
+    some macOS builds. Write to a temporary file first and only replace the
+    destination if the result is a valid PCM clip with non-zero frames.
+    """
+    with tempfile.TemporaryDirectory(prefix="voxflow-golden-") as temp_dir:
+        temp_path = Path(temp_dir) / path.name
+        subprocess.run(
+            ["say", "-v", TTS_VOICE, "-o", str(temp_path), "--data-format=LEI16@16000", phrase],
+            check=True,
+        )
+        if not _valid_wav(temp_path):
+            raise RuntimeError(
+                f"macOS say produced an invalid WAV for {path.name}. "
+                "Keep the existing fixture and regenerate with a known-good audio source."
+            )
+        shutil.move(str(temp_path), str(path))
 
 
 def generate(force: bool) -> None:

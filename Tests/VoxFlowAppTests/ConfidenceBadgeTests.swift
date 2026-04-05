@@ -1,6 +1,7 @@
 import XCTest
 @testable import VoxFlowApp
 
+@MainActor
 final class ConfidenceBadgeTests: XCTestCase {
 
     func testTranscriptCandidateStoresConfidence() {

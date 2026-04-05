@@ -38,10 +38,13 @@ final class WhisperKitSTTService {
         }
 
         let started = ContinuousClock.now
+        let conversionStarted = ContinuousClock.now
         let floatSamples = await Task.detached {
             Self.convertPCMInt16ToFloat(audio.pcm)
         }.value
+        let conversionLatencyMs = Self.elapsedMilliseconds(since: conversionStarted)
 
+        let inferenceStarted = ContinuousClock.now
         let results: [TranscriptionResult] = try await pipe.transcribe(
             audioArray: floatSamples,
             decodeOptions: DecodingOptions(
@@ -49,10 +52,10 @@ final class WhisperKitSTTService {
                 wordTimestamps: true
             )
         )
+        let inferenceLatencyMs = Self.elapsedMilliseconds(since: inferenceStarted)
 
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        let elapsed = started.duration(to: .now)
-        let latencyMs = Int(elapsed.components.seconds) * 1000 + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
+        let latencyMs = Self.elapsedMilliseconds(since: started)
 
         let confidence: Double = {
             guard let first = results.first, let seg = first.segments.first else { return 0.0 }
@@ -75,7 +78,14 @@ final class WhisperKitSTTService {
                 isFinal: true,
                 latencyMs: latencyMs,
                 confidenceEstimate: 0.0,
-                processingTimeMs: latencyMs
+                processingTimeMs: latencyMs,
+                stageTimingsMs: [
+                    "pcm_to_float": conversionLatencyMs,
+                    "stt_inference": inferenceLatencyMs,
+                ],
+                modelLoadedBeforeRequest: true,
+                modelLoadedAfterRequest: true,
+                coldStart: false
             )
         }
 
@@ -90,7 +100,14 @@ final class WhisperKitSTTService {
             isFinal: true,
             latencyMs: latencyMs,
             confidenceEstimate: confidence,
-            processingTimeMs: latencyMs
+            processingTimeMs: latencyMs,
+            stageTimingsMs: [
+                "pcm_to_float": conversionLatencyMs,
+                "stt_inference": inferenceLatencyMs,
+            ],
+            modelLoadedBeforeRequest: true,
+            modelLoadedAfterRequest: true,
+            coldStart: false
         )
     }
 
@@ -112,6 +129,12 @@ final class WhisperKitSTTService {
                 Float(int16Buffer[i]) / Float(Int16.max)
             }
         }
+    }
+
+    nonisolated private static func elapsedMilliseconds(since started: ContinuousClock.Instant) -> Int {
+        let elapsed = started.duration(to: .now)
+        return Int(elapsed.components.seconds) * 1000
+            + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
     }
 }
 

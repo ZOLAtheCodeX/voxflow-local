@@ -189,4 +189,50 @@ final class SettingsCoordinatorTests: XCTestCase {
         XCTAssertEqual(config.translateModel, TranslationProfile.marianFallback.modelID)
         XCTAssertEqual(config.translateBackend, "marian")
     }
+
+    @MainActor
+    func testPromptWorkflowWithWhisperKitDoesNotRequireBackend() {
+        let (_, state, _) = makeSUT()
+        state.workflowMode = .prompt
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+
+        XCTAssertFalse(state.workflowNeedsBackend)
+        XCTAssertFalse(state.backendShouldRun)
+    }
+
+    @MainActor
+    func testRestartBackendWithLocalWhisperKitLeavesBackendIdle() {
+        let (sut, state, _) = makeSUT()
+        state.workflowMode = .dictation
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+
+        sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
+
+        XCTAssertFalse(state.backendProcessRunning)
+        XCTAssertFalse(state.backendWarmupInProgress)
+        XCTAssertFalse(state.backendReadyForDictation)
+        XCTAssertNil(state.backendReadinessIssue)
+        XCTAssertEqual(state.backendStatusSummary, "Backend idle — current workflow runs in app")
+        XCTAssertEqual(state.backendActiveSTTModel, "whisperkit (in-app)")
+        XCTAssertEqual(state.statusLine, "Dictation mode active")
+    }
+
+    @MainActor
+    func testRestartBackendWithMeetingWorkflowMarksBackendWarmup() {
+        let (sut, state, _) = makeSUT()
+        state.workflowMode = .meeting
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+
+        sut.restartBackendWithCurrentConfiguration(status: "Meeting mode active")
+
+        XCTAssertTrue(state.backendProcessRunning)
+        XCTAssertTrue(state.backendWarmupInProgress)
+        XCTAssertFalse(state.backendReadyForDictation)
+        XCTAssertNil(state.backendReadinessIssue)
+        XCTAssertEqual(state.backendStatusSummary, "Backend starting — waiting for warmup")
+        XCTAssertEqual(state.statusLine, "Meeting mode active")
+    }
 }

@@ -45,9 +45,11 @@ class TestConsentStoreTTL:
         record = store.create("sess-1", "cleanup", "original", "redacted")
 
         # Simulate time advancing past TTL
-        with patch("server.time") as mock_time:
-            # First call: create was at real time. Now simulate resolve at +20s.
-            mock_time.time.return_value = record.created_at + 20
+        with patch.object(
+            ConsentStore._prune_locked.__globals__["time"],
+            "time",
+            return_value=record.created_at + 20,
+        ):
             result = store.resolve(record.token, "sess-1", "cleanup")
         assert result is None
 

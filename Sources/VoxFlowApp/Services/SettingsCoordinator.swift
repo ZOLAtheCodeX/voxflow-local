@@ -168,13 +168,7 @@ final class SettingsCoordinator: SettingsCoordinating {
         guard state.sttBackend != backend else { return }
         state.sttBackend = backend
         UserDefaults.standard.set(backend.rawValue, forKey: sttBackendKey)
-
-        if backend == .whisperKit {
-            // WhisperKit is in-process — no backend restart needed
-            state.statusLine = "STT backend: \(backend.displayName)"
-        } else {
-            restartBackendWithCurrentConfiguration(status: "STT backend: \(backend.displayName)")
-        }
+        restartBackendWithCurrentConfiguration(status: "STT backend: \(backend.displayName)")
     }
 
     func updateLocalWhisperModel(whisperModel: String) {
@@ -332,10 +326,24 @@ final class SettingsCoordinator: SettingsCoordinating {
 
     func restartBackendWithCurrentConfiguration(status: String) {
         let launchConfiguration = currentBackendLaunchConfiguration()
-        if backendManager.isRunning {
-            backendManager.restartAsync(configuration: launchConfiguration)
-        } else {
+        if state.backendShouldRun {
+            state.backendProcessRunning = true
+            state.backendWarmupInProgress = true
+            state.backendReadyForDictation = false
+            state.backendReadinessIssue = nil
+            state.backendStatusSummary = backendManager.isRunning
+                ? "Backend reloading — applying new configuration"
+                : "Backend starting — waiting for warmup"
+            state.backendActiveSTTModel = ""
             backendManager.startIfNeededAsync(configuration: launchConfiguration)
+        } else {
+            backendManager.stopAsync()
+            state.backendProcessRunning = false
+            state.backendWarmupInProgress = false
+            state.backendReadyForDictation = false
+            state.backendReadinessIssue = nil
+            state.backendStatusSummary = "Backend idle — current workflow runs in app"
+            state.backendActiveSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
         }
 
         state.statusLine = status

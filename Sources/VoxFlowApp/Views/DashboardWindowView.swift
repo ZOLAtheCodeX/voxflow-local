@@ -9,6 +9,7 @@ struct DashboardWindowView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 metricsGrid
+                backendSection
                 modeUsageSection
                 benchmarkRecommendationSection
                 compatibilitySection
@@ -49,6 +50,45 @@ struct DashboardWindowView: View {
             statCard(title: "Transcription", value: "\(state.averageTranscriptionLatencyMs)ms avg", detail: "Last \(state.lastTranscriptionLatencyMs ?? 0)ms")
             statCard(title: "Insert Success", value: "\(Int((state.insertSuccessRate * 100).rounded()))%", detail: "Fallback \(state.fallbackInsertCount) · Failed \(state.failedInsertCount)")
             statCard(title: "Approvals", value: "T\(state.approvedTranslationCount) · M\(state.approvedMeetingCount)", detail: "Raw \(state.privacyApproveRawCount) · Redacted \(state.privacyApproveRedactedCount)")
+        }
+    }
+
+    private var backendSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Backend Runtime")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(backendStatusColor)
+                        .frame(width: 8, height: 8)
+                    Text(state.backendStatusSummary)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(backendStatusColor)
+                }
+
+                Text("Process \(state.backendProcessRunning ? "running" : "stopped") · STT \(state.sttBackend.displayName)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                if !state.backendActiveSTTModel.isEmpty {
+                    Text("Active backend STT model: \(state.backendActiveSTTModel)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let issue = state.backendReadinessIssue, !issue.isEmpty {
+                    Text("Issue: \(issue)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.gray.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 
@@ -199,6 +239,19 @@ struct DashboardWindowView: View {
             }
             return $0.recommendationScore < $1.recommendationScore
         }
+    }
+
+    private var backendStatusColor: Color {
+        if !state.backendShouldRun && !state.backendProcessRunning && !state.backendWarmupInProgress {
+            return .secondary
+        }
+        if state.backendReadyForDictation {
+            return .green
+        }
+        if state.backendWarmupInProgress {
+            return .orange
+        }
+        return .red
     }
 
     private var headerRow: some View {

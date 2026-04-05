@@ -22,6 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 import httpx
+import server
 
 from server import _rate_limit_timestamps, app
 
@@ -95,6 +96,16 @@ class TestReadiness:
         assert isinstance(data["active_stt_model_loaded"], bool)
         assert isinstance(data["models_dir_exists"], bool)
         assert isinstance(data["issues"], list)
+
+    def test_whisperkit_backend_is_treated_as_in_app_stt(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("VOXFLOW_STT_BACKEND", "whisperKit")
+        server.initialize_runtime_state()
+        readiness = server.readiness_snapshot()
+
+        assert readiness.stt_backend == "whisperkit"
+        assert readiness.ready_for_dictation is True
+        assert readiness.active_stt_model == "whisperkit (in-app)"
+        assert readiness.active_stt_model_loaded is True
 
 
 # ── Privacy Preview ──────────────────────────────────────────────────
@@ -279,5 +290,36 @@ class TestTranscribeChunking:
             "chunk_index": 0,
         })
         data = resp.json()
-        expected_keys = {"text", "is_final", "latency_ms", "confidence_estimate", "processing_time_ms"}
+        expected_keys = {
+            "text",
+            "is_final",
+            "latency_ms",
+            "confidence_estimate",
+            "processing_time_ms",
+            "stage_timings_ms",
+            "model_loaded_before_request",
+            "model_loaded_after_request",
+            "cold_start",
+        }
         assert expected_keys.issubset(data.keys())
+
+    @pytest.mark.anyio
+    async def test_transcribe_response_exposes_stage_timings(self, client: httpx.AsyncClient):
+        import base64
+        import struct
+
+        silence = struct.pack("<" + "h" * 16000, *([0] * 16000))
+        b64 = base64.b64encode(silence).decode()
+
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-diagnostics",
+            "audio_pcm16le": b64,
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["stage_timings_ms"], dict)
+        assert "request_decode" in data["stage_timings_ms"]
+        assert isinstance(data["cold_start"], bool)

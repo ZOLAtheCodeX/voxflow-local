@@ -47,8 +47,10 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
 
         state.sessionState = .inserting
         let appName = state.focusTarget.appName ?? "Unknown App"
+        let started = ContinuousClock.now
         let result = insertService.insert(text: state.displayText, targetApp: targetApp)
-        log.info("insertCurrentText: method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
+        let elapsedMs = Self.elapsedMilliseconds(since: started)
+        log.info("insertCurrentText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)
 
@@ -82,8 +84,10 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         guard !text.isEmpty else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
+        let started = ContinuousClock.now
         let result = insertService.insert(text: text, targetApp: targetApp)
-        log.info("insertText: method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
+        let elapsedMs = Self.elapsedMilliseconds(since: started)
+        log.info("insertText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)
 
@@ -147,5 +151,11 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         }
 
         state.insertStatsByApp[appName] = stats
+    }
+
+    private static func elapsedMilliseconds(since startedAt: ContinuousClock.Instant) -> Int {
+        let duration = startedAt.duration(to: .now)
+        return Int(duration.components.seconds) * 1000
+            + Int(duration.components.attoseconds / 1_000_000_000_000_000)
     }
 }

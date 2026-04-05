@@ -12,6 +12,13 @@ struct VoxFlowLocalApp: App {
         WindowGroup("VoxFlow", id: "main") {
             MainWindowView(coordinator: coordinator, state: coordinator.state)
                 .frame(minWidth: 900, minHeight: 680)
+                .task {
+                    await MainActor.run {
+                        appDelegate.installAutomationURLHandler { url in
+                            handleAutomationURL(url)
+                        }
+                    }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .voxflowOpenDashboard)) { _ in
                     activateAndOpenWindow(id: "dashboard")
                 }
@@ -71,5 +78,16 @@ struct VoxFlowLocalApp: App {
     private func activateAndOpenWindow(id: String) {
         coordinator.activateForWindow()
         openWindow(id: id)
+    }
+
+    private func handleAutomationURL(_ url: URL) {
+        do {
+            let command = try AppAutomationCommand(url: url)
+            coordinator.handleAutomationCommand(command) { windowID in
+                activateAndOpenWindow(id: windowID)
+            }
+        } catch {
+            coordinator.state.statusLine = "Automation URL failed: \(error.localizedDescription)"
+        }
     }
 }

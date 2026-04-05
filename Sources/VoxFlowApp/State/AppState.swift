@@ -27,6 +27,7 @@ final class AppState: ObservableObject {
     @Published var meetingModeEnabled = false
     @Published var promptModeEnabled = false
     @Published var promptCandidate: PromptCandidate?
+    @Published var lastPipelineTrace: CapturePipelineTrace?
     @Published var translationProfile: TranslationProfile = .translateGemma4B
     @Published var dictationHotkeyPreset: DictationHotkeyPreset = .fnOnly
     @Published var commandLaneHotkeyPreset: CommandLaneHotkeyPreset = .fnCommandSpace
@@ -51,8 +52,12 @@ final class AppState: ObservableObject {
     @Published var launchedAt: Date = Date()
     @Published var captureCount = 0
     @Published var backendReadyForDictation = false
+    @Published var backendProcessRunning = false
+    @Published var backendWarmupInProgress = false
     @Published var whisperKitReady = false
     @Published var backendReadinessIssue: String?
+    @Published var backendStatusSummary: String = "Backend not checked"
+    @Published var backendActiveSTTModel: String = ""
     @Published var localCaptureCount = 0
     @Published var privateAPICaptureCount = 0
     @Published var totalTranscriptionLatencyMs = 0
@@ -124,6 +129,43 @@ final class AppState: ObservableObject {
         return modes
     }
 
+    var canUseSelectedSTTBackend: Bool {
+        backendReadyForDictation || (sttBackend == .whisperKit && whisperKitReady)
+    }
+
+    var workflowNeedsBackend: Bool {
+        if providerMode == .privateAPI {
+            return true
+        }
+        if sttBackend != .whisperKit {
+            return true
+        }
+
+        switch workflowMode {
+        case .translateEnToDe, .meeting:
+            return true
+        case .dictation, .prompt:
+            return false
+        }
+    }
+
+    var backendShouldRun: Bool {
+        isBenchmarkRunning || workflowNeedsBackend
+    }
+
+    var backendStatusColorName: String {
+        if !backendShouldRun && !backendProcessRunning && !backendWarmupInProgress {
+            return "secondary"
+        }
+        if backendReadyForDictation {
+            return "green"
+        }
+        if backendWarmupInProgress {
+            return "orange"
+        }
+        return "red"
+    }
+
     var averageTranscriptionLatencyMs: Int {
         guard captureCount > 0 else { return 0 }
         return totalTranscriptionLatencyMs / captureCount
@@ -189,6 +231,7 @@ final class AppState: ObservableObject {
         meetingCandidate = nil
         promptCandidate = nil
         privacyPreview = nil
+        lastPipelineTrace = nil
     }
 
     func setIdle() {
@@ -214,5 +257,6 @@ final class AppState: ObservableObject {
         insertStatsByApp = [:]
         workflowCaptureCounts = [:]
         benchmarkHistoryByProfile = [:]
+        lastPipelineTrace = nil
     }
 }

@@ -811,7 +811,7 @@ struct CommandPaletteView: View {
     }
 
     private var dictationReady: Bool {
-        state.backendReadyForDictation || (state.sttBackend == .whisperKit && state.whisperKitReady)
+        state.canUseSelectedSTTBackend && (!state.workflowNeedsBackend || state.backendReadyForDictation)
     }
 
     private var readinessBadgeColor: Color {

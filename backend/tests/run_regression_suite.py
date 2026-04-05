@@ -78,45 +78,72 @@ def resolve_expectation(clip: dict[str, Any], backend: str) -> dict[str, Any]:
     return base
 
 
-def validate_transcript(text: str, expectation: dict[str, Any]) -> str | None:
+def validate_transcript(text: str, expectation: dict[str, Any]) -> tuple[str | None, dict[str, float]]:
     normalized = normalize_text(text)
     lowered = normalized.lower()
+    metrics: dict[str, float] = {}
 
     allow_placeholder = bool(expectation.get("allow_placeholder", False))
     if is_placeholder_text(normalized) and not allow_placeholder:
-        return "received placeholder transcript"
+        return "received placeholder transcript", metrics
 
     min_words = int(expectation.get("min_words", 1))
     max_words = int(expectation.get("max_words", 200))
     words = word_count(normalized)
     if words < min_words or words > max_words:
-        return f"word count {words} outside [{min_words}, {max_words}]"
+        return f"word count {words} outside [{min_words}, {max_words}]", metrics
 
     must_include_all = [str(token).lower() for token in expectation.get("must_include_all", [])]
     missing_all = [token for token in must_include_all if token not in lowered]
     if missing_all:
-        return f"missing required tokens: {missing_all}"
+        return f"missing required tokens: {missing_all}", metrics
 
     must_include_any = [str(token).lower() for token in expectation.get("must_include_any", [])]
     if must_include_any and not any(token in lowered for token in must_include_any):
-        return f"none of must_include_any tokens present: {must_include_any}"
+        return f"none of must_include_any tokens present: {must_include_any}", metrics
 
     must_not_include = [str(token).lower() for token in expectation.get("must_not_include", [])]
     present_forbidden = [token for token in must_not_include if token in lowered]
     if present_forbidden:
-        return f"forbidden tokens present: {present_forbidden}"
+        return f"forbidden tokens present: {present_forbidden}", metrics
 
     forbidden_patterns = [str(pattern) for pattern in expectation.get("forbidden_patterns", [])]
     for pattern in forbidden_patterns:
         if re.search(pattern, normalized, flags=re.IGNORECASE):
-            return f"forbidden regex matched: {pattern}"
+            return f"forbidden regex matched: {pattern}", metrics
 
-    return None
+    reference_text = str(expectation.get("reference_text", "")).strip()
+    if reference_text and not (allow_placeholder and is_placeholder_text(normalized)):
+        similarity, length_ratio, token_recall = meaning_drift_metrics(reference_text, normalized)
+        metrics = {
+            "similarity": similarity,
+            "length_ratio": length_ratio,
+            "token_recall": token_recall,
+        }
+
+        min_similarity = float(expectation.get("min_similarity", 0.0))
+        min_token_recall = float(expectation.get("min_token_recall", 0.0))
+        min_length_ratio = float(expectation.get("length_ratio_min", 0.0))
+        max_length_ratio = float(expectation.get("length_ratio_max", 99.0))
+
+        if similarity < min_similarity:
+            return f"similarity {similarity:.3f} < {min_similarity:.3f}", metrics
+        if token_recall < min_token_recall:
+            return f"token recall {token_recall:.3f} < {min_token_recall:.3f}", metrics
+        if length_ratio < min_length_ratio or length_ratio > max_length_ratio:
+            return (
+                f"length ratio {length_ratio:.3f} outside "
+                f"[{min_length_ratio:.3f}, {max_length_ratio:.3f}]",
+                metrics,
+            )
+
+    return None, metrics
 
 
 def run_stt_checks(manifest: dict[str, Any], clips_root: Path, backends: list[str], iterations: int) -> tuple[list[CheckResult], dict[str, Any]]:
     results: list[CheckResult] = []
     backend_latencies: dict[str, list[float]] = {backend: [] for backend in backends}
+    backend_cold_start_counts: dict[str, int] = {backend: 0 for backend in backends}
     backend_meta: dict[str, dict[str, Any]] = {}
 
     for backend in backends:
@@ -124,7 +151,12 @@ def run_stt_checks(manifest: dict[str, Any], clips_root: Path, backends: list[st
         if backend == "openai" and not server.openai_audio_client.configured:
             backend_meta[backend] = {"status": "skipped", "reason": "OpenAI backend is not configured"}
             continue
-        backend_meta[backend] = {"status": "ran"}
+        warmup_started = time.perf_counter()
+        server.initialize_runtime_state()
+        backend_meta[backend] = {
+            "status": "ran",
+            "warmup_ms": round((time.perf_counter() - warmup_started) * 1000.0, 2),
+        }
 
         for clip in manifest["clips"]:
             clip_id = str(clip["id"])
@@ -149,14 +181,28 @@ def run_stt_checks(manifest: dict[str, Any], clips_root: Path, backends: list[st
                 elapsed_ms = (time.perf_counter() - started) * 1000.0
                 measured_latency = max(float(response.latency_ms), elapsed_ms)
                 backend_latencies[backend].append(measured_latency)
+                if getattr(response, "cold_start", False):
+                    backend_cold_start_counts[backend] += 1
 
-                error = validate_transcript(response.text, expectation)
+                error, metrics = validate_transcript(response.text, expectation)
                 test_id = f"{clip_id}#{run_index + 1}"
+                stage_timings = getattr(response, "stage_timings_ms", {}) or {}
+                timing_suffix = ""
+                if stage_timings:
+                    ordered = ", ".join(f"{key}={value}ms" for key, value in sorted(stage_timings.items()))
+                    timing_suffix = f"; timings={ordered}"
                 if error:
-                    details = f"{error}; transcript='{response.text}'"
+                    details = f"{error}; transcript='{response.text}'{timing_suffix}"
                     results.append(CheckResult(id=test_id, backend=backend, passed=False, details=details))
                 else:
-                    details = f"ok ({int(measured_latency)}ms): {response.text}"
+                    if metrics:
+                        details = (
+                            f"ok ({int(measured_latency)}ms, sim={metrics['similarity']:.3f}, "
+                            f"recall={metrics['token_recall']:.3f}, ratio={metrics['length_ratio']:.3f}): "
+                            f"{response.text}{timing_suffix}"
+                        )
+                    else:
+                        details = f"ok ({int(measured_latency)}ms): {response.text}{timing_suffix}"
                     results.append(CheckResult(id=test_id, backend=backend, passed=True, details=details))
 
     summary = {"per_backend": {}}
@@ -168,6 +214,7 @@ def run_stt_checks(manifest: dict[str, Any], clips_root: Path, backends: list[st
         summary["per_backend"][backend] = {
             **backend_meta.get(backend, {}),
             "sample_count": len(samples),
+            "cold_start_sample_count": backend_cold_start_counts[backend],
             "min_ms": round(min(samples), 2),
             "max_ms": round(max(samples), 2),
             "mean_ms": round(statistics.fmean(samples), 2),

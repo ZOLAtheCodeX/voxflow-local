@@ -26,7 +26,7 @@ for module in MOCKED_MODULES:
 # Add app to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
-from server import WhisperEngine
+from server import STTExecutionResult, WhisperEngine
 
 @pytest.fixture(autouse=True)
 def reset_mocks():
@@ -77,11 +77,12 @@ def test_transcribe_no_pipeline():
     sys.modules["transformers"].pipeline.side_effect = Exception("Fail")
 
     # Action — must be even-length bytes (int16 = 2 bytes per sample)
-    text, conf = engine.transcribe(bytes(32), 16000, "en")
+    result = engine.transcribe(bytes(32), 16000, "en")
 
     # Assert
-    assert "[transcription unavailable" in text
-    assert conf == 0.0
+    assert isinstance(result, STTExecutionResult)
+    assert "[transcription unavailable" in result.text
+    assert result.confidence == 0.0
 
 def test_transcribe_success():
     """Test transcribe returns text when pipeline works."""
@@ -96,11 +97,12 @@ def test_transcribe_success():
     sys.modules["transformers"].pipeline.return_value = mock_pipeline_instance
 
     # Action — must be even-length bytes (int16 = 2 bytes per sample)
-    text, conf = engine.transcribe(bytes(32), 16000, "en")
+    result = engine.transcribe(bytes(32), 16000, "en")
 
     # Assert
-    assert text == "Hello world"
-    assert conf == 0.9
+    assert isinstance(result, STTExecutionResult)
+    assert result.text == "Hello world"
+    assert result.confidence == 0.9
 
     # Verify pipeline was called (engine calls pipeline(...) internally)
     mock_pipeline_instance.assert_called_once()

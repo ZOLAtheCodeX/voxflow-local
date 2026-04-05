@@ -87,7 +87,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
             rawText: "hello", lightText: "hello", polishText: "hello", selectedMode: .raw
         )
         // Should compile and not crash — targetApp is optional
-        let result = sut.insertText("hello", statusSuffix: "test", targetApp: nil)
+        _ = sut.insertText("hello", statusSuffix: "test", targetApp: nil)
         // Insert may fail (no AX context in test), but it should not crash
         XCTAssertNotNil(state.lastInsertResult)
     }

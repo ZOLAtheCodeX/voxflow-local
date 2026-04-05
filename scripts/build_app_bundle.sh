@@ -167,6 +167,17 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
   <string>1</string>
   <key>CFBundleIconFile</key>
   <string>VoxFlow</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>local.voxflow.app.automation</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>voxflow</string>
+      </array>
+    </dict>
+  </array>
   <key>CFBundleSupportedPlatforms</key>
   <array>
     <string>MacOSX</string>

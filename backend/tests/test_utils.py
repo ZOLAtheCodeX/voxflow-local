@@ -185,9 +185,8 @@ class TestNormalizeSttBackend:
         assert normalize_stt_backend("unknown") == "whisper"
         assert normalize_stt_backend("") == "whisper"
 
-    def test_whisperkit_falls_back_to_whisper(self):
-        # CLAUDE.md documents whisperKit as valid, but normalize treats it as unknown
-        assert normalize_stt_backend("whisperKit") == "whisper"
+    def test_whisperkit_is_supported_backend(self):
+        assert normalize_stt_backend("whisperKit") == "whisperkit"
 
     def test_strips_whitespace(self):
         assert normalize_stt_backend("  whisper  ") == "whisper"

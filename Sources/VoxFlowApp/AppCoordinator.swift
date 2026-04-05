@@ -9,6 +9,68 @@ extension Notification.Name {
     static let voxflowOpenSetup = Notification.Name("voxflowOpenSetup")
 }
 
+private final class CapturePipelineTraceBuilder {
+    let sessionID: String
+    let workflowMode: WorkflowMode
+    let sttBackend: STTBackend
+    let providerMode: ProviderMode
+    let commandLane: Bool
+    let recordedAt = Date()
+
+    private let started = ContinuousClock.now
+    private(set) var audioDurationMs: Int?
+    private(set) var stageTimings: [PipelineStageTiming] = []
+
+    init(
+        sessionID: String,
+        workflowMode: WorkflowMode,
+        sttBackend: STTBackend,
+        providerMode: ProviderMode,
+        commandLane: Bool
+    ) {
+        self.sessionID = sessionID
+        self.workflowMode = workflowMode
+        self.sttBackend = sttBackend
+        self.providerMode = providerMode
+        self.commandLane = commandLane
+    }
+
+    func setAudioDuration(from audio: CapturedAudio) {
+        audioDurationMs = Int((Double(audio.pcm.count) / (audio.sampleRate * 2.0)) * 1000.0)
+    }
+
+    func recordStage(_ name: String, startedAt: ContinuousClock.Instant, detail: String? = nil) {
+        let elapsed = Self.elapsedMilliseconds(since: startedAt)
+        stageTimings.append(PipelineStageTiming(name: name, durationMs: elapsed, detail: detail))
+    }
+
+    func appendStage(name: String, durationMs: Int, detail: String? = nil) {
+        stageTimings.append(PipelineStageTiming(name: name, durationMs: durationMs, detail: detail))
+    }
+
+    func build(statusLine: String, sessionState: SessionState) -> CapturePipelineTrace {
+        CapturePipelineTrace(
+            sessionID: sessionID,
+            workflowMode: workflowMode,
+            sttBackend: sttBackend,
+            providerMode: providerMode,
+            commandLane: commandLane,
+            audioDurationMs: audioDurationMs,
+            totalDurationMs: Self.elapsedMilliseconds(since: started),
+            sessionState: sessionState,
+            statusLine: statusLine,
+            recordedAt: recordedAt,
+            stageTimings: stageTimings
+        )
+    }
+
+    private static func elapsedMilliseconds(since startedAt: ContinuousClock.Instant) -> Int {
+        let duration = startedAt.duration(to: .now)
+        return Int(duration.components.seconds) * 1000
+            + Int(duration.components.attoseconds / 1_000_000_000_000_000)
+    }
+}
+
 @MainActor
 final class AppCoordinator: ObservableObject {
     static let shared = AppCoordinator()
@@ -33,6 +95,8 @@ final class AppCoordinator: ObservableObject {
     private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService)
     private(set) lazy var benchmark: TranslationBenchmarkCoordinating = TranslationBenchmarkCoordinator(state: state, backendManager: backendManager, settings: settings)
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
+    private(set) lazy var translationWorkflow: TranslationWorkflowCoordinating = TranslationWorkflowCoordinator(state: state)
+    private(set) lazy var promptWorkflow: PromptWorkflowCoordinating = PromptWorkflowCoordinator(state: state, textInsertion: textInsertion)
 
     private var timer: Timer?
     private var captureTimeoutTimer: Timer?
@@ -56,7 +120,6 @@ final class AppCoordinator: ObservableObject {
         settingsCoordinator.migrateAPIKeysToKeychain()
         settingsCoordinator.configureInitialState()
         self.settings = settingsCoordinator
-        backendManager.startIfNeededAsync(configuration: settingsCoordinator.currentBackendLaunchConfiguration())
         startFocusMonitoring()
         beginWarmupMonitoring()
         state.$sessionState
@@ -84,33 +147,40 @@ final class AppCoordinator: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.didFinishLaunching = true
-            // Fallback: if no managed window opens, set up panel after
-            // a brief delay (0.1s) — activation policy is already .accessory.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                guard self.menuBarPanel == nil else { return }
-                self.setupMenuBarPanel()
-                self.log.info("Menu bar panel setup (cold start fallback)")
+            Task { @MainActor [weak self] in
+                self?.handleAppDidFinishLaunching()
             }
         }
     }
 
     func warmup() async {
-        // Load WhisperKit model if selected
         if state.sttBackend == .whisperKit {
             await loadWhisperKitModel()
         }
 
-        // Always poll backend readiness (still needed for cleanup/translation)
+        let shouldPollBackend = state.backendShouldRun || state.backendWarmupInProgress
+        guard shouldPollBackend else {
+            await refreshBackendReadiness()
+            return
+        }
+
+        if state.backendShouldRun && !backendManager.isRunning {
+            state.backendProcessRunning = true
+            state.backendWarmupInProgress = true
+            state.backendReadyForDictation = false
+            state.backendReadinessIssue = nil
+            state.backendStatusSummary = "Backend starting — waiting for warmup"
+            state.backendActiveSTTModel = ""
+            backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
+        }
+
         for attempt in 0..<24 {
             guard !Task.isCancelled else { return }
             await refreshBackendReadiness()
             if state.backendReadyForDictation {
                 return
             }
-            // If WhisperKit is ready, we can dictate even without backend
-            if state.sttBackend == .whisperKit && state.whisperKitReady {
+            if !state.backendShouldRun && !state.backendWarmupInProgress {
                 return
             }
             let delay: UInt64 = attempt < 4 ? 2_000_000_000 : 5_000_000_000
@@ -144,9 +214,7 @@ final class AppCoordinator: ObservableObject {
 
     func appDidBecomeActive() {
         configureHotkeysIfNeeded()
-        if !state.backendReadyForDictation {
-            beginWarmupMonitoring()
-        }
+        scheduleRuntimeWarmupIfNeeded()
     }
 
     func showMainWindow() {
@@ -160,24 +228,76 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    private func scheduleRuntimeWarmupIfNeeded() {
+        guard state.backendShouldRun || state.backendWarmupInProgress || (state.sttBackend == .whisperKit && !state.whisperKitReady) else {
+            return
+        }
+        beginWarmupMonitoring()
+    }
+
     private func refreshBackendReadiness() async {
+        let startupIssue = backendManager.lastStartupFailureReason
+        let backendRunning = backendManager.isRunning
+        state.backendProcessRunning = backendRunning
+
+        if !backendRunning && !state.backendShouldRun && !state.backendWarmupInProgress {
+            state.backendReadyForDictation = false
+            state.backendReadinessIssue = nil
+            state.backendActiveSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
+            state.backendStatusSummary = "Backend idle — current workflow runs in app"
+            return
+        }
+
         do {
             let readiness = try await BackendAPIClient.ready()
             state.backendReadyForDictation = readiness.readyForDictation
+            state.backendWarmupInProgress = false
             state.backendReadinessIssue = readiness.issues.first
-            if !readiness.readyForDictation, let firstIssue = readiness.issues.first {
+            state.backendActiveSTTModel = readiness.activeSttModel
+            state.backendStatusSummary = readiness.readyForDictation
+                ? "Backend ready (\(readiness.activeSttModel))"
+                : "Backend not ready: \(readiness.issues.first ?? "unknown issue")"
+            if shouldSurfaceBackendStatusInStatusLine(),
+               !readiness.readyForDictation,
+               let firstIssue = readiness.issues.first {
                 state.statusLine = "Backend not ready: \(firstIssue)"
             }
         } catch {
             state.backendReadyForDictation = false
-            let startupIssue = backendManager.lastStartupFailureReason
-            state.backendReadinessIssue = startupIssue ?? "Backend offline"
+            state.backendActiveSTTModel = ""
             if let startupIssue {
-                state.statusLine = "Backend startup issue: \(startupIssue)"
+                state.backendWarmupInProgress = false
+                state.backendReadinessIssue = startupIssue
+                state.backendStatusSummary = "Backend startup issue: \(startupIssue)"
+                if shouldSurfaceBackendStatusInStatusLine() {
+                    state.statusLine = "Backend startup issue: \(startupIssue)"
+                }
+            } else if backendRunning || state.backendWarmupInProgress {
+                state.backendWarmupInProgress = true
+                state.backendReadinessIssue = nil
+                state.backendStatusSummary = "Backend starting — waiting for warmup"
+                if shouldSurfaceBackendStatusInStatusLine() {
+                    state.statusLine = "Backend starting — wait for warmup"
+                }
             } else {
-                state.statusLine = "Backend offline. Start backend in Settings."
+                state.backendWarmupInProgress = false
+                state.backendReadinessIssue = "Backend offline"
+                state.backendStatusSummary = "Backend offline"
+                if shouldSurfaceBackendStatusInStatusLine() {
+                    state.statusLine = "Backend offline. Start backend in Settings."
+                }
             }
         }
+    }
+
+    private func shouldSurfaceBackendStatusInStatusLine() -> Bool {
+        guard state.sessionState == .idle || state.sessionState == .onboarding else {
+            return false
+        }
+        if state.workflowNeedsBackend {
+            return true
+        }
+        return state.sttBackend != .whisperKit || !state.whisperKitReady
     }
 
     func configureHotkeysIfNeeded() {
@@ -254,8 +374,7 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        let canTranscribe = state.backendReadyForDictation
-            || (state.sttBackend == .whisperKit && state.whisperKitReady)
+        let canTranscribe = state.canUseSelectedSTTBackend
         if !canTranscribe {
             let backendReady = state.backendReadyForDictation
             let whisperReady = state.whisperKitReady
@@ -266,9 +385,8 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        // Workflows beyond basic dictation require the backend even when WhisperKit handles STT
-        let workflowNeedsBackend = state.workflowMode != .dictation || state.providerMode == .privateAPI
-        if workflowNeedsBackend && !state.backendReadyForDictation {
+        // Some workflows still depend on backend services even when STT is local.
+        if state.workflowNeedsBackend && !state.backendReadyForDictation {
             let modeName = state.workflowMode.displayName
             log.warning("startCapture blocked: \(modeName) requires backend but backend not ready")
             state.statusLine = "\(modeName) requires backend — wait for model warmup"
@@ -328,12 +446,40 @@ final class AppCoordinator: ObservableObject {
 
         defer { state.isCommandLaneActive = false }
         prepareForTranscription(commandLane: commandLane)
+        let sessionID = "session-\(sessionCounter)"
+        let trace = CapturePipelineTraceBuilder(
+            sessionID: sessionID,
+            workflowMode: state.workflowMode,
+            sttBackend: state.sttBackend,
+            providerMode: state.providerMode,
+            commandLane: commandLane
+        )
 
         do {
-            guard let capturedAudio = try stopAndValidateAudio() else { return }
+            let captureFinalizeStarted = ContinuousClock.now
+            guard let capturedAudio = try stopAndValidateAudio() else {
+                trace.recordStage("capture_finalize", startedAt: captureFinalizeStarted, detail: state.statusLine)
+                finalizeCaptureTrace(trace)
+                return
+            }
+            trace.setAudioDuration(from: capturedAudio)
+            trace.recordStage(
+                "capture_finalize",
+                startedAt: captureFinalizeStarted,
+                detail: "samples=\(capturedAudio.pcm.count / MemoryLayout<Int16>.size)"
+            )
 
-            let sessionID = "session-\(sessionCounter)"
+            let transcriptionStarted = ContinuousClock.now
             let transcription = try await transcribeAudio(capturedAudio, sessionID: sessionID)
+            let transcriptionDetail: String
+            if state.sttBackend == .whisperKit {
+                transcriptionDetail = "reported=\(transcription.processingTimeMs)ms"
+            } else {
+                let coldStartSuffix = (transcription.coldStart ?? false) ? ", cold_start=true" : ""
+                transcriptionDetail = "server=\(transcription.processingTimeMs)ms, response=\(transcription.latencyMs)ms\(coldStartSuffix)"
+            }
+            trace.recordStage("stt", startedAt: transcriptionStarted, detail: transcriptionDetail)
+            appendTranscriptionDiagnostics(transcription, to: trace)
 
             recordCaptureMetrics(
                 latencyMs: transcription.latencyMs,
@@ -341,10 +487,18 @@ final class AppCoordinator: ObservableObject {
                 onboardingCalibration: state.onboardingPhase == .calibrating
             )
 
-            try await handleTranscriptionResult(transcription, capturedAudio: capturedAudio, sessionID: sessionID, commandLane: commandLane)
+            try await handleTranscriptionResult(
+                transcription,
+                capturedAudio: capturedAudio,
+                sessionID: sessionID,
+                commandLane: commandLane,
+                trace: trace
+            )
+            finalizeCaptureTrace(trace)
 
         } catch {
             handleCaptureError(error)
+            finalizeCaptureTrace(trace)
         }
     }
 
@@ -398,7 +552,13 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    private func handleTranscriptionResult(_ transcription: TranscribeResponse, capturedAudio: CapturedAudio, sessionID: String, commandLane: Bool) async throws {
+    private func handleTranscriptionResult(
+        _ transcription: TranscribeResponse,
+        capturedAudio: CapturedAudio,
+        sessionID: String,
+        commandLane: Bool,
+        trace: CapturePipelineTraceBuilder
+    ) async throws {
         let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         lastTranscriptionConfidence = transcription.confidenceEstimate
         #if DEBUG
@@ -441,19 +601,42 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        try await processWorkflow(sessionID: sessionID, rawText: rawText)
+        try await processWorkflow(sessionID: sessionID, rawText: rawText, trace: trace)
     }
 
-    private func processWorkflow(sessionID: String, rawText: String) async throws {
+    private func appendTranscriptionDiagnostics(_ transcription: TranscribeResponse, to trace: CapturePipelineTraceBuilder) {
+        guard let stageTimings = transcription.stageTimingsMs, !stageTimings.isEmpty else { return }
+
+        let preferredOrder = [
+            "request_decode",
+            "model_load",
+            "pcm_to_float",
+            "wav_encode",
+            "stt_request",
+            "stt_inference",
+        ]
+
+        let orderedKeys = preferredOrder.filter { stageTimings[$0] != nil }
+        let remainingKeys = stageTimings.keys
+            .filter { !preferredOrder.contains($0) }
+            .sorted()
+
+        for key in orderedKeys + remainingKeys {
+            guard let duration = stageTimings[key] else { continue }
+            trace.appendStage(name: "stt.\(key)", durationMs: duration)
+        }
+    }
+
+    private func processWorkflow(sessionID: String, rawText: String, trace: CapturePipelineTraceBuilder) async throws {
         switch state.workflowMode {
         case .translateEnToDe:
-            try await processTranslation(sessionID: sessionID, rawText: rawText)
+            try await processTranslation(sessionID: sessionID, rawText: rawText, trace: trace)
         case .meeting:
-            try await processMeeting(sessionID: sessionID, rawText: rawText)
+            try await processMeeting(sessionID: sessionID, rawText: rawText, trace: trace)
         case .dictation:
-            try await processDictation(sessionID: sessionID, rawText: rawText)
+            try await processDictation(sessionID: sessionID, rawText: rawText, trace: trace)
         case .prompt:
-            try await processPrompt(sessionID: sessionID, rawText: rawText)
+            try await processPrompt(sessionID: sessionID, rawText: rawText, trace: trace)
         }
     }
 
@@ -624,6 +807,9 @@ final class AppCoordinator: ObservableObject {
         case .prompt:
             state.statusLine = "Prompt mode active"
         }
+
+        settings.restartBackendWithCurrentConfiguration(status: state.statusLine)
+        scheduleRuntimeWarmupIfNeeded()
     }
 
     // MARK: - Settings Forwarding
@@ -641,29 +827,41 @@ final class AppCoordinator: ObservableObject {
         settings.setCommandLaneHotkeyPreset(preset)
         configureHotkeys(force: true)
     }
-    func selectTranslationProfile(_ profile: TranslationProfile) { settings.selectTranslationProfile(profile) }
+    func selectTranslationProfile(_ profile: TranslationProfile) {
+        settings.selectTranslationProfile(profile)
+        scheduleRuntimeWarmupIfNeeded()
+    }
     func selectSTTBackend(_ backend: STTBackend) {
         settings.selectSTTBackend(backend)
-        if backend == .whisperKit && !whisperKitService.isLoaded {
-            Task { await loadWhisperKitModel() }
-        }
+        scheduleRuntimeWarmupIfNeeded()
     }
-    func updateLocalWhisperModel(whisperModel: String) { settings.updateLocalWhisperModel(whisperModel: whisperModel) }
+    func updateLocalWhisperModel(whisperModel: String) {
+        settings.updateLocalWhisperModel(whisperModel: whisperModel)
+        scheduleRuntimeWarmupIfNeeded()
+    }
     func selectProviderMode(_ mode: ProviderMode) {
         if mode == .localOnly {
             state.privacyPreview = nil
             privacy.clearPendingOperation()
         }
         settings.selectProviderMode(mode)
+        scheduleRuntimeWarmupIfNeeded()
     }
-    func updatePrivateAPIConfig(baseURL: String, model: String, apiKey: String) { settings.updatePrivateAPIConfig(baseURL: baseURL, model: model, apiKey: apiKey) }
-    func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String, ttsModel: String, ttsVoice: String) { settings.updateOpenAIConfig(baseURL: baseURL, apiKey: apiKey, sttModel: sttModel, ttsModel: ttsModel, ttsVoice: ttsVoice) }
+    func updatePrivateAPIConfig(baseURL: String, model: String, apiKey: String) {
+        settings.updatePrivateAPIConfig(baseURL: baseURL, model: model, apiKey: apiKey)
+        scheduleRuntimeWarmupIfNeeded()
+    }
+    func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String, ttsModel: String, ttsVoice: String) {
+        settings.updateOpenAIConfig(baseURL: baseURL, apiKey: apiKey, sttModel: sttModel, ttsModel: ttsModel, ttsVoice: ttsVoice)
+        scheduleRuntimeWarmupIfNeeded()
+    }
 
     // MARK: - Benchmark Forwarding
 
     func runTranslationBenchmark() async {
         await benchmark.runTranslationBenchmark()
-        Task { await warmup() }
+        settings.restartBackendWithCurrentConfiguration(status: state.statusLine)
+        scheduleRuntimeWarmupIfNeeded()
     }
     func applyFastestBenchmarkProfile() { benchmark.applyFastestBenchmarkProfile() }
 
@@ -673,6 +871,43 @@ final class AppCoordinator: ObservableObject {
         if !opened {
             log.error("Unable to open Settings window from coordinator")
             state.statusLine = "Unable to open Settings window"
+        }
+    }
+
+    func handleAutomationCommand(
+        _ command: AppAutomationCommand,
+        openWindow: (String) -> Void
+    ) {
+        log.info("Automation command received: \(String(describing: command), privacy: .public)")
+
+        switch command {
+        case .openWindow(let target):
+            switch target {
+            case .main:
+                showMainWindow()
+            case .dashboard:
+                openWindow("dashboard")
+            case .setup:
+                openWindow("setup")
+            case .settings:
+                openSettings()
+            }
+        case .selectWorkflow(let mode, let enableIfNeeded):
+            if enableIfNeeded {
+                enableWorkflowModeIfNeeded(mode)
+            }
+            selectWorkflowMode(mode)
+        case .backend(let action):
+            switch action {
+            case .start:
+                state.statusLine = "Backend start requested"
+                startBackend()
+            case .stop:
+                stopBackend()
+            case .recheck:
+                state.statusLine = "Refreshing backend readiness"
+                refreshReadiness()
+            }
         }
     }
 
@@ -693,15 +928,43 @@ final class AppCoordinator: ObservableObject {
     }
 
     func startBackend() {
-        backendManager.restartAsync(configuration: settings.currentBackendLaunchConfiguration())
+        state.backendProcessRunning = true
+        state.backendWarmupInProgress = true
+        state.backendReadyForDictation = false
+        state.backendReadinessIssue = nil
+        state.backendStatusSummary = "Backend starting — waiting for warmup"
+        backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
         beginWarmupMonitoring()
     }
 
     func stopBackend() {
         warmupTask?.cancel()
         backendManager.stopAsync()
+        state.backendProcessRunning = false
+        state.backendWarmupInProgress = false
         state.backendReadyForDictation = false
+        state.backendActiveSTTModel = ""
         state.backendReadinessIssue = "Backend stopped"
+        state.backendStatusSummary = "Backend stopped"
+    }
+
+    private func enableWorkflowModeIfNeeded(_ mode: WorkflowMode) {
+        switch mode {
+        case .dictation:
+            return
+        case .translateEnToDe:
+            if !state.translationModeEnabled {
+                settings.setTranslationModeEnabled(true)
+            }
+        case .meeting:
+            if !state.meetingModeEnabled {
+                settings.setMeetingModeEnabled(true)
+            }
+        case .prompt:
+            if !state.promptModeEnabled {
+                settings.setPromptModeEnabled(true)
+            }
+        }
     }
 
     private func showMainWindowIfNeeded(force: Bool = false) {
@@ -762,6 +1025,16 @@ final class AppCoordinator: ObservableObject {
         state.recentDictations = sessionMemory.recent()
     }
 
+    private func finalizeCaptureTrace(_ trace: CapturePipelineTraceBuilder) {
+        let snapshot = trace.build(statusLine: state.statusLine, sessionState: state.sessionState)
+        state.lastPipelineTrace = snapshot
+        let audioDetail = snapshot.audioDurationMs.map { ", audio=\($0)ms" } ?? ""
+        let modeDetail = snapshot.commandLane ? ", commandLane=true" : ""
+        log.info(
+            "Capture trace [\(snapshot.sessionID)] workflow=\(snapshot.workflowMode.rawValue), stt=\(snapshot.sttBackend.rawValue), provider=\(snapshot.providerMode.rawValue)\(modeDetail), total=\(snapshot.totalDurationMs)ms\(audioDetail), sessionState=\(snapshot.sessionState.rawValue), status='\(snapshot.statusLine)' :: \(snapshot.stageSummary)"
+        )
+    }
+
     func insertRecentDictation(_ candidate: TranscriptCandidate) {
         let text = candidate.text(for: candidate.selectedMode)
         let appLabel = state.focusTarget.appName ?? "app"
@@ -780,9 +1053,11 @@ final class AppCoordinator: ObservableObject {
         sessionID: String,
         operation: PrivacyOperationKind,
         inputText: String,
+        trace: CapturePipelineTraceBuilder,
         process: @escaping @MainActor (ProviderMode, String?, Bool) async throws -> Void
     ) async throws {
         if state.providerMode == .privateAPI {
+            let previewStarted = ContinuousClock.now
             try await privacy.requestPrivacyPreview(
                 sessionID: sessionID,
                 operation: operation,
@@ -790,15 +1065,20 @@ final class AppCoordinator: ObservableObject {
             ) { consentToken, allowRaw in
                 try await process(.privateAPI, consentToken, allowRaw)
             }
+            trace.recordStage("privacy_preview", startedAt: previewStarted)
             return
         }
         try await process(.localOnly, nil, false)
         state.recordingDuration = 0
     }
 
-    private func processDictation(sessionID: String, rawText: String) async throws {
+    private func processDictation(
+        sessionID: String,
+        rawText: String,
+        trace: CapturePipelineTraceBuilder
+    ) async throws {
         try await processWithPrivacyGate(
-            sessionID: sessionID, operation: .cleanup, inputText: rawText
+            sessionID: sessionID, operation: .cleanup, inputText: rawText, trace: trace
         ) { [weak self] providerMode, consentToken, allowRaw in
             guard let self else { return }
             let profile = self.resolveEffectiveProfile()
@@ -816,9 +1096,12 @@ final class AppCoordinator: ObservableObject {
                 self.state.transcriptCandidate = candidate
                 self.pushToSessionMemory(candidate)
                 let appLabel = self.state.focusTarget.appName ?? "app"
+                let insertStarted = ContinuousClock.now
                 if self.textInsertion.insertText(rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: self.capturedTargetApp) {
+                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=raw")
                     self.state.sessionState = .idle
                 } else {
+                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=raw, result=fallback")
                     self.state.sessionState = .review
                 }
                 return
@@ -826,8 +1109,12 @@ final class AppCoordinator: ObservableObject {
 
             // Local cleanup for WhisperKit — no backend needed
             if providerMode == .localOnly && self.state.sttBackend == .whisperKit {
+                let lightStarted = ContinuousClock.now
                 let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: effectiveTone)
+                trace.recordStage("cleanup_light_local", startedAt: lightStarted, detail: "tone=\(effectiveTone.rawValue)")
+                let polishStarted = ContinuousClock.now
                 let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: effectiveTone)
+                trace.recordStage("cleanup_polish_local", startedAt: polishStarted, detail: "tone=\(effectiveTone.rawValue)")
 
                 let candidate = TranscriptCandidate(
                     rawText: rawText, lightText: lightText,
@@ -844,9 +1131,12 @@ final class AppCoordinator: ObservableObject {
                     let text = candidate.text(for: autoMode)
                     let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
                     let appLabel = self.state.focusTarget.appName ?? "app"
+                    let insertStarted = ContinuousClock.now
                     if self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
+                        trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue)")
                         self.state.sessionState = .idle
                     } else {
+                        trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue), result=fallback")
                         self.state.sessionState = .review
                         self.state.statusLine = "Auto-insert failed — review and retry"
                     }
@@ -858,16 +1148,20 @@ final class AppCoordinator: ObservableObject {
                 return
             }
 
+            let lightStarted = ContinuousClock.now
             let lightText = try await BackendAPIClient.cleanup(
                 sessionID: sessionID, mode: .light, inputText: rawText,
                 toneStyle: effectiveTone, providerMode: providerMode,
                 consentToken: consentToken, allowRaw: allowRaw
             ).outputText
+            trace.recordStage("cleanup_light_api", startedAt: lightStarted, detail: "tone=\(effectiveTone.rawValue), provider=\(providerMode.rawValue)")
+            let polishStarted = ContinuousClock.now
             let polishText = try await BackendAPIClient.cleanup(
                 sessionID: sessionID, mode: .polish, inputText: rawText,
                 toneStyle: effectiveTone, providerMode: providerMode,
                 consentToken: consentToken, allowRaw: allowRaw
             ).outputText
+            trace.recordStage("cleanup_polish_api", startedAt: polishStarted, detail: "tone=\(effectiveTone.rawValue), provider=\(providerMode.rawValue)")
             // Private-API: default to .light so the redacted/cleaned version
             // is shown first — .raw would expose the unredacted original.
             let defaultMode: CleanupMode = providerMode == .privateAPI ? .light : .raw
@@ -886,9 +1180,12 @@ final class AppCoordinator: ObservableObject {
                 let text = candidate.text(for: autoMode)
                 let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
                 let appLabel = self.state.focusTarget.appName ?? "app"
+                let insertStarted = ContinuousClock.now
                 if self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
+                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue)")
                     self.state.sessionState = .idle
                 } else {
+                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue), result=fallback")
                     self.state.sessionState = .review
                     self.state.statusLine = "Auto-insert failed — review and retry"
                 }
@@ -902,84 +1199,73 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    private func processPrompt(sessionID: String, rawText: String) async throws {
+    private func processPrompt(
+        sessionID: String,
+        rawText: String,
+        trace: CapturePipelineTraceBuilder
+    ) async throws {
         try await processWithPrivacyGate(
-            sessionID: sessionID, operation: .cleanup, inputText: rawText
+            sessionID: sessionID, operation: .cleanup, inputText: rawText, trace: trace
         ) { [weak self] providerMode, consentToken, allowRaw in
             guard let self else { return }
             let profile = self.resolveEffectiveProfile()
-            let effectiveTone = profile?.tone ?? self.state.toneStyle
-            let effectiveInsert = profile?.insertBehavior ?? self.state.insertBehavior
-
-            let cleanedText: String
-            if providerMode == .localOnly && self.state.sttBackend == .whisperKit {
-                cleanedText = TextCleanupService.cleanup(rawText, mode: .polish, tone: effectiveTone)
-            } else {
-                let cleanupResponse = try await BackendAPIClient.cleanup(
-                    sessionID: sessionID, mode: .polish, inputText: rawText,
-                    toneStyle: effectiveTone, providerMode: providerMode,
-                    consentToken: consentToken, allowRaw: allowRaw
-                )
-                cleanedText = cleanupResponse.outputText
-            }
-
-            let intent = PromptFramingService.detectIntent(cleanedText)
-            let framedPrompt = PromptFramingService.frame(cleanedText, intent: intent)
-
-            let candidate = PromptCandidate(
+            let request = PromptWorkflowRequest(
                 sessionID: sessionID,
                 rawText: rawText,
-                cleanedText: cleanedText,
-                framedPrompt: framedPrompt,
-                detectedIntent: intent
+                providerMode: providerMode,
+                consentToken: consentToken,
+                allowRaw: allowRaw,
+                toneStyle: profile?.tone ?? self.state.toneStyle,
+                insertBehavior: profile?.insertBehavior ?? self.state.insertBehavior,
+                sttBackend: self.state.sttBackend,
+                targetApp: self.capturedTargetApp
             )
-            self.state.promptCandidate = candidate
-
-            if let _ = effectiveInsert.cleanupMode, providerMode == .localOnly {
-                let appLabel = self.state.focusTarget.appName ?? "app"
-                if self.textInsertion.insertText(framedPrompt, statusSuffix: "Prompt inserted (\(intent.displayName) — \(appLabel))", targetApp: self.capturedTargetApp) {
-                    self.state.sessionState = .idle
-                } else {
-                    self.state.sessionState = .review
-                }
-            } else {
-                self.state.sessionState = .review
-                self.state.statusLine = "Review prompt and insert"
+            try await self.promptWorkflow.processPrompt(request) { name, startedAt, detail in
+                trace.recordStage(name, startedAt: startedAt, detail: detail)
             }
         }
     }
 
-    private func processTranslation(sessionID: String, rawText: String) async throws {
+    private func processTranslation(
+        sessionID: String,
+        rawText: String,
+        trace: CapturePipelineTraceBuilder
+    ) async throws {
         try await processWithPrivacyGate(
-            sessionID: sessionID, operation: .translate, inputText: rawText
+            sessionID: sessionID, operation: .translate, inputText: rawText, trace: trace
         ) { [weak self] providerMode, consentToken, allowRaw in
             guard let self else { return }
-            let translation = try await BackendAPIClient.translate(
-                sessionID: sessionID, sourceText: rawText,
-                sourceLanguage: "en", targetLanguage: "de",
-                providerMode: providerMode, consentToken: consentToken, allowRaw: allowRaw
+            let request = TranslationWorkflowRequest(
+                sessionID: sessionID,
+                rawText: rawText,
+                sourceLanguage: "en",
+                targetLanguage: "de",
+                providerMode: providerMode,
+                consentToken: consentToken,
+                allowRaw: allowRaw
             )
-            self.state.translationCandidate = TranslationCandidate(
-                sourceEnglish: translation.sourceText,
-                targetGerman: translation.translatedText, approved: false
-            )
-            self.state.sessionState = .review
-            self.state.statusLine = providerMode == .privateAPI
-                ? (allowRaw ? "Review translation before insert" : "Review redacted translation before insert")
-                : "Approve translation before insert"
+            try await self.translationWorkflow.processTranslation(request) { name, startedAt, detail in
+                trace.recordStage(name, startedAt: startedAt, detail: detail)
+            }
         }
     }
 
-    private func processMeeting(sessionID: String, rawText: String) async throws {
+    private func processMeeting(
+        sessionID: String,
+        rawText: String,
+        trace: CapturePipelineTraceBuilder
+    ) async throws {
         try await processWithPrivacyGate(
-            sessionID: sessionID, operation: .meeting, inputText: rawText
+            sessionID: sessionID, operation: .meeting, inputText: rawText, trace: trace
         ) { [weak self] providerMode, consentToken, allowRaw in
             guard let self else { return }
+            let summaryStarted = ContinuousClock.now
             let response = try await BackendAPIClient.meetingSummarize(
                 sessionID: sessionID, transcript: rawText,
                 toneStyle: self.state.toneStyle, providerMode: providerMode,
                 consentToken: consentToken, allowRaw: allowRaw
             )
+            trace.recordStage("meeting_summary", startedAt: summaryStarted, detail: "provider=\(providerMode.rawValue)")
             self.state.meetingCandidate = MeetingCandidate(from: response)
             self.state.sessionState = .review
             self.state.statusLine = providerMode == .privateAPI
@@ -1140,8 +1426,21 @@ final class AppCoordinator: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
                 self?.checkAndRevertActivationPolicy()
+            }
+        }
+    }
+
+    private func handleAppDidFinishLaunching() {
+        didFinishLaunching = true
+
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            await MainActor.run {
+                guard let self, self.menuBarPanel == nil else { return }
+                self.setupMenuBarPanel()
+                self.log.info("Menu bar panel setup (cold start fallback)")
             }
         }
     }

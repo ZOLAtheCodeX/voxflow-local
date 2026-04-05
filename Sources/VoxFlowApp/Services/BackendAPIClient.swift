@@ -6,6 +6,10 @@ struct TranscribeResponse: Codable {
     let latencyMs: Int
     let confidenceEstimate: Double
     let processingTimeMs: Int
+    let stageTimingsMs: [String: Int]?
+    let modelLoadedBeforeRequest: Bool?
+    let modelLoadedAfterRequest: Bool?
+    let coldStart: Bool?
 }
 
 struct CleanupResponse: Codable {

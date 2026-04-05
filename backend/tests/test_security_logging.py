@@ -1,7 +1,7 @@
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 # Prevent ML model downloads — engines will set _pipeline=False on load failure.
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -11,10 +11,27 @@ os.environ.setdefault("VOXFLOW_MODELS_DIR", "/nonexistent")
 
 import pytest
 import logging
+
+# test_whisper_engine.py imports server with mocked FastAPI dependencies. Clear
+# that cached server module and any mocked framework modules here so this test
+# always exercises the real ASGI app regardless of import order.
+sys.modules.pop("server", None)
+for module_name in (
+    "fastapi",
+    "fastapi.middleware",
+    "fastapi.middleware.cors",
+    "fastapi.responses",
+    "numpy",
+    "pydantic",
+):
+    module = sys.modules.get(module_name)
+    if isinstance(module, MagicMock):
+        del sys.modules[module_name]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 import httpx
-from server import app, provider_router
+from server import STTExecutionResult, app, provider_router
 
 @pytest.fixture()
 async def client():
@@ -30,7 +47,19 @@ class TestSecurityLogging:
         # that triggers the filter.
         hallucination_text = "Thank you for watching."
 
-        with patch.object(provider_router, "transcribe", return_value=(hallucination_text, 0.9)):
+        mock_result = STTExecutionResult(
+            text=hallucination_text,
+            confidence=0.9,
+            stage_timings_ms={"mock_transcribe": 0},
+            model_loaded_before_request=True,
+            model_loaded_after_request=True,
+            cold_start=False,
+        )
+        with patch.object(
+            provider_router,
+            "transcribe",
+            new=lambda _pcm, _sample_rate, _language_hint: mock_result,
+        ):
             with caplog.at_level(logging.INFO):
                 # Send a dummy audio payload
                 # 1 second of silence at 16kHz (16-bit PCM)

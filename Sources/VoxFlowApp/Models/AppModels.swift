@@ -82,6 +82,40 @@ struct PromptCandidate {
     let detectedIntent: PromptIntent
 }
 
+struct PipelineStageTiming {
+    let name: String
+    let durationMs: Int
+    let detail: String?
+}
+
+struct CapturePipelineTrace {
+    let sessionID: String
+    let workflowMode: WorkflowMode
+    let sttBackend: STTBackend
+    let providerMode: ProviderMode
+    let commandLane: Bool
+    let audioDurationMs: Int?
+    let totalDurationMs: Int
+    let sessionState: SessionState
+    let statusLine: String
+    let recordedAt: Date
+    let stageTimings: [PipelineStageTiming]
+
+    var stageSummary: String {
+        stageTimings
+            .map { stage in
+                let detailSuffix: String
+                if let detail = stage.detail, !detail.isEmpty {
+                    detailSuffix = " (\(detail))"
+                } else {
+                    detailSuffix = ""
+                }
+                return "\(stage.name)=\(stage.durationMs)ms\(detailSuffix)"
+            }
+            .joined(separator: ", ")
+    }
+}
+
 enum ToneStyle: String, CaseIterable, Identifiable, Codable {
     case neutral
     case concise

@@ -77,8 +77,7 @@ final class TranslationBenchmarkCoordinator: TranslationBenchmarkCoordinating {
         }
 
         state.translationProfile = originalProfile
-        backendManager.restartAsync(configuration: settings.currentBackendLaunchConfiguration())
-        _ = await waitForBackendReady()
+        state.isBenchmarkRunning = false
 
         state.translationBenchmarkResults = results
         updateBenchmarkHistory(with: results)
@@ -93,8 +92,6 @@ final class TranslationBenchmarkCoordinator: TranslationBenchmarkCoordinating {
         } else {
             state.benchmarkStatusLine = "Benchmark complete, but profiles returned placeholder output. Download models and retry."
         }
-
-        state.isBenchmarkRunning = false
     }
 
     func applyFastestBenchmarkProfile() {

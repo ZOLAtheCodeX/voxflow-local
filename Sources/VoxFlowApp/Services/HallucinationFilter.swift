@@ -22,6 +22,13 @@ enum HallucinationFilter {
         "\u{266C}",
         "...",
         "\u{2026}",
+        // Common Whisper silence hallucinations — filter at any duration.
+        "hello.",
+        "hello",
+        "hi.",
+        "hi",
+        "hey.",
+        "hey",
     ])
 
     private static let shortOnlyFiltered: Set<String> = Set([
@@ -30,13 +37,6 @@ enum HallucinationFilter {
         "bye.",
         "goodbye.",
         "you",
-        // Common Whisper silence hallucinations — only filter on short audio
-        "hello.",
-        "hello",
-        "hi.",
-        "hi",
-        "hey.",
-        "hey",
     ])
 
     static func isLikelyHallucination(_ text: String, shortAudio: Bool) -> Bool {
