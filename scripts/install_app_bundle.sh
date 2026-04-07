@@ -65,25 +65,23 @@ if [[ -z "${SIGN_IDENTITY}" ]]; then
   SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
 fi
 
-if command -v codesign >/dev/null 2>&1; then
-  if [[ -n "${SIGN_IDENTITY}" ]]; then
-    echo "[install] signing with identity: ${SIGN_IDENTITY}"
-    if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
-      if ! codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENTITLEMENTS_FILE}" "${STAGED_APP}" >/dev/null 2>&1; then
-        echo "[install] warning: identity signing failed; falling back to ad-hoc."
-        codesign --force --sign - --entitlements "${ENTITLEMENTS_FILE}" "${STAGED_APP}" >/dev/null 2>&1 || true
-      fi
-    elif ! codesign --force --sign "${SIGN_IDENTITY}" "${STAGED_APP}" >/dev/null 2>&1; then
-      echo "[install] warning: identity signing failed; falling back to ad-hoc."
-      codesign --force --sign - "${STAGED_APP}" >/dev/null 2>&1 || true
-    fi
-  else
-    echo "[install] no signing identity found; applying ad-hoc signature..."
-    if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
-      codesign --force --sign - --entitlements "${ENTITLEMENTS_FILE}" "${STAGED_APP}" >/dev/null 2>&1 || true
-    else
-      codesign --force --sign - "${STAGED_APP}" >/dev/null 2>&1 || true
-    fi
+if [[ -z "${SIGN_IDENTITY}" ]]; then
+  echo "[install] error: no Apple Development signing identity found."
+  echo "[install] ad-hoc signing (--sign -) breaks Accessibility permission persistence."
+  echo "[install] install an Apple Development certificate or set VOXFLOW_SIGN_IDENTITY."
+  exit 1
+fi
+
+echo "[install] signing with identity: ${SIGN_IDENTITY}"
+if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
+  if ! codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENTITLEMENTS_FILE}" "${STAGED_APP}"; then
+    echo "[install] error: signing failed with identity: ${SIGN_IDENTITY}"
+    exit 1
+  fi
+else
+  if ! codesign --force --sign "${SIGN_IDENTITY}" "${STAGED_APP}"; then
+    echo "[install] error: signing failed with identity: ${SIGN_IDENTITY}"
+    exit 1
   fi
 fi
 
@@ -103,11 +101,10 @@ fi
 echo "[install] promoting staged app into ~/Applications..."
 mv "${STAGED_APP}" "${DEST_APP}"
 
-if command -v codesign >/dev/null 2>&1; then
-  echo "[install] verifying ad-hoc signature..."
-  if ! codesign --verify --strict "${DEST_APP}" >/dev/null 2>&1; then
-    echo "[install] warning: codesign verification failed; launcher may reject the app."
-  fi
+echo "[install] verifying signature..."
+if ! codesign --verify --strict "${DEST_APP}" >/dev/null 2>&1; then
+  echo "[install] error: codesign verification failed after install."
+  exit 1
 fi
 
 echo "[install] clearing quarantine attributes..."

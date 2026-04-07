@@ -22,14 +22,13 @@ if [[ ! -x "\${APP_BIN}" ]]; then
   exit 1
 fi
 
-if open "\${APP_PATH}" >/dev/null 2>&1; then
-  exit 0
+if ! open "\${APP_PATH}"; then
+  echo "[launcher] failed to open \${APP_PATH}"
+  echo "[launcher] Do NOT launch the raw executable directly — it registers as a"
+  echo "[launcher] different TCC client and Accessibility permissions will not persist."
+  echo "[launcher] Try: xattr -cr \${APP_PATH} && open \${APP_PATH}"
+  exit 1
 fi
-
-nohup "\${APP_BIN}" >"\${LOG_PATH}" 2>&1 &
-disown || true
-echo "[launcher] started VoxFlow directly"
-echo "[launcher] log: \${LOG_PATH}"
 EOF
 
 chmod +x "${TARGET_PATH}"

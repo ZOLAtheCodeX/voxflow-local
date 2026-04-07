@@ -114,13 +114,7 @@ Run commands from the repository root (`voxflow-local/`).
 ./scripts/run_backend.sh
 ```
 
-4. Run app:
-
-```bash
-swift run VoxFlowLocal
-```
-
-Optional native app bundle (Finder/Dock launch):
+4. Build, install, and run the app bundle:
 
 ```bash
 ./scripts/build_app_bundle.sh
@@ -128,13 +122,16 @@ Optional native app bundle (Finder/Dock launch):
 open ~/Applications/VoxFlow.app
 ```
 
-One-command repair + launch (recommended if bundle got corrupted/nested):
+> **Important:** Always launch via `open ~/Applications/VoxFlow.app`.
+> Do not use `swift run VoxFlowLocal` or run the binary directly — raw binary launches register as a different TCC client and Accessibility permissions will not persist.
+
+One-command rebuild + install + launch:
 
 ```bash
-./scripts/reinstall_and_launch.sh --skip-build
+./scripts/reinstall_and_launch.sh
 ```
 
-Create a one-click Desktop launcher:
+Optional: create a one-click Desktop launcher (uses `open` internally):
 
 ```bash
 ./scripts/create_desktop_launcher.sh
@@ -178,17 +175,15 @@ If `open dist/VoxFlow.app` fails in your terminal environment, use:
 ./scripts/open_app_bundle.sh
 ```
 
-This launcher automatically falls back to direct binary start and writes logs to:
+This script uses `open` only and refuses to launch the raw binary (which would break Accessibility permissions).
 
-```bash
-./.runtime/app-direct.log
-```
-
-Or launch both backend + app in one command (dev only, raw binary):
+For development with backend + app together:
 
 ```bash
 ./scripts/launch_voxflow_dev.sh
 ```
+
+> **Note:** `launch_voxflow_dev.sh` runs the raw binary directly. Accessibility features will not work in this mode. Use only for non-AX development tasks.
 
 5. Run tests:
 
