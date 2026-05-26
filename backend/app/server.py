@@ -47,6 +47,7 @@ from nlp import (
     split_and_recase,
     split_sentences,
 )
+from privacy import AuditLogger, ConsentRecord, ConsentStore, redact_sensitive_text
 
 logger = logging.getLogger("voxflow")
 logging.basicConfig(
@@ -874,21 +875,6 @@ def normalize_stt_backend(raw: str) -> str:
     return "whisper"
 
 
-def redact_sensitive_text(text: str) -> str:
-    redacted = text
-    patterns: list[tuple[str, str]] = [
-        (r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b", "[EMAIL]"),
-        (r"https?://[^\s,)>\"']+", "[URL]"),
-        (r"\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b", "[PHONE]"),
-        (r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)", "[SSN]"),
-        (r"\b(?:\d[ -]*?){13,19}\b", "[ACCOUNT_NUMBER]"),
-        (r"\b\d{9,}\b", "[ID]"),
-    ]
-    for pattern, replacement in patterns:
-        redacted = re.sub(pattern, replacement, redacted, flags=re.IGNORECASE)
-    return normalize_whitespace(redacted)
-
-
 def extract_json_object(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if not stripped:
@@ -925,80 +911,6 @@ def coerce_string_list(value: Any, limit: int) -> list[str]:
 def is_placeholder_text(text: str) -> bool:
     lowered = text.lower()
     return lowered.startswith("[translation unavailable") or lowered.startswith("[transcription unavailable")
-
-
-@dataclass
-class ConsentRecord:
-    token: str
-    session_id: str
-    operation: str
-    original_text: str
-    redacted_text: str
-    created_at: float
-    max_uses: int = 1
-    use_count: int = 0
-
-
-class ConsentStore:
-    def __init__(self, ttl_seconds: int = 1800) -> None:
-        self._ttl_seconds = ttl_seconds
-        self._records: dict[str, ConsentRecord] = {}
-        self._lock = Lock()
-
-    def create(self, session_id: str, operation: str, original_text: str, redacted_text: str, max_uses: int = 1) -> ConsentRecord:
-        token = secrets.token_urlsafe(20)
-        record = ConsentRecord(
-            token=token,
-            session_id=session_id,
-            operation=operation,
-            original_text=original_text,
-            redacted_text=redacted_text,
-            created_at=time.time(),
-            max_uses=max(1, max_uses),
-        )
-        with self._lock:
-            self._prune_locked()
-            self._records[token] = record
-        return record
-
-    def resolve(self, token: str, session_id: str, operation: str) -> ConsentRecord | None:
-        with self._lock:
-            self._prune_locked()
-            record = self._records.get(token)
-            if not record:
-                return None
-            if record.session_id != session_id or record.operation != operation:
-                return None
-            # Bounded-use: increment counter, consume when limit reached
-            record.use_count += 1
-            if record.use_count >= record.max_uses:
-                self._records.pop(token, None)
-            return record
-
-    def _prune_locked(self) -> None:
-        cutoff = time.time() - self._ttl_seconds
-        expired = [token for token, record in self._records.items() if record.created_at < cutoff]
-        for token in expired:
-            self._records.pop(token, None)
-
-
-class AuditLogger:
-    _audit_logger = logging.getLogger("voxflow.audit")
-
-    def log(self, *, operation: str, provider_mode: str, session_id: str, payload_length: int, redacted: bool) -> None:
-        self._audit_logger.info(
-            json.dumps(
-                {
-                    "event": "privacy_audit",
-                    "operation": operation,
-                    "provider_mode": provider_mode,
-                    "session_id": session_id,
-                    "payload_length": payload_length,
-                    "redacted": redacted,
-                    "timestamp": int(time.time()),
-                }
-            ),
-        )
 
 
 class PrivateAPIClient:

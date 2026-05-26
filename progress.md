@@ -22,9 +22,10 @@ The user's task list numbered engines first; I'm reordering to match the import 
   - [x] `nlp/sentences.py` — split_sentences
   - [x] `nlp/meeting.py` — infer_speaker_segments, infer_task_owners, coerce_*, render_meeting_*_export, build_meeting_summary
   - server.py: 2274 → 1782 lines (492 lines moved into nlp/). All 282 Python tests + 256 Swift tests green.
-- [ ] **Task 2 (renumbered to 2):** Extract `backend/app/privacy/` package
-  - [ ] `privacy/consent.py` — ConsentRecord, ConsentStore, AuditLogger
-  - [ ] `privacy/redaction.py` — redact_sensitive_text
+- [x] **Task 2:** Extract `backend/app/privacy/` package ✅
+  - [x] `privacy/consent.py` — ConsentRecord, ConsentStore, AuditLogger
+  - [x] `privacy/redaction.py` — redact_sensitive_text
+  - server.py: 1782 → 1693 lines. 282 Python + 256 Swift tests still green.
 - [ ] **Task 1 (renumbered to 3):** Extract `backend/app/engines/` package
   - [ ] `engines/whisper.py` — WhisperEngine, OpenAIAudioClient
   - [ ] `engines/polish.py` — PolishEngine
