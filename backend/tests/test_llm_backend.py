@@ -261,6 +261,97 @@ class TestSelectBackend:
         assert isinstance(backend, OllamaBackend)
 
 
+class TestRecommendOllamaModel:
+    """Recommended model tiers by host RAM."""
+
+    def test_recommends_e4b_for_high_ram(self) -> None:
+        from engines.llm_backend import recommend_ollama_model
+        assert recommend_ollama_model(32 * 1024**3) == "gemma4:e4b-mlx"
+        assert recommend_ollama_model(16 * 1024**3) == "gemma4:e4b-mlx"
+
+    def test_recommends_e2b_for_mid_ram(self) -> None:
+        from engines.llm_backend import recommend_ollama_model
+        assert recommend_ollama_model(15 * 1024**3) == "gemma4:e2b-mlx"
+        assert recommend_ollama_model(8 * 1024**3) == "gemma4:e2b-mlx"
+
+    def test_no_recommendation_for_low_ram(self) -> None:
+        from engines.llm_backend import recommend_ollama_model
+        assert recommend_ollama_model(4 * 1024**3) is None
+        assert recommend_ollama_model(7 * 1024**3) is None
+
+    def test_zero_memory_returns_none(self) -> None:
+        from engines.llm_backend import recommend_ollama_model
+        assert recommend_ollama_model(0) is None
+
+
+class TestListOllamaModels:
+    def test_returns_parsed_list_on_success(self) -> None:
+        from engines.llm_backend import list_ollama_models
+        body = json.dumps({"models": [{"name": "gemma4:e4b-mlx", "size": 9_600_000_000}]}).encode("utf-8")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(body),
+        ):
+            models = list_ollama_models()
+        assert models == [{"name": "gemma4:e4b-mlx", "size": 9_600_000_000}]
+
+    def test_returns_empty_on_connection_error(self) -> None:
+        from engines.llm_backend import list_ollama_models
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=urlerror.URLError("refused"),
+        ):
+            assert list_ollama_models() == []
+
+    def test_returns_empty_on_malformed_json(self) -> None:
+        from engines.llm_backend import list_ollama_models
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(b"not json"),
+        ):
+            assert list_ollama_models() == []
+
+
+class TestPullOllamaModelStream:
+    def test_yields_ndjson_lines(self) -> None:
+        from engines.llm_backend import pull_ollama_model_stream
+        lines = [
+            b'{"status": "pulling manifest"}\n',
+            b'{"status": "downloading", "completed": 1000, "total": 5000}\n',
+            b'{"status": "success"}\n',
+        ]
+
+        class _StreamingResponse:
+            def __enter__(self) -> "_StreamingResponse":
+                return self
+            def __exit__(self, *args: object) -> None:
+                return None
+            def __iter__(self):
+                return iter(lines)
+
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_StreamingResponse(),
+        ):
+            out = list(pull_ollama_model_stream("gemma4:e4b-mlx"))
+
+        assert len(out) == 3
+        assert "pulling manifest" in out[0]
+        assert "success" in out[2]
+
+    def test_emits_error_line_on_connection_failure(self) -> None:
+        from engines.llm_backend import pull_ollama_model_stream
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=urlerror.URLError("connection refused"),
+        ):
+            out = list(pull_ollama_model_stream("gemma4:e4b-mlx"))
+        assert len(out) == 1
+        parsed = json.loads(out[0])
+        assert parsed["status"] == "error"
+        assert "unreachable" in parsed["error"]
+
+
 class TestProbeOllamaAvailable:
     """probe_ollama_available() caches the result for the TTL window."""
 

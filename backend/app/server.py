@@ -37,7 +37,14 @@ from engines import (
     preferred_torch_device,
     resolve_model_ref,
 )
-from engines.llm_backend import probe_ollama_available
+from engines.llm_backend import (
+    detect_host_memory_bytes,
+    list_ollama_models,
+    probe_ollama_available,
+    pull_ollama_model_stream,
+    recommend_ollama_model,
+)
+from fastapi.responses import StreamingResponse
 from nlp import (
     _WHISPER_HALLUCINATION_ALWAYS,
     _WHISPER_HALLUCINATION_SHORT_ONLY,
@@ -77,6 +84,9 @@ from schemas import (
     MeetingSpeakerSegment,
     MeetingSummaryResponse,
     MeetingTaskOwner,
+    OllamaModelInfo,
+    OllamaModelsResponse,
+    OllamaPullRequest,
     PrivacyPreviewRequest,
     PrivacyPreviewResponse,
     PromptFrameRequest,
@@ -477,6 +487,60 @@ def prompt_frame(payload: PromptFrameRequest) -> PromptFrameResponse:
         redacted=False,
     )
     return PromptFrameResponse(framed_prompt=framed, detected_intent=intent)
+
+
+@app.get("/v1/ollama/models", response_model=OllamaModelsResponse)
+def ollama_models() -> OllamaModelsResponse:
+    """List installed Ollama models + the recommended model for this host."""
+    available = probe_ollama_available()
+    raw_models = list_ollama_models() if available else []
+    models: list[OllamaModelInfo] = []
+    for entry in raw_models:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            continue
+        models.append(
+            OllamaModelInfo(
+                name=name,
+                size=int(entry.get("size", 0) or 0),
+                digest=str(entry.get("digest", ""))[:64],
+                modified_at=str(entry.get("modified_at", "")),
+            )
+        )
+
+    host_memory_bytes = detect_host_memory_bytes()
+    host_memory_gb = round(host_memory_bytes / (1024 ** 3), 2) if host_memory_bytes else 0.0
+    recommended = (
+        os.environ.get("VOXFLOW_OLLAMA_MODEL", "").strip()
+        or recommend_ollama_model(host_memory_bytes)
+    )
+    current_model = os.environ.get("VOXFLOW_OLLAMA_MODEL", "").strip() or (recommended or "")
+
+    return OllamaModelsResponse(
+        available=available,
+        models=models,
+        current_model=current_model,
+        recommended_model=recommended,
+        host_memory_gb=host_memory_gb,
+    )
+
+
+@app.post("/v1/ollama/pull")
+def ollama_pull(payload: OllamaPullRequest) -> StreamingResponse:
+    """Stream NDJSON progress lines from Ollama's /api/pull endpoint to the client.
+
+    Never auto-pulls — caller (Swift Settings) supplies the model name explicitly.
+    The streamed lines are passed through verbatim so the client can render its
+    own progress UI without re-parsing.
+    """
+    if not probe_ollama_available(force=True):
+        raise HTTPException(status_code=503, detail="Ollama is not reachable at the configured URL")
+    return StreamingResponse(
+        pull_ollama_model_stream(payload.model),
+        media_type="application/x-ndjson",
+    )
 
 
 @app.websocket("/v1/events")

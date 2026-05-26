@@ -251,3 +251,127 @@ def select_backend() -> TextLLMBackend:
         "Unknown VOXFLOW_POLISH_BACKEND=%r; falling back to flan_t5", choice
     )
     return FlanT5Backend()
+
+
+# ── Host memory + recommended model ─────────────────────────────────────
+
+
+def detect_host_memory_bytes() -> int:
+    """Detect physical RAM in bytes. macOS uses ``sysctl hw.memsize``;
+    Linux falls back to ``os.sysconf``. Returns 0 on any failure.
+    """
+    try:
+        import subprocess  # local import — only needed for this helper
+
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception as exc:
+        logger.debug("sysctl hw.memsize failed: %s", exc)
+
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        phys_pages = os.sysconf("SC_PHYS_PAGES")
+        return int(page_size) * int(phys_pages)
+    except Exception as exc:
+        logger.debug("sysconf RAM detection failed: %s", exc)
+
+    return 0
+
+
+def recommend_ollama_model(host_memory_bytes: int | None = None) -> str | None:
+    """Return the suggested Ollama model id for this host, or ``None``.
+
+    Tiers (per Phase 3.3):
+    - ≥ 16 GB → ``gemma4:e4b-mlx`` (quality default)
+    - 8–16 GB → ``gemma4:e2b-mlx`` (lower memory pressure)
+    - < 8 GB  → ``None`` (don't recommend Ollama; regex pipeline only)
+
+    ``VOXFLOW_OLLAMA_MODEL`` env override is honoured by callers; this helper
+    only computes the default tier.
+    """
+    if host_memory_bytes is None:
+        host_memory_bytes = detect_host_memory_bytes()
+    if host_memory_bytes <= 0:
+        return None
+    gb = host_memory_bytes / (1024 ** 3)
+    if gb >= 16:
+        return "gemma4:e4b-mlx"
+    if gb >= 8:
+        return "gemma4:e2b-mlx"
+    return None
+
+
+# ── Ollama admin operations (list / pull) ───────────────────────────────
+
+
+def list_ollama_models(base_url: str | None = None, *, timeout: float = 2.0) -> list[dict]:
+    """Return the installed Ollama model list from ``GET /api/tags``.
+
+    Empty list on any failure — callers must handle Ollama-unavailable
+    gracefully (the Settings UI shows an "Install Ollama" prompt instead).
+    """
+    base = (base_url or os.environ.get("VOXFLOW_OLLAMA_URL", "http://localhost:11434")).rstrip("/")
+    req = urlrequest.Request(f"{base}/api/tags", method="GET")
+    try:
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+    except Exception as exc:
+        logger.warning("Ollama /api/tags failed: %s", exc)
+        return []
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except Exception as exc:
+        logger.warning("Ollama /api/tags malformed JSON: %s", exc)
+        return []
+    models = parsed.get("models", [])
+    return models if isinstance(models, list) else []
+
+
+def pull_ollama_model_stream(model: str, base_url: str | None = None):
+    """Yield NDJSON progress lines from Ollama's ``POST /api/pull``.
+
+    The endpoint returns one JSON line per progress event, e.g.::
+
+        {"status": "pulling manifest"}
+        {"status": "downloading", "digest": "...", "total": 4500000, "completed": 1200000}
+        {"status": "success"}
+
+    This generator yields each line verbatim (already decoded as ``str``)
+    so the FastAPI route can re-stream them as a ``text/event-stream`` or
+    ``application/x-ndjson`` body without re-parsing. Any HTTP / network
+    failure ends the stream with a synthetic error event.
+    """
+    base = (base_url or os.environ.get("VOXFLOW_OLLAMA_URL", "http://localhost:11434")).rstrip("/")
+    payload = json.dumps({"model": model, "stream": True}).encode("utf-8")
+    req = urlrequest.Request(
+        f"{base}/api/pull",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=None) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+                if not line:
+                    continue
+                yield line + "\n"
+    except urlerror.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            pass
+        yield json.dumps({"status": "error", "error": f"http_{exc.code}: {detail}"}) + "\n"
+    except (urlerror.URLError, ConnectionError, TimeoutError, OSError) as exc:
+        yield json.dumps({"status": "error", "error": f"unreachable: {exc}"}) + "\n"
+    except Exception as exc:  # pragma: no cover - last-resort fallback
+        logger.error("Ollama pull stream unexpected error: %s", exc)
+        yield json.dumps({"status": "error", "error": f"unexpected: {exc}"}) + "\n"

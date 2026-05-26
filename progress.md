@@ -29,18 +29,18 @@ Phase 2 status: Tasks 1–4 (nlp, privacy, engines, routing) committed. Task 5 (
 - [x] Persist dismissal in UserDefaults (`VoxFlow.ollamaNudgeDismissed` key).
 - [x] **Commit** — 309 Python (305 + 4 probe-cache tests) + 256 Swift = 565 tests green.
 
-### 3.3 — Settings UI for Local AI Model (~3h)
+### 3.3 — Settings UI for Local AI Model (~3h) ✅
 
-- [ ] Backend endpoint to query Ollama model list (status pill data)
-- [ ] Backend endpoint to proxy Ollama `/api/pull` NDJSON streaming to Swift
-- [ ] Swift Settings → "Local AI Model" section with status pill + Pull-model button + native `ProgressView` (bytes)
-- [ ] RAM-tiered default model selection:
+- [x] Backend endpoint `GET /v1/ollama/models` returns installed models + recommended model + host memory.
+- [x] Backend endpoint `POST /v1/ollama/pull` streams Ollama `/api/pull` NDJSON to Swift via `StreamingResponse(media_type="application/x-ndjson")`. 503 when Ollama is unreachable.
+- [x] Swift Settings → "Local AI Model" section: reachability pill, installed models list with size, recommended model with "Pull Model" button, live NDJSON progress line, host memory readout. Uses `URLSession.bytes(for:).lines` to stream NDJSON.
+- [x] RAM-tiered default model via `recommend_ollama_model()`:
   - ≥16 GB → `gemma4:e4b-mlx`
   - 8–16 GB → `gemma4:e2b-mlx`
-  - <8 GB → regex pipeline only (no Ollama recommendation)
-- [ ] `VOXFLOW_OLLAMA_MODEL` env var still overrides
-- [ ] Never auto-pull — explicit user action required
-- [ ] **Commit**
+  - <8 GB → `None` (regex pipeline only)
+- [x] `VOXFLOW_OLLAMA_MODEL` env var still overrides — `/v1/ollama/models` returns it as `current_model` and `recommended_model` when set.
+- [x] Never auto-pull — user must click "Pull Model" in Settings.
+- [x] **Commit** — 318 Python (309 + 9 ollama-admin tests) + 256 Swift = 574 tests green.
 
 ### 3.4 — Golden tests + tuning (~4h)
 

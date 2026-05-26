@@ -138,6 +138,38 @@ struct BackendReadinessResponse: Codable {
     }
 }
 
+struct OllamaModelInfo: Codable, Identifiable, Hashable {
+    let name: String
+    let size: Int
+    let digest: String
+    let modifiedAt: String
+
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case size
+        case digest
+        case modifiedAt = "modified_at"
+    }
+}
+
+struct OllamaModelsResponse: Codable {
+    let available: Bool
+    let models: [OllamaModelInfo]
+    let currentModel: String
+    let recommendedModel: String?
+    let hostMemoryGb: Double
+
+    enum CodingKeys: String, CodingKey {
+        case available
+        case models
+        case currentModel = "current_model"
+        case recommendedModel = "recommended_model"
+        case hostMemoryGb = "host_memory_gb"
+    }
+}
+
 enum BackendError: LocalizedError {
     case httpError(statusCode: Int, detail: String)
 
@@ -241,6 +273,36 @@ enum BackendAPIClient {
 
     static func ready() async throws -> BackendReadinessResponse {
         return try await performGetRequest(path: "v1/ready")
+    }
+
+    static func ollamaModels() async throws -> OllamaModelsResponse {
+        return try await performGetRequest(path: "v1/ollama/models")
+    }
+
+    /// Trigger an Ollama model pull. Streams NDJSON progress lines back from
+    /// the backend; ``onProgress`` is invoked once per line so the UI can
+    /// surface status and byte-progress. Returns when the stream terminates
+    /// (success or error event).
+    static func ollamaPull(model: String, onProgress: @escaping @Sendable (String) -> Void) async throws {
+        struct Payload: Codable {
+            let model: String
+        }
+        let url = baseURL.appendingPathComponent("v1/ollama/pull")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(Payload(model: model))
+
+        let (bytes, response) = try await session.bytes(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw BackendError.httpError(statusCode: http.statusCode, detail: "Ollama pull failed")
+        }
+        for try await line in bytes.lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                onProgress(trimmed)
+            }
+        }
     }
 
     static func transcribe(

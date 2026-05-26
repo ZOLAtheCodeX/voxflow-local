@@ -15,6 +15,11 @@ struct SettingsView: View {
     @State private var openAITTSModelDraft = ""
     @State private var openAITTSVoiceDraft = ""
     @State private var localWhisperModelDraft = ""
+    @State private var ollamaStatus: OllamaModelsResponse?
+    @State private var ollamaLoadError: String?
+    @State private var ollamaPullProgress: String?
+    @State private var ollamaPullActive: Bool = false
+    @State private var ollamaPullTargetModel: String = ""
 
     var body: some View {
         Form {
@@ -115,6 +120,53 @@ struct SettingsView: View {
                     .padding(.top, 4)
                 }
             }
+
+            Section("Local AI Model") {
+                ollamaStatusRow
+                if let status = ollamaStatus {
+                    if !status.models.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Installed models").font(.system(size: 11, weight: .semibold))
+                            ForEach(status.models) { model in
+                                HStack {
+                                    Text(model.name).font(.system(size: 11))
+                                    Spacer()
+                                    Text(formatBytes(model.size))
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    if let recommended = status.recommendedModel,
+                       !status.models.contains(where: { $0.name == recommended }) {
+                        HStack {
+                            Text("Recommended: \(recommended)")
+                                .font(.system(size: 11))
+                            Spacer()
+                            Button(ollamaPullActive ? "Pulling…" : "Pull Model") {
+                                pullModel(recommended)
+                            }
+                            .disabled(ollamaPullActive || !status.available)
+                        }
+                        if let progress = ollamaPullProgress {
+                            Text(progress)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Text("Host memory: \(String(format: "%.1f", status.hostMemoryGb)) GB")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                if let error = ollamaLoadError {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+            }
+            .task { await refreshOllamaStatus() }
 
             if !state.ollamaAvailable && !state.ollamaNudgeDismissed {
                 Section {
@@ -535,6 +587,72 @@ struct SettingsView: View {
         case .heavy:
             return .red
         }
+    }
+
+    @ViewBuilder private var ollamaStatusRow: some View {
+        HStack {
+            Text("Ollama")
+            Spacer()
+            if let status = ollamaStatus {
+                Text(status.available ? "Reachable" : "Not running")
+                    .foregroundStyle(status.available ? .green : .secondary)
+            } else if ollamaLoadError != nil {
+                Text("Error")
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Checking…")
+                    .foregroundStyle(.secondary)
+            }
+            Button("Refresh") {
+                Task { await refreshOllamaStatus() }
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11))
+        }
+        .font(.system(size: 12))
+    }
+
+    @MainActor
+    private func refreshOllamaStatus() async {
+        do {
+            ollamaStatus = try await BackendAPIClient.ollamaModels()
+            ollamaLoadError = nil
+        } catch {
+            ollamaLoadError = error.localizedDescription
+        }
+    }
+
+    private func pullModel(_ model: String) {
+        guard !ollamaPullActive else { return }
+        ollamaPullActive = true
+        ollamaPullProgress = "Starting…"
+        ollamaPullTargetModel = model
+        Task {
+            do {
+                try await BackendAPIClient.ollamaPull(model: model) { line in
+                    Task { @MainActor in
+                        ollamaPullProgress = line
+                    }
+                }
+                await MainActor.run {
+                    ollamaPullProgress = "Done."
+                    ollamaPullActive = false
+                }
+                await refreshOllamaStatus()
+            } catch {
+                await MainActor.run {
+                    ollamaPullProgress = "Failed: \(error.localizedDescription)"
+                    ollamaPullActive = false
+                }
+            }
+        }
+    }
+
+    private func formatBytes(_ size: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB, .useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(size))
     }
 
     private func refreshPermissions() {

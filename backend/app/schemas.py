@@ -129,6 +129,25 @@ class PrivacyPreviewResponse(BaseModel):
     redacted_text: str
 
 
+class OllamaModelInfo(BaseModel):
+    name: str
+    size: int = 0
+    digest: str = ""
+    modified_at: str = ""
+
+
+class OllamaModelsResponse(BaseModel):
+    available: bool
+    models: list[OllamaModelInfo] = Field(default_factory=list)
+    current_model: str = ""
+    recommended_model: str | None = None
+    host_memory_gb: float = 0.0
+
+
+class OllamaPullRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=128)
+
+
 class ReadyResponse(BaseModel):
     service_status: str
     ready_for_dictation: bool
