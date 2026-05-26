@@ -233,8 +233,19 @@ export VOXFLOW_MODELS_DIR="$(pwd)/models"
 - Default model refs:
   - STT (WhisperKit): `openai/whisper-small` (CoreML, in-process via Apple Neural Engine)
   - STT (Whisper): `openai/whisper-small` (Python backend)
-  - Polish: `google/flan-t5-small`
+  - Polish: `gemma4:e4b-mlx` via local Ollama (Gemma 4 MLX variant, Apple Silicon optimised). The pre-Phase-3 `google/flan-t5-small` path has been removed; the regex pipeline (`apply_tone(light_cleanup())`) is the documented guardrail-fallback when Ollama is unreachable.
   - Translate: `google/translategemma-4b-it`
+
+### Ollama setup
+
+```bash
+# Install Ollama from https://ollama.com/download, then:
+ollama serve &
+ollama pull gemma4:e4b-mlx   # recommended for ≥16 GB RAM
+# ollama pull gemma4:e2b-mlx # smaller — recommended for 8–16 GB RAM
+```
+
+VoxFlow probes Ollama at startup (`GET /v1/ready` exposes `ollama_available`). Settings → Local AI Model shows the reachability pill and lets you pull a model with a live NDJSON progress bar. `VOXFLOW_OLLAMA_URL` (default `http://localhost:11434`) and `VOXFLOW_OLLAMA_MODEL` (default `gemma4:e4b-mlx`) override the connection.
 
 - Translate backend options:
   - `VOXFLOW_TRANSLATE_BACKEND=auto` (default; uses `translategemma` for TranslateGemma models, otherwise `marian`)

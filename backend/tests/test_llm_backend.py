@@ -253,12 +253,13 @@ class TestSelectBackend:
         backend = select_backend()
         assert isinstance(backend, OllamaBackend)
 
-    def test_legacy_flan_t5_value_falls_back_to_ollama(
+    def test_legacy_or_unknown_value_falls_back_to_ollama(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Existing user configs that still set flan_t5 should not crash;
-        # they get ollama instead with a warning logged.
-        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "flan_t5")
+        # Existing user configs that still set a removed/legacy value or
+        # any other unknown identifier should not crash; they get ollama
+        # instead with a warning logged.
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "legacy-removed-backend")
         backend = select_backend()
         assert isinstance(backend, OllamaBackend)
 
