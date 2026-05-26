@@ -93,6 +93,23 @@ final class AppCoordinator: ObservableObject {
     private(set) lazy var translationWorkflow: TranslationWorkflowCoordinating = TranslationWorkflowCoordinator(state: state)
     private(set) lazy var promptWorkflow: PromptWorkflowCoordinating = PromptWorkflowCoordinator(state: state, textInsertion: textInsertion)
 
+    // Cockpit Layer 0 — long-form workspace + smart actions.
+    // Constructed lazily so the autoSaveDirectory is resolved relative to
+    // Application Support at first access.
+    private(set) lazy var cockpitSessionService: LongFormSessionService = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let dir = appSupport.appendingPathComponent("VoxFlow/sessions", isDirectory: true)
+        return LongFormSessionService(autoSaveDirectory: dir)
+    }()
+    private(set) lazy var cockpitActionService: SmartActionService = SmartActionService(backend: BackendAPISmartActionAdapter())
+    private(set) lazy var cockpit: CockpitCoordinator = CockpitCoordinator(
+        state: state,
+        sessionService: cockpitSessionService,
+        actionService: cockpitActionService,
+        textInsertionCoordinator: textInsertion as? TextInsertionCoordinator
+    )
+
     private var timer: Timer?
     private var captureTimeoutTimer: Timer?
     private var sessionCounter: Int = 0

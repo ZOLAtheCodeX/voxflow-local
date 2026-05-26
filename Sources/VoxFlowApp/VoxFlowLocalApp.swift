@@ -50,6 +50,12 @@ struct VoxFlowLocalApp: App {
                 }
                 .keyboardShortcut("1", modifiers: [.command])
 
+                Button("Open Cockpit") {
+                    coordinator.cockpit.open()
+                    activateAndOpenWindow(id: "cockpit")
+                }
+                .keyboardShortcut("v", modifiers: [.option, .command])
+
                 Divider()
 
                 Button("Quit VoxFlow") {
@@ -72,6 +78,16 @@ struct VoxFlowLocalApp: App {
         Window("VoxFlow Setup", id: "setup") {
             SetupWizardView(coordinator: coordinator, state: coordinator.state)
                 .frame(minWidth: 660, minHeight: 720)
+        }
+
+        // Cockpit Layer 0 — long-form workspace, opens via ⌥⌘V or menu.
+        Window("VoxFlow Cockpit", id: "cockpit") {
+            CockpitWindowView(
+                coordinator: coordinator.cockpit,
+                state: coordinator.state,
+                sessionService: coordinator.cockpitSessionService
+            )
+            .frame(minWidth: 720, minHeight: 480)
         }
     }
 
