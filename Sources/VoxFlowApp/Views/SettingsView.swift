@@ -212,41 +212,45 @@ struct SettingsView: View {
                     .font(VF.captionFont)
                     .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("Local Whisper Model", text: $localWhisperModelDraft)
-                        .textFieldStyle(.roundedBorder)
+                if state.sttBackend == .whisper {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Local Whisper Model", text: $localWhisperModelDraft)
+                            .textFieldStyle(.roundedBorder)
 
-                    Button("Apply Local Whisper Model") {
-                        coordinator.updateLocalWhisperModel(whisperModel: localWhisperModelDraft)
+                        Button("Apply Local Whisper Model") {
+                            coordinator.updateLocalWhisperModel(whisperModel: localWhisperModelDraft)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("OpenAI Base URL", text: $openAIBaseURLDraft)
-                        .textFieldStyle(.roundedBorder)
-                    SecureField("OpenAI API Key", text: $openAIAPIKeyDraft)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("OpenAI STT Model", text: $openAISTTModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("OpenAI TTS Model", text: $openAITTSModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("OpenAI TTS Voice", text: $openAITTSVoiceDraft)
-                        .textFieldStyle(.roundedBorder)
+                if state.sttBackend == .openAI {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("OpenAI Base URL", text: $openAIBaseURLDraft)
+                            .textFieldStyle(.roundedBorder)
+                        SecureField("OpenAI API Key", text: $openAIAPIKeyDraft)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("OpenAI STT Model", text: $openAISTTModelDraft)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("OpenAI TTS Model", text: $openAITTSModelDraft)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("OpenAI TTS Voice", text: $openAITTSVoiceDraft)
+                            .textFieldStyle(.roundedBorder)
 
-                    Button("Apply OpenAI Speech Config") {
-                        coordinator.updateOpenAIConfig(
-                            baseURL: openAIBaseURLDraft,
-                            apiKey: openAIAPIKeyDraft,
-                            sttModel: openAISTTModelDraft,
-                            ttsModel: openAITTSModelDraft,
-                            ttsVoice: openAITTSVoiceDraft
-                        )
+                        Button("Apply OpenAI Speech Config") {
+                            coordinator.updateOpenAIConfig(
+                                baseURL: openAIBaseURLDraft,
+                                apiKey: openAIAPIKeyDraft,
+                                sttModel: openAISTTModelDraft,
+                                ttsModel: openAITTSModelDraft,
+                                ttsVoice: openAITTSVoiceDraft
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
             }
 
             Section("Dictation") {
