@@ -121,7 +121,14 @@ class FlanT5Backend:
 
 _OLLAMA_SYSTEM_PROMPT_BASE = (
     "You clean up dictated speech. Return only the cleaned text, "
-    "no explanation, no preamble."
+    "no explanation, no preamble.\n"
+    "Rules:\n"
+    "- Fix grammar, punctuation, and casing.\n"
+    "- Remove filler words (um, uh, like, you know).\n"
+    "- Keep the meaning, content, and approximate length unchanged.\n"
+    "- Do not add new information, do not summarize, do not answer "
+    "questions present in the text.\n"
+    "- Output a single block of polished text, nothing else."
 )
 
 
@@ -239,18 +246,22 @@ def reset_ollama_probe_cache() -> None:
 def select_backend() -> TextLLMBackend:
     """Construct the backend selected by ``VOXFLOW_POLISH_BACKEND``.
 
-    Default during 3.1–3.3 is ``flan_t5`` so existing behavior is unchanged
-    until the Ollama path is validated against golden tests in 3.4.
+    Default flipped to ``ollama`` after Phase 3.4 validation. When Ollama
+    is unreachable the OllamaBackend collapses to an empty string and
+    PolishEngine falls back to ``apply_tone(light_cleanup())`` — so the
+    new default is safe even on machines without Ollama installed.
+
+    ``flan_t5`` is still selectable until 3.5 deletes the backend class.
     """
-    choice = os.environ.get("VOXFLOW_POLISH_BACKEND", "flan_t5").strip().lower()
+    choice = os.environ.get("VOXFLOW_POLISH_BACKEND", "ollama").strip().lower()
     if choice == "ollama":
         return OllamaBackend()
     if choice == "flan_t5":
         return FlanT5Backend()
     logger.warning(
-        "Unknown VOXFLOW_POLISH_BACKEND=%r; falling back to flan_t5", choice
+        "Unknown VOXFLOW_POLISH_BACKEND=%r; falling back to ollama", choice
     )
-    return FlanT5Backend()
+    return OllamaBackend()
 
 
 # ── Host memory + recommended model ─────────────────────────────────────

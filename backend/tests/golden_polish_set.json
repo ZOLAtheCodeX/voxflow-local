@@ -1,0 +1,60 @@
+[
+  {
+    "name": "email_request",
+    "tone": "neutral",
+    "input": "uh can you send the q3 financial report to bob and alice by end of day friday",
+    "scripted_output": "Can you send the Q3 financial report to Bob and Alice by end of day Friday?",
+    "expected_substrings": ["Q3 financial report", "Bob", "Alice", "Friday"]
+  },
+  {
+    "name": "filler_heavy_sentence",
+    "tone": "concise",
+    "input": "um so basically i think we should kind of you know maybe consider rescheduling the meeting",
+    "scripted_output": "We should consider rescheduling the meeting.",
+    "expected_substrings": ["reschedul", "meeting"],
+    "forbidden_substrings": [" um ", " uh ", " basically ", " kind of "]
+  },
+  {
+    "name": "multi_clause_legal",
+    "tone": "formal",
+    "input": "the data controller has the right to access personal data under article 15 but the data subject can request restriction under article 18",
+    "scripted_output": "The data controller has the right to access personal data under Article 15, but the data subject can request restriction under Article 18.",
+    "expected_substrings": ["Article 15", "Article 18", "data controller", "data subject"]
+  },
+  {
+    "name": "short_imperative",
+    "tone": "friendly",
+    "input": "send the deck to marketing",
+    "scripted_output": "Could you send the deck to marketing?",
+    "expected_substrings": ["deck", "marketing"]
+  },
+  {
+    "name": "spoken_punctuation",
+    "tone": "neutral",
+    "input": "hello team comma we will discuss the new policy period thanks comma jamie",
+    "scripted_output": "Hello team, we will discuss the new policy. Thanks, Jamie.",
+    "expected_substrings": ["Hello team,", "policy.", "Thanks, Jamie"],
+    "forbidden_substrings": [" comma ", " period "]
+  },
+  {
+    "name": "iso_jargon",
+    "tone": "formal",
+    "input": "the iso 42001 implementation requires aigp certification and quarterly audits",
+    "scripted_output": "The ISO 42001 implementation requires AIGP certification and quarterly audits.",
+    "expected_substrings": ["ISO 42001", "AIGP", "quarterly audits"]
+  },
+  {
+    "name": "long_paragraph",
+    "tone": "neutral",
+    "input": "we discussed the migration plan during standup the team agreed to move forward with the phased approach starting next sprint with the auth service then the billing service then everything else",
+    "scripted_output": "We discussed the migration plan during standup. The team agreed to move forward with the phased approach, starting next sprint with the auth service, then the billing service, then everything else.",
+    "expected_substrings": ["migration plan", "phased approach", "auth service", "billing service"]
+  },
+  {
+    "name": "casual_slack_message",
+    "tone": "concise",
+    "input": "hey just wanted to follow up on the thing from yesterday any updates",
+    "scripted_output": "Following up on yesterday — any updates?",
+    "expected_substrings": ["follow", "update"]
+  }
+]

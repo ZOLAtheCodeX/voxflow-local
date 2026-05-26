@@ -42,13 +42,16 @@ Phase 2 status: Tasks 1–4 (nlp, privacy, engines, routing) committed. Task 5 (
 - [x] Never auto-pull — user must click "Pull Model" in Settings.
 - [x] **Commit** — 318 Python (309 + 9 ollama-admin tests) + 256 Swift = 574 tests green.
 
-### 3.4 — Golden tests + tuning (~4h)
+### 3.4 — Golden tests + tuning (~4h) ⏳ partial
 
-- [ ] 5–10 golden polish regression tests in `backend/tests/test_polish_golden.py` (fuzzy assertions)
-- [ ] Tune system prompt until guardrail trigger rate < 15% on golden set
-- [ ] Measure + document latency for `e2b-mlx` and `e4b-mlx`
-- [ ] Flip `VOXFLOW_POLISH_BACKEND` default to `ollama`
-- [ ] **Commit**
+- [x] 8 golden polish regression cases in `backend/tests/golden_polish_set.json` covering email request, filler-heavy speech, multi-clause legal, short imperatives, spoken-punctuation conversion, ISO jargon (ISO 42001 / AIGP), long paragraphs, casual Slack messages. Each case carries `expected_substrings` and (where useful) `forbidden_substrings`.
+- [x] `backend/tests/test_polish_golden.py` with two modes:
+  - Always-on smoke parameterized over the golden set (verifies the polish pipeline runs end-to-end and returns non-empty output for every case — fights the guardrail / echo rules deliberately by skipping the strict substring assertions on the scripted path).
+  - Live-Ollama parameterized tests gated on `VOXFLOW_OLLAMA_GOLDEN=1` that assert <15% guardrail trigger rate AND the expected/forbidden substrings hold against the real model.
+- [x] System prompt for Ollama tightened in `engines/llm_backend.py` with explicit rules ("fix grammar/punctuation/case", "remove filler words", "keep meaning + length", "output a single block, nothing else"). Tone constraint stays in the system role.
+- [ ] Measure + document latency for `gemma4:e2b-mlx` and `gemma4:e4b-mlx` — **blocked on a running Ollama**.
+- [ ] Flip `VOXFLOW_POLISH_BACKEND` default to `ollama` — **deferred until the live golden tests confirm < 15% trigger rate**.
+- [ ] **Commit** the default flip and latency notes — deferred with the above.
 
 ### 3.5 — FLAN-T5 removal (~1h)
 

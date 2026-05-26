@@ -231,11 +231,11 @@ class TestPolishEngineWithFakeBackend:
 
 
 class TestSelectBackend:
-    def test_default_is_flan_t5(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_default_is_ollama(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("VOXFLOW_POLISH_BACKEND", raising=False)
         backend = select_backend()
-        assert isinstance(backend, FlanT5Backend)
-        assert backend.name == "flan_t5"
+        assert isinstance(backend, OllamaBackend)
+        assert backend.name == "ollama"
 
     def test_explicit_ollama(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "ollama")
@@ -248,17 +248,17 @@ class TestSelectBackend:
         backend = select_backend()
         assert isinstance(backend, FlanT5Backend)
 
-    def test_unknown_value_falls_back_to_flan_t5(
+    def test_unknown_value_falls_back_to_ollama(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "made-up-backend")
         backend = select_backend()
-        assert isinstance(backend, FlanT5Backend)
+        assert isinstance(backend, OllamaBackend)
 
     def test_case_insensitive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "Ollama")
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "FLAN_T5")
         backend = select_backend()
-        assert isinstance(backend, OllamaBackend)
+        assert isinstance(backend, FlanT5Backend)
 
 
 class TestRecommendOllamaModel:
