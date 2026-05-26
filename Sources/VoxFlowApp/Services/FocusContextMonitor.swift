@@ -45,6 +45,14 @@ final class FocusContextMonitor {
     }
 
     private func poll() {
+        // Skip the expensive AX call entirely while frozen. `freeze()` is
+        // called at capture-start so the focused-target snapshot we already
+        // committed (`capturedTargetApp`) stays authoritative for the rest
+        // of the session. Polling on the frozen path was wasting an
+        // `AXUIElementCopyAttributeValue` pair every 250 ms — the pair runs
+        // on the main thread and shows up in the dictation hot-path trace.
+        // (Phase 5.5.)
+        guard !isFrozen else { return }
         let snapshot = insertService.focusedTargetSnapshot()
         let changed = snapshot.hasFocusedTextInput != lastSnapshot.hasFocusedTextInput
             || snapshot.hasInsertionCursor != lastSnapshot.hasInsertionCursor
@@ -52,7 +60,7 @@ final class FocusContextMonitor {
             || snapshot.bundleID != lastSnapshot.bundleID
             || snapshot.role != lastSnapshot.role
         lastSnapshot = snapshot
-        guard !isFrozen, changed else { return }
+        guard changed else { return }
         onUpdate?(snapshot)
     }
 }
