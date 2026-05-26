@@ -58,6 +58,8 @@ final class AppState: ObservableObject {
     @Published var backendReadinessIssue: String?
     @Published var backendStatusSummary: String = "Backend not checked"
     @Published var backendActiveSTTModel: String = ""
+    @Published var ollamaAvailable: Bool = false
+    @Published var ollamaNudgeDismissed: Bool = UserDefaults.standard.bool(forKey: "VoxFlow.ollamaNudgeDismissed")
     @Published var localCaptureCount = 0
     @Published var privateAPICaptureCount = 0
     @Published var totalTranscriptionLatencyMs = 0

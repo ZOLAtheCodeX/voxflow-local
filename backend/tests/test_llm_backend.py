@@ -22,6 +22,8 @@ from engines.llm_backend import (
     FlanT5Backend,
     OllamaBackend,
     TextLLMBackend,
+    probe_ollama_available,
+    reset_ollama_probe_cache,
     select_backend,
 )
 from engines.polish import PolishEngine
@@ -257,6 +259,48 @@ class TestSelectBackend:
         monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "Ollama")
         backend = select_backend()
         assert isinstance(backend, OllamaBackend)
+
+
+class TestProbeOllamaAvailable:
+    """probe_ollama_available() caches the result for the TTL window."""
+
+    def test_returns_true_when_ollama_responds(self) -> None:
+        reset_ollama_probe_cache()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(b'{"models": []}', status=200),
+        ):
+            assert probe_ollama_available(force=True) is True
+
+    def test_returns_false_when_ollama_down(self) -> None:
+        reset_ollama_probe_cache()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=urlerror.URLError("connection refused"),
+        ):
+            assert probe_ollama_available(force=True) is False
+
+    def test_caches_result_across_calls(self) -> None:
+        reset_ollama_probe_cache()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(b'{"models": []}', status=200),
+        ) as urlopen_mock:
+            probe_ollama_available(force=True)
+            probe_ollama_available()
+            probe_ollama_available()
+            # First call did one probe; second/third hit the cache.
+            assert urlopen_mock.call_count == 1
+
+    def test_force_bypasses_cache(self) -> None:
+        reset_ollama_probe_cache()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(b'{"models": []}', status=200),
+        ) as urlopen_mock:
+            probe_ollama_available(force=True)
+            probe_ollama_available(force=True)
+            assert urlopen_mock.call_count == 2
 
 
 class TestProtocolConformance:

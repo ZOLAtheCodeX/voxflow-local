@@ -75,7 +75,67 @@ struct BackendReadinessResponse: Codable {
     let privateApiConfigured: Bool
     let privateApiPolicyVersion: String
     let privateApiPolicyReady: Bool
+    let ollamaAvailable: Bool
     let issues: [String]
+
+    init(
+        serviceStatus: String,
+        readyForDictation: Bool,
+        sttBackend: String,
+        activeSttModel: String,
+        activeSttModelLoaded: Bool,
+        sttFallbackActive: Bool,
+        offlineMode: Bool,
+        pythonExecutable: String,
+        pythonVersion: String,
+        modelsDir: String,
+        modelsDirExists: Bool,
+        openaiAudioConfigured: Bool,
+        privateApiConfigured: Bool,
+        privateApiPolicyVersion: String,
+        privateApiPolicyReady: Bool,
+        ollamaAvailable: Bool = false,
+        issues: [String]
+    ) {
+        self.serviceStatus = serviceStatus
+        self.readyForDictation = readyForDictation
+        self.sttBackend = sttBackend
+        self.activeSttModel = activeSttModel
+        self.activeSttModelLoaded = activeSttModelLoaded
+        self.sttFallbackActive = sttFallbackActive
+        self.offlineMode = offlineMode
+        self.pythonExecutable = pythonExecutable
+        self.pythonVersion = pythonVersion
+        self.modelsDir = modelsDir
+        self.modelsDirExists = modelsDirExists
+        self.openaiAudioConfigured = openaiAudioConfigured
+        self.privateApiConfigured = privateApiConfigured
+        self.privateApiPolicyVersion = privateApiPolicyVersion
+        self.privateApiPolicyReady = privateApiPolicyReady
+        self.ollamaAvailable = ollamaAvailable
+        self.issues = issues
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        serviceStatus = try container.decode(String.self, forKey: .serviceStatus)
+        readyForDictation = try container.decode(Bool.self, forKey: .readyForDictation)
+        sttBackend = try container.decode(String.self, forKey: .sttBackend)
+        activeSttModel = try container.decode(String.self, forKey: .activeSttModel)
+        activeSttModelLoaded = try container.decode(Bool.self, forKey: .activeSttModelLoaded)
+        sttFallbackActive = try container.decode(Bool.self, forKey: .sttFallbackActive)
+        offlineMode = try container.decode(Bool.self, forKey: .offlineMode)
+        pythonExecutable = try container.decode(String.self, forKey: .pythonExecutable)
+        pythonVersion = try container.decode(String.self, forKey: .pythonVersion)
+        modelsDir = try container.decode(String.self, forKey: .modelsDir)
+        modelsDirExists = try container.decode(Bool.self, forKey: .modelsDirExists)
+        openaiAudioConfigured = try container.decode(Bool.self, forKey: .openaiAudioConfigured)
+        privateApiConfigured = try container.decode(Bool.self, forKey: .privateApiConfigured)
+        privateApiPolicyVersion = try container.decode(String.self, forKey: .privateApiPolicyVersion)
+        privateApiPolicyReady = try container.decode(Bool.self, forKey: .privateApiPolicyReady)
+        ollamaAvailable = try container.decodeIfPresent(Bool.self, forKey: .ollamaAvailable) ?? false
+        issues = try container.decode([String].self, forKey: .issues)
+    }
 }
 
 enum BackendError: LocalizedError {

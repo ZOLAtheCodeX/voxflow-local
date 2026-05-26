@@ -250,6 +250,7 @@ final class AppCoordinator: ObservableObject {
             state.backendWarmupInProgress = false
             state.backendReadinessIssue = readiness.issues.first
             state.backendActiveSTTModel = readiness.activeSttModel
+            state.ollamaAvailable = readiness.ollamaAvailable
             state.backendStatusSummary = readiness.readyForDictation
                 ? "Backend ready (\(readiness.activeSttModel))"
                 : "Backend not ready: \(readiness.issues.first ?? "unknown issue")"

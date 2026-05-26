@@ -145,4 +145,5 @@ class ReadyResponse(BaseModel):
     private_api_configured: bool
     private_api_policy_version: str
     private_api_policy_ready: bool
+    ollama_available: bool = False
     issues: list[str] = Field(default_factory=list)

@@ -22,12 +22,12 @@ Phase 2 status: Tasks 1–4 (nlp, privacy, engines, routing) committed. Task 5 (
 - [x] Unit tests with mocked Ollama responses (`test_llm_backend.py`, 23 cases)
 - [x] **Commit** — 305 Python (282 + 23 new) + 256 Swift = 561 tests green
 
-### 3.2 — Readiness reporting (~1h)
+### 3.2 — Readiness reporting (~1h) ✅
 
-- [ ] Add `ollama_available: bool` to `/v1/ready` response (via `ReadyResponse` schema)
-- [ ] Swift Settings shows one-time dismissable nudge when Ollama not detected
-- [ ] Persist dismissal in UserDefaults
-- [ ] **Commit**
+- [x] Add `ollama_available: bool` to `/v1/ready` response (via `ReadyResponse` schema). 5s-TTL cached `probe_ollama_available()` in `engines/llm_backend.py` so polls don't pay the 1.5s timeout when Ollama is down.
+- [x] Swift Settings shows one-time dismissable nudge when Ollama not detected (`SettingsView` section before "Speech Models"; only renders when `!state.ollamaAvailable && !state.ollamaNudgeDismissed`).
+- [x] Persist dismissal in UserDefaults (`VoxFlow.ollamaNudgeDismissed` key).
+- [x] **Commit** — 309 Python (305 + 4 probe-cache tests) + 256 Swift = 565 tests green.
 
 ### 3.3 — Settings UI for Local AI Model (~3h)
 

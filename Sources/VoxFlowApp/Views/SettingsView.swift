@@ -116,6 +116,33 @@ struct SettingsView: View {
                 }
             }
 
+            if !state.ollamaAvailable && !state.ollamaNudgeDismissed {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Ollama not detected")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Install Ollama and pull a Gemma 4 model for higher-quality polish. The dictation flow keeps working without it.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Button("Dismiss") {
+                                state.ollamaNudgeDismissed = true
+                                UserDefaults.standard.set(true, forKey: "VoxFlow.ollamaNudgeDismissed")
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.system(size: 11))
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
             Section("Speech Models") {
                 Picker(
                     "STT Backend",

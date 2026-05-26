@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+from threading import Lock
 from typing import Protocol
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -200,6 +202,38 @@ class OllamaBackend:
                 return 200 <= resp.status < 300
         except Exception:
             return False
+
+
+_PROBE_LOCK = Lock()
+_PROBE_TTL_SECONDS = 5.0
+_probe_cache: tuple[float, bool] | None = None
+
+
+def probe_ollama_available(*, force: bool = False) -> bool:
+    """Cached Ollama availability probe for /v1/ready.
+
+    Hits ``GET /api/tags`` with a 1.5s timeout. Cached for ~5 seconds so
+    rapid readiness polls don't repeatedly pay the timeout penalty when
+    Ollama isn't running. Pass ``force=True`` from tests to bust the cache.
+    """
+    global _probe_cache
+    now = time.monotonic()
+    with _PROBE_LOCK:
+        if not force and _probe_cache is not None:
+            ts, value = _probe_cache
+            if now - ts < _PROBE_TTL_SECONDS:
+                return value
+    probed = OllamaBackend().is_available()
+    with _PROBE_LOCK:
+        _probe_cache = (now, probed)
+    return probed
+
+
+def reset_ollama_probe_cache() -> None:
+    """Test hook: drop the cached probe result so the next call re-probes."""
+    global _probe_cache
+    with _PROBE_LOCK:
+        _probe_cache = None
 
 
 def select_backend() -> TextLLMBackend:

@@ -37,6 +37,7 @@ from engines import (
     preferred_torch_device,
     resolve_model_ref,
 )
+from engines.llm_backend import probe_ollama_available
 from nlp import (
     _WHISPER_HALLUCINATION_ALWAYS,
     _WHISPER_HALLUCINATION_SHORT_ONLY,
@@ -208,7 +209,6 @@ provider_router = ProviderRouter(
     prompt_framing_engine=prompt_framing_engine,
 )
 
-
 def resolve_effective_text(
     *,
     provider_mode: str,
@@ -283,6 +283,7 @@ def readiness_snapshot() -> ReadyResponse:
         private_api_configured=private_api_client.configured,
         private_api_policy_version=privacy_policy.version or "unset",
         private_api_policy_ready=private_api_policy_ready,
+        ollama_available=probe_ollama_available(),
         issues=issues,
     )
 
