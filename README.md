@@ -89,7 +89,7 @@ Mac-native, local-only dictation app with WhisperKit/Whisper STT, post-capture c
 - `scripts/run_backend.sh`: run backend server
 - `scripts/test_all.sh`: run Swift tests + backend tests via `.venv`
 - `scripts/download_models.py`: optional model pre-download
-- `scripts/launch_voxflow_dev.sh`: dev-only launcher (raw binary, no bundle context)
+- `scripts/launch_voxflow_dev.sh`: dev launcher — starts backend if not running, builds + installs the bundle, opens `~/Applications/VoxFlow.app`
 - `scripts/stop_voxflow.sh`: stop app and backend
 - `scripts/build_app_bundle.sh`: build a native `.app` bundle with icon (`dist/VoxFlow.app`)
 - `scripts/install_app_bundle.sh`: install bundle into `~/Applications` with validation + LaunchServices registration
@@ -194,7 +194,7 @@ For development with backend + app together:
 ./scripts/launch_voxflow_dev.sh
 ```
 
-> **Note:** `launch_voxflow_dev.sh` runs the raw binary directly. Accessibility features will not work in this mode. Use only for non-AX development tasks.
+This builds the `.app` bundle, installs it into `~/Applications/`, and launches it via `open` — so Accessibility permissions persist across rebuilds (TCC sees a stable signed identity).
 
 5. Run tests:
 

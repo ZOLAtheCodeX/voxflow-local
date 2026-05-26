@@ -3,9 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_PATH="${1:-${HOME}/Desktop/VoxFlow.command}"
-APP_PATH="${HOME}/Applications/VoxFlow.app"
-APP_BIN="${APP_PATH}/Contents/MacOS/VoxFlowLocal"
-LOG_PATH="${HOME}/Library/Logs/VoxFlow.log"
 
 cat > "${TARGET_PATH}" <<EOF
 #!/usr/bin/env bash
@@ -13,7 +10,6 @@ set -euo pipefail
 
 APP_PATH="\${HOME}/Applications/VoxFlow.app"
 APP_BIN="\${APP_PATH}/Contents/MacOS/VoxFlowLocal"
-LOG_PATH="\${HOME}/Library/Logs/VoxFlow.log"
 
 if [[ ! -x "\${APP_BIN}" ]]; then
   echo "[launcher] VoxFlow executable not found: \${APP_BIN}"
@@ -33,4 +29,4 @@ EOF
 
 chmod +x "${TARGET_PATH}"
 echo "[launcher] created: ${TARGET_PATH}"
-echo "[launcher] app target: ${APP_PATH}"
+echo "[launcher] app target: ${HOME}/Applications/VoxFlow.app"
