@@ -7,29 +7,29 @@ struct OnboardingCalibrationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Voice Calibration")
-                .font(.system(size: 18, weight: .semibold))
+                .font(VF.largeFont)
 
             Text("Say each phrase using the hold-to-talk hotkey so the app can calibrate your voice profile.")
-                .font(.system(size: 13))
+                .font(VF.bodyFont)
                 .foregroundStyle(.secondary)
 
             if let phrase = state.currentCalibrationPhrase {
                 Text("Phrase \(state.activeCalibrationIndex + 1) of \(state.calibrationItems.count)")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(VF.labelFont)
                     .foregroundStyle(.secondary)
 
                 Text("\"\(phrase)\"")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(VF.headingFont)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(VF.elevatedBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
             }
 
             if state.sessionState == .recording {
                 Text("Recording... release hotkey to process this phrase")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.orange)
+                    .font(VF.labelFont)
+                    .foregroundStyle(VF.colorWarning)
             }
 
             HStack(spacing: 10) {
@@ -47,6 +47,12 @@ struct OnboardingCalibrationView: View {
                 }
                 .buttonStyle(.bordered)
 
+                Button("Skip Calibration") {
+                    coordinator.completeOnboardingManually()
+                }
+                .buttonStyle(.bordered)
+                .help("Skip the voice profile setup. You can rerun calibration any time from the Setup Wizard.")
+
                 Spacer()
             }
 
@@ -62,11 +68,11 @@ struct OnboardingCalibrationView: View {
                             Spacer()
                             if let score = item.score {
                                 Text("\(Int(score * 100))%")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(score > 0.72 ? .green : .orange)
+                                    .font(VF.captionEmphasizedFont)
+                                    .foregroundStyle(score > 0.72 ? VF.colorSuccess : VF.colorWarning)
                             }
                         }
-                        .font(.system(size: 12))
+                        .font(VF.secondaryFont)
                     }
                 }
             }

@@ -53,8 +53,8 @@ struct CommandPaletteView: View {
             footerBar
         }
         .padding(.vertical, VF.spacingMedium)
-        .background(state.isCommandLaneActive ? Color.orange.opacity(0.08) : Color.clear)
-        .animation(.smooth(duration: 0.25), value: activePanel)
+        .background(state.isCommandLaneActive ? VF.tintedBackground(VF.colorWarning, opacity: 0.08) : Color.clear)
+        .animation(VF.animationStandard, value: activePanel)
         .animation(.smooth(duration: 0.3), value: state.sessionState)
         .onAppear { updateRecordingBadgeAnimation() }
         .onChange(of: state.sessionState) { _, _ in
@@ -73,8 +73,8 @@ struct CommandPaletteView: View {
                             .font(VF.captionFont.weight(.bold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.24))
-                            .foregroundStyle(.orange)
+                            .background(VF.tintedBackground(VF.colorWarning, opacity: 0.24))
+                            .foregroundStyle(VF.colorWarning)
                             .clipShape(Capsule())
                     }
                 }
@@ -386,7 +386,7 @@ struct CommandPaletteView: View {
                         .background {
                             RoundedRectangle(cornerRadius: VF.cornerMedium)
                                 .fill(.regularMaterial)
-                                .overlay(Color.green.opacity(0.08))
+                                .overlay(VF.tintedBackground(VF.colorSuccess, opacity: 0.08))
                         }
                 }
 
@@ -477,7 +477,7 @@ struct CommandPaletteView: View {
                         .background {
                             RoundedRectangle(cornerRadius: VF.cornerMedium)
                                 .fill(.regularMaterial)
-                                .overlay(Color.green.opacity(0.08))
+                                .overlay(VF.tintedBackground(VF.colorSuccess, opacity: 0.08))
                         }
                     }
                 }
@@ -597,7 +597,7 @@ struct CommandPaletteView: View {
                 HStack(alignment: .bottom, spacing: 6) {
                     ForEach(0..<5, id: \.self) { index in
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.red.gradient)
+                            .fill(VF.colorError.gradient)
                             .frame(width: 8, height: waveformHeight(index: index, time: context.date.timeIntervalSinceReferenceDate))
                     }
                 }
@@ -612,6 +612,13 @@ struct CommandPaletteView: View {
                 .font(VF.captionFont)
                 .foregroundStyle(.secondary)
 
+            if let appName = state.focusTarget.appName, !appName.isEmpty {
+                Label("Inserting into \(appName)", systemImage: "arrow.right.circle")
+                    .font(VF.captionEmphasizedFont)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Target application: \(appName)")
+            }
+
             Button("Cancel Capture") {
                 coordinator.cancelActiveCapture()
             }
@@ -625,18 +632,21 @@ struct CommandPaletteView: View {
 
     private var transcribingStateCard: some View {
         VStack(spacing: VF.spacingMedium) {
-            ProgressView()
-                .controlSize(.regular)
+            StagedProgressView(activeStage: currentPipelineStage)
+                .padding(.horizontal, 4)
+
             Text("Processing… \(transcribingElapsed)s")
                 .font(VF.bodyFont)
                 .foregroundStyle(.secondary)
+
             if transcribingElapsed > 90 {
                 Text("Taking longer than expected…")
                     .font(VF.captionFont)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(VF.colorWarning)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 150)
+        .padding(VF.spacingLarge)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
         .task {
             transcribingElapsed = 0
@@ -650,6 +660,23 @@ struct CommandPaletteView: View {
             }
             transcribingElapsed = 0
         }
+    }
+
+    /// Heuristic stage selector for the pipeline progress view.
+    ///
+    /// We don't have per-stage signals from the backend, but the visual
+    /// upgrade over a single spinner is real: users see which slice of the
+    /// pipeline is running. Transcription dominates the wall-clock time
+    /// (~80% of the total) for any non-trivial dictation; cleanup and
+    /// insert are typically sub-100ms each. Once the card mounts we know
+    /// capture is done, so we start at `.transcribing`. After a reasonable
+    /// transcription window we promote to `.cleaning` — the actual swap
+    /// to `.inserting` happens implicitly when this card dismisses.
+    private var currentPipelineStage: PipelineStage {
+        if transcribingElapsed <= 3 {
+            return .transcribing
+        }
+        return .cleaning
     }
 
     private var footerBar: some View {
