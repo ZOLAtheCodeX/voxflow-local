@@ -554,14 +554,32 @@ struct FocusTargetSnapshot: Codable, Sendable, Equatable {
     let appName: String?
     let bundleID: String?
     let role: String?
+    // Carry the focused app's PID so a long-form session can reconstruct
+    // ``NSRunningApplication`` at insert time without consulting
+    // ``NSWorkspace.shared.frontmostApplication`` (which the cockpit
+    // window would itself be at that moment). ``nil`` only when the
+    // AX query failed and the rest of the snapshot is .unavailable.
+    let processIdentifier: Int32?
 
     static let unavailable = FocusTargetSnapshot(
         hasFocusedTextInput: false,
         hasInsertionCursor: false,
         appName: nil,
         bundleID: nil,
-        role: nil
+        role: nil,
+        processIdentifier: nil
     )
+}
+
+struct BackendReadinessState: Equatable, Sendable {
+    var readyForDictation = false
+    var processRunning = false
+    var warmupInProgress = false
+    var whisperKitReady = false
+    var readinessIssue: String?
+    var statusSummary: String = "Backend not checked"
+    var activeSTTModel: String = ""
+    var ollamaAvailable = false
 }
 
 struct CalibrationItem: Identifiable, Hashable {

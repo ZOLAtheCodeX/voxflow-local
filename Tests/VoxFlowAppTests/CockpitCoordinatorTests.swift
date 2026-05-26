@@ -36,6 +36,27 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 1)
     }
 
+    func test_applyAction_skips_history_when_guardrail_triggered() async throws {
+        let (_, coord, sessionService, _) = makeCoordinatorWithGuardrailBackend()
+        sessionService.start()
+        sessionService.appendChunk("raw transcript")
+        sessionService.stop()
+        _ = try await coord.applyAction(.memo, to: "raw transcript")
+        // Guardrail trips must not record an AppliedAction — the session JSON
+        // would otherwise show entries that ⌘Z cannot undo (SmartActionService
+        // already filters guardrail trips from its own undo stack).
+        XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 0)
+    }
+
+    func test_applyAction_skips_history_when_output_unchanged() async throws {
+        let (_, coord, sessionService, _) = makeCoordinatorWithEchoBackend()
+        sessionService.start()
+        sessionService.appendChunk("identical transcript")
+        sessionService.stop()
+        _ = try await coord.applyAction(.memo, to: "identical transcript")
+        XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 0)
+    }
+
     // MARK: - MRU promotion
 
     func test_chip_promoted_after_three_invocations() async throws {
@@ -100,12 +121,23 @@ final class CockpitCoordinatorTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeCoordinator() -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
+        makeCoordinator(backend: StubSmartActionBackend())
+    }
+
+    private func makeCoordinatorWithGuardrailBackend() -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
+        makeCoordinator(backend: GuardrailSmartActionBackend())
+    }
+
+    private func makeCoordinatorWithEchoBackend() -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
+        makeCoordinator(backend: EchoSmartActionBackend())
+    }
+
+    private func makeCoordinator(backend: SmartActionBackend) -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
         let state = AppState()
         let sessionDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("voxflow-cockpit-test-\(UUID().uuidString)")
         let sessionService = LongFormSessionService(autoSaveDirectory: sessionDir)
-        let stubBackend = StubSmartActionBackend()
-        let actionService = SmartActionService(backend: stubBackend)
+        let actionService = SmartActionService(backend: backend)
         let coord = CockpitCoordinator(
             state: state,
             sessionService: sessionService,
@@ -121,6 +153,28 @@ private final class StubSmartActionBackend: SmartActionBackend, @unchecked Senda
         SmartActionResult(
             actionId: action,
             output: "# transformed\n\n\(transcript)",
+            guardrailTriggered: false,
+            error: nil
+        )
+    }
+}
+
+private final class GuardrailSmartActionBackend: SmartActionBackend, @unchecked Sendable {
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        SmartActionResult(
+            actionId: action,
+            output: "regex fallback",
+            guardrailTriggered: true,
+            error: nil
+        )
+    }
+}
+
+private final class EchoSmartActionBackend: SmartActionBackend, @unchecked Sendable {
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        SmartActionResult(
+            actionId: action,
+            output: transcript,
             guardrailTriggered: false,
             error: nil
         )

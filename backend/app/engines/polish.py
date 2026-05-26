@@ -19,7 +19,7 @@ from threading import Lock
 
 from nlp import apply_tone, light_cleanup
 
-from .llm_backend import TextLLMBackend, select_backend
+from .llm_backend import TextLLMBackend, probe_ollama_available, select_backend
 
 logger = logging.getLogger("voxflow")
 
@@ -47,6 +47,18 @@ class PolishEngine:
         if callable(retry):
             with self._lock:
                 retry()
+
+    def is_available(self) -> bool:
+        """Whether the configured backend can actually serve requests now.
+
+        Polish has a regex fallback so this is informational, but
+        SmartActionEngine uses it to fail closed — a regex-cleaned
+        transcript is not a valid substitute for "convert to MECE".
+        The Ollama probe is cached (~5s TTL) so this is cheap to call.
+        """
+        if self.backend_name != "ollama":
+            return True
+        return probe_ollama_available()
 
     def polish(
         self,

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import secrets
+import asyncio
 import sys
 import time
 import uuid
@@ -329,13 +330,34 @@ def health() -> dict[str, str]:
     }
 
 
+_ml_semaphore: asyncio.Semaphore | None = None
+_ml_semaphore_loop: asyncio.AbstractEventLoop | None = None
+
+def get_ml_semaphore() -> asyncio.Semaphore:
+    global _ml_semaphore, _ml_semaphore_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if _ml_semaphore is None or (loop is not None and _ml_semaphore_loop is not loop):
+        _ml_semaphore = asyncio.Semaphore(2)
+        _ml_semaphore_loop = loop
+    return _ml_semaphore
+
+async def run_blocking(func, *args, **kwargs):
+    from functools import partial
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+
+
 @app.get("/v1/ready", response_model=ReadyResponse)
 def ready() -> ReadyResponse:
     return readiness_snapshot()
 
 
 @app.post("/v1/transcribe", response_model=TranscribeResponse)
-def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
+async def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     started = time.perf_counter()
     stage_timings_ms: dict[str, int] = {}
 
@@ -366,7 +388,13 @@ def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     if len(audio_bytes) % 2 != 0:
         raise HTTPException(status_code=400, detail="PCM16 audio must have even byte length")
 
-    result = provider_router.transcribe(audio_bytes, payload.sample_rate, payload.language_hint)
+    sem = get_ml_semaphore()
+    if sem.locked():
+        raise HTTPException(status_code=503, detail="Server busy: maximum concurrent model evaluations reached")
+
+    async with sem:
+        result = await run_blocking(provider_router.transcribe, audio_bytes, payload.sample_rate, payload.language_hint)
+
     stage_timings_ms.update(result.stage_timings_ms)
     latency_ms = int((time.perf_counter() - started) * 1000)
 
@@ -417,8 +445,14 @@ def privacy_preview(payload: PrivacyPreviewRequest) -> PrivacyPreviewResponse:
 
 
 @app.post("/v1/cleanup", response_model=CleanupResponse)
-def cleanup(payload: CleanupRequest) -> CleanupResponse:
-    output, triggered, resolved = provider_router.cleanup(payload)
+async def cleanup(payload: CleanupRequest) -> CleanupResponse:
+    sem = get_ml_semaphore()
+    if sem.locked():
+        raise HTTPException(status_code=503, detail="Server busy: maximum concurrent model evaluations reached")
+
+    async with sem:
+        output, triggered, resolved = await run_blocking(provider_router.cleanup, payload)
+
     provider_mode = resolved.provider_mode
     effective_text = resolved.effective_text
 
@@ -433,8 +467,14 @@ def cleanup(payload: CleanupRequest) -> CleanupResponse:
 
 
 @app.post("/v1/translate", response_model=TranslateResponse)
-def translate(payload: TranslateRequest) -> TranslateResponse:
-    effective_text, translated, resolved = provider_router.translate(payload)
+async def translate(payload: TranslateRequest) -> TranslateResponse:
+    sem = get_ml_semaphore()
+    if sem.locked():
+        raise HTTPException(status_code=503, detail="Server busy: maximum concurrent model evaluations reached")
+
+    async with sem:
+        effective_text, translated, resolved = await run_blocking(provider_router.translate, payload)
+
     provider_mode = resolved.provider_mode
 
     audit_logger.log(
@@ -448,8 +488,14 @@ def translate(payload: TranslateRequest) -> TranslateResponse:
 
 
 @app.post("/v1/meeting_summarize", response_model=MeetingSummaryResponse)
-def meeting_summarize(payload: MeetingRequest) -> MeetingSummaryResponse:
-    structured, resolved = provider_router.meeting_summary(payload)
+async def meeting_summarize(payload: MeetingRequest) -> MeetingSummaryResponse:
+    sem = get_ml_semaphore()
+    if sem.locked():
+        raise HTTPException(status_code=503, detail="Server busy: maximum concurrent model evaluations reached")
+
+    async with sem:
+        structured, resolved = await run_blocking(provider_router.meeting_summary, payload)
+
     provider_mode = resolved.provider_mode
     effective_text = resolved.effective_text
 
@@ -481,7 +527,7 @@ def meeting_summarize(payload: MeetingRequest) -> MeetingSummaryResponse:
 
 
 @app.post("/v1/smart_action", response_model=SmartActionResponse)
-def smart_action(payload: SmartActionRequest) -> SmartActionResponse:
+async def smart_action(payload: SmartActionRequest) -> SmartActionResponse:
     """Cockpit Layer 0 — apply a smart action to a captured transcript.
 
     Routes to ``SmartActionEngine`` which builds an action-specific system
@@ -490,10 +536,26 @@ def smart_action(payload: SmartActionRequest) -> SmartActionResponse:
     in ``PolishEngine`` so degenerate output falls back to
     ``apply_tone(light_cleanup())`` uniformly.
     """
-    result = smart_action_engine.apply(
-        action_id=payload.action_id,
-        transcript=payload.transcript,
-    )
+    sem = get_ml_semaphore()
+    if sem.locked():
+        raise HTTPException(status_code=503, detail="Server busy: maximum concurrent model evaluations reached")
+
+    # Redact PII before the transcript reaches the LLM. Parity with
+    # /v1/cleanup, /v1/translate, /v1/meeting_summarize which all run
+    # ``resolve_effective_text()`` (which calls ``redact_sensitive_text``
+    # internally). Smart actions are always local-only Ollama, so the full
+    # provider-mode machinery isn't needed — just the redaction step.
+    # Luhn-validated CC numbers / SSNs / phone / email / URL are scrubbed
+    # to placeholder tokens before the prompt is built.
+    safe_transcript = redact_sensitive_text(payload.transcript)
+
+    async with sem:
+        result = await run_blocking(
+            smart_action_engine.apply,
+            action_id=payload.action_id,
+            transcript=safe_transcript,
+        )
+
     return SmartActionResponse(
         action_id=result.action_id,
         output=result.output,

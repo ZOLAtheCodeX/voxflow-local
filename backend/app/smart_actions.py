@@ -90,6 +90,34 @@ class SmartActionEngine:
                 error=f"unknown action: {action_id}",
             )
 
+        # Fail closed when the LLM backend is unreachable. PolishEngine has a
+        # regex fallback (apply_tone(light_cleanup())) that is fine for polish
+        # but structurally wrong for smart actions — returning grammar-cleaned
+        # text to a user who asked for MECE / steel-man / disclaimer is
+        # misleading. Callers surface ``error == "ollama_unavailable"`` as a
+        # user-visible "Ollama required" message rather than inserting the
+        # fallback. Backends that don't expose ``is_available`` (test stubs)
+        # are treated as available — only the production OllamaBackend can
+        # actually fail closed here.
+        availability_check = getattr(self._polish_backend, "is_available", None)
+        if callable(availability_check):
+            try:
+                available = bool(availability_check())
+            except Exception as exc:  # pragma: no cover - defensive only
+                logger.warning("SmartActionEngine availability probe raised: %s", exc)
+                available = False
+            if not available:
+                logger.warning(
+                    "SmartActionEngine: backend unavailable — refusing action %r",
+                    action_id,
+                )
+                return SmartActionResult(
+                    action_id=action_id,
+                    output=transcript,
+                    guardrail_triggered=False,
+                    error="ollama_unavailable",
+                )
+
         system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(action_description=description)
         output, guardrail = self._polish_backend.polish(
             text=transcript,

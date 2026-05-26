@@ -165,3 +165,61 @@ def test_disclaimer_action_uses_disclaimer_prompt():
 
     system_prompt = mock_backend.polish.call_args.kwargs["system_prompt"]
     assert "disclaimer" in system_prompt.lower() or "legal" in system_prompt.lower()
+
+
+def test_apply_fails_closed_when_backend_unavailable():
+    """Backend reports is_available()==False → return verbatim transcript with
+    error tag ``ollama_unavailable`` instead of letting PolishEngine return
+    its regex fallback. The Swift client surfaces this as a user-visible
+    'Ollama required for smart actions' message rather than silently
+    inserting structurally wrong output."""
+    mock_backend = MagicMock()
+    mock_backend.is_available.return_value = False
+    engine = SmartActionEngine(polish_backend=mock_backend)
+
+    result = engine.apply(action_id="memo", transcript="raw transcript text")
+
+    assert result.action_id == "memo"
+    assert result.output == "raw transcript text"
+    assert result.guardrail_triggered is False
+    assert result.error == "ollama_unavailable"
+    mock_backend.polish.assert_not_called()
+
+
+def test_apply_calls_polish_when_backend_does_not_expose_availability():
+    """Legacy test stubs that don't expose ``is_available`` are treated as
+    available — the gate fails open. Ensures existing tests aren't broken
+    by the new fail-closed branch."""
+    # spec=["polish"] means only the polish attribute exists; is_available
+    # would raise AttributeError. SmartActionEngine handles this gracefully.
+    mock_backend = MagicMock(spec=["polish"])
+    mock_backend.polish.return_value = ("polished", False)
+    engine = SmartActionEngine(polish_backend=mock_backend)
+
+    result = engine.apply(action_id="memo", transcript="any text")
+
+    assert result.output == "polished"
+    assert result.error is None
+    mock_backend.polish.assert_called_once()
+
+
+def test_smart_action_endpoint_returns_unavailable_when_polish_engine_offline(monkeypatch):
+    """HTTP integration: polish_engine.is_available()==False → 200 with
+    error='ollama_unavailable' and output=transcript verbatim."""
+    from fastapi.testclient import TestClient
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+    import server
+
+    monkeypatch.setattr(server.polish_engine, "is_available", lambda: False)
+
+    client = TestClient(server.app)
+    resp = client.post("/v1/smart_action", json={
+        "action_id": "memo",
+        "transcript": "draft memo content",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["output"] == "draft memo content"
+    assert body["error"] == "ollama_unavailable"
+    assert body["guardrail_triggered"] is False

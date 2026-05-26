@@ -44,7 +44,8 @@ final class PromptWorkflowCoordinatorTests: XCTestCase {
             hasInsertionCursor: true,
             appName: "Notes",
             bundleID: "com.apple.Notes",
-            role: "AXTextField"
+            role: "AXTextField",
+            processIdentifier: nil
         )
 
         var recordedStages: [String] = []
@@ -80,7 +81,8 @@ final class PromptWorkflowCoordinatorTests: XCTestCase {
             hasInsertionCursor: true,
             appName: "Xcode",
             bundleID: "com.apple.dt.Xcode",
-            role: "AXTextField"
+            role: "AXTextField",
+            processIdentifier: nil
         )
 
         var recordedStages: [String] = []

@@ -59,7 +59,14 @@ final class CockpitCoordinator: ObservableObject {
         let result = try await actionService.apply(action, to: transcript)
         state.chipInvocationCounts[action, default: 0] += 1
         promoteIfNeeded(action)
-        if sessionService.currentSession != nil, !result.output.isEmpty {
+        // Mirror SmartActionService's undo-stack filter on the session
+        // history: guardrail trips and unchanged echoes aren't real
+        // transformations, so they don't belong in appliedActions either —
+        // otherwise the JSON history shows entries ⌘Z can't undo.
+        let isMeaningful = !result.guardrailTriggered
+            && !result.output.isEmpty
+            && result.output != transcript
+        if sessionService.currentSession != nil, isMeaningful {
             sessionService.recordAppliedAction(
                 AppliedAction(
                     actionId: action,
@@ -104,11 +111,14 @@ final class CockpitCoordinator: ObservableObject {
               let coordinator = textInsertionCoordinator else { return }
         let text = session.transcript
         guard !text.isEmpty else { return }
-        // The frozen target-app's NSRunningApplication isn't stored on
-        // the FocusTargetSnapshot codable struct; we let TextInsertionCoordinator
-        // resolve the current focused app at insert time. The cockpit's
-        // recorded targetApp on the session is informational only.
-        _ = await coordinator.insertText(text, statusSuffix: "cockpit")
+        // Reconstruct NSRunningApplication from the pid frozen at
+        // session-start. Required because at insert time the frontmost
+        // app *is* the cockpit window itself — resolving via
+        // NSWorkspace.shared.frontmostApplication would target the
+        // cockpit, not the app the user was dictating into.
+        let targetApp: NSRunningApplication? = session.targetApp?.processIdentifier
+            .flatMap { NSRunningApplication(processIdentifier: $0) }
+        _ = await coordinator.insertText(text, statusSuffix: "cockpit", targetApp: targetApp)
         state.cockpitVisible = false
         sessionService.reset()
     }

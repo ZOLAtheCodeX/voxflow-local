@@ -273,7 +273,8 @@ final class AppModelTests: XCTestCase {
     func testFocusTargetSnapshotIncludesBundleID() {
         let snapshot = FocusTargetSnapshot(
             hasFocusedTextInput: true, hasInsertionCursor: true,
-            appName: "Slack", bundleID: "com.tinyspeck.slackmacgap", role: "AXTextField"
+            appName: "Slack", bundleID: "com.tinyspeck.slackmacgap", role: "AXTextField",
+            processIdentifier: nil
         )
         XCTAssertEqual(snapshot.bundleID, "com.tinyspeck.slackmacgap")
     }
