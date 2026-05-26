@@ -33,9 +33,12 @@ The user's task list numbered engines first; I'm reordering to match the import 
   - [x] `engines/prompt_framing.py` — PromptFramingEngine
   - Also moved: `engines/_utils.py` (resolve_model_ref, preferred_torch_device), `engines/results.py` (STTExecutionResult).
   - server.py: 1693 → 1054 lines (639 lines moved into engines/). 282 Python + 256 Swift tests still green.
-- [ ] **Task 3 (renumbered to 4):** Extract `backend/app/routing/` package
-  - [ ] `routing/private_api.py` — PrivateAPIClient, PrivateAPIPolicy
-  - [ ] `routing/provider.py` — ProviderRouter, ResolvedProviderInput
+- [x] **Task 3:** Extract `backend/app/routing/` package ✅
+  - [x] `routing/private_api.py` — PrivateAPIClient, PrivateAPIPolicy
+  - [x] `routing/provider.py` — ProviderRouter, ResolvedProviderInput
+  - [x] `routing/utils.py` — normalize_provider_mode, normalize_stt_backend, extract_json_object, coerce_string_list, is_placeholder_text (helpers used by routing)
+  - Also moved: `schemas.py` (all Pydantic Request/Response classes — required to break circular import between server and routing).
+  - server.py: 1054 → 498 lines (556 more moved out). 282 Python + 256 Swift tests still green.
 - [ ] **Task 5:** Extract `backend/app/api/` package
   - [ ] `api/routes.py` — FastAPI route handlers
   - [ ] `api/middleware.py` — rate limiting + CORS
