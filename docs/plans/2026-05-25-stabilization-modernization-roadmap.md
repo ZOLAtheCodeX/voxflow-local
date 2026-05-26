@@ -3,9 +3,22 @@
 - **Date:** 2026-05-25
 - **Branch baseline:** `master` @ `51d6160`
 - **Test baseline:** 537 reported in CLAUDE.md; pytest actually collects 281 Python tests (parametrization expands the count). True total: 256 Swift + 281 Python + 10 regression = 547.
+- **Current test totals (post-Phase-5):** 256 Swift + 344 Python (+9 live-Ollama skipped without `VOXFLOW_OLLAMA_GOLDEN=1`).
 - **Inputs:**
   - 4-agent parallel codebase review (Swift architecture, Python backend, SwiftUI, Ollama swap scoping)
   - External review from Gemini Antigravity IDE, verified and archived at `docs/reviews/2026-05-25-external-review-gemini.md`
+
+## Shipping Status (as of 2026-05-26)
+
+| Phase | Status | Branch | Notes |
+|---|---|---|---|
+| Phase 1 — Quick Wins (QW-1..8) | ✅ Shipped | `master` (commit `b04badd`) | All 8 quick wins merged before this roadmap exited draft. |
+| Phase 2 — Decompose & Test | ⚠️ Partial | `feature/phase-2-decompose` (tasks 1–4 committed: `c85c933` nlp, `6325c23` privacy, `79617fa` engines, `1b2dac6` routing + schemas). Task 5 (api/ extraction) stashed — 4 privacy-token tests fail under it. Tasks 6–14 (Swift coordinator extraction + concurrency hardening + new tests) deferred. |
+| Phase 3 — Ollama / Gemma 4 Polish | ✅ Shipped | `feature/phase-3-ollama` (tip `370d74c`) | All 5 sub-phases (3.1–3.5) complete; FLAN-T5 fully removed; OllamaBackend is the only polish backend; regex `apply_tone(light_cleanup())` is the documented unavailability fallback. PHASE_3_COMPLETE emitted 2026-05-26. Local-validation owed to user: run `scripts/measure_polish_latency.py` with Ollama up to fill in real latency numbers, and `VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py` to confirm <15% guardrail trigger rate on this user's hardware. |
+| Phase 4 — UI Modernization | ✅ Shipped | `feature/phase-4-ui` (tip `e698e23`) | Translucent panel + materials sweep + token-driven typography/colors/motion + 4-step `StagedProgressView` + target-app indicator + conditional Settings fields + Skip Calibration + `ConfidenceBadge` a11y + T0·M0 expansion + shared `MetricCardView`. Zero hardcoded `.font(.system(size:))` in `SetupWizardView/SettingsView/DashboardWindowView` (was 79). Zero `Color.gray.opacity` in `Sources/VoxFlowApp/Views/`. PHASE_4_COMPLETE emitted 2026-05-26. |
+| Phase 5 — Performance Polish | ⏳ In-flight | `feature/phase-5-perf` (5.1 short-audio whisper fast path, 5.2 Luhn-validated CC redaction, 5.3 lock-guarded rate limiter, 5.4 WebSocket idle timeout, 5.5 FocusContextMonitor frozen-poll short-circuit — all committed). 5.7/5.8 docs (this revision). |
+
+Phase 5.6 (`AppState` `BackendReadinessState` collapse) overlaps with deferred Phase 2 Task 8 — likely lands as part of the Phase 2 closeout rather than Phase 5.
 
 ## Goals (from user)
 
@@ -25,7 +38,7 @@
 
 ---
 
-## Phase 1 — Quick Wins (~1 day)
+## Phase 1 — Quick Wins (~1 day) ✅ Shipped (`master` @ `b04badd`)
 
 High-confidence, small-blast-radius fixes. Ship as one PR. Includes the two viable external-review items plus the highest-severity issues independent review surfaced in the same file.
 
@@ -44,7 +57,7 @@ High-confidence, small-blast-radius fixes. Ship as one PR. Includes the two viab
 
 ---
 
-## Phase 2 — Decompose & Test (~1 week)
+## Phase 2 — Decompose & Test (~1 week) ⚠️ Partial (tasks 1–4 of 5 committed on `feature/phase-2-decompose`; task 5 stashed)
 
 Tighten the structure so subsequent phases land cleanly.
 
@@ -76,7 +89,7 @@ Tighten the structure so subsequent phases land cleanly.
 
 ---
 
-## Phase 3 — Ollama / Gemma 4 Polish Backend (~11 hours, sequential)
+## Phase 3 — Ollama / Gemma 4 Polish Backend (~11 hours, sequential) ✅ Shipped (`feature/phase-3-ollama` @ `370d74c`)
 
 ### Architecture
 
@@ -135,7 +148,7 @@ Latency estimates are extrapolations from comparable parameter counts on M-serie
 
 ---
 
-## Phase 4 — UI Modernization (~2 days)
+## Phase 4 — UI Modernization (~2 days) ✅ Shipped (`feature/phase-4-ui` @ `e698e23`)
 
 Two high-leverage visual changes first, then expand the design system.
 
@@ -168,7 +181,7 @@ Then enforce in `SetupWizardView`, `SettingsView`, `DashboardWindowView`, which 
 
 ---
 
-## Phase 5 — Performance Polish (~1 day)
+## Phase 5 — Performance Polish (~1 day) ⏳ In-flight (`feature/phase-5-perf`; 5.1–5.5 committed)
 
 | Item | File:line | Change |
 | --- | --- | --- |
@@ -211,3 +224,9 @@ Then enforce in `SetupWizardView`, `SettingsView`, `DashboardWindowView`, which 
   - Phase 3.3: switched from shell-out / clipboard to Ollama `/api/pull` NDJSON streaming through FastAPI proxy.
   - Phase 3 § Model selection: added RAM-tiered defaults.
   - Phase 3.5: removed transition period — FLAN-T5 deleted cleanly.
+- 2026-05-26 (revision 3) — Ralph Loop iteration:
+  - Phase 3 shipped on `feature/phase-3-ollama` (`370d74c`); PHASE_3_COMPLETE.
+  - Phase 4 shipped on `feature/phase-4-ui` (`e698e23`); PHASE_4_COMPLETE.
+  - Phase 5 work in-flight on `feature/phase-5-perf` (5.1–5.5 committed; 5.7/5.8 docs land with this revision).
+  - Phase 2 Task 5 (api/ extraction) stashed pending fix to 4 failing privacy-token tests.
+  - Added "Shipping Status" table at the top of this document so a reader can see at a glance which phases have landed without reading the whole plan.
