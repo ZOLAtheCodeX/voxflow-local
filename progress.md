@@ -51,15 +51,16 @@ Phase 2 status: Tasks 1–4 (nlp, privacy, engines, routing) committed. Task 5 (
 - [x] Flipped `VOXFLOW_POLISH_BACKEND` default to `ollama` (`engines/llm_backend.py:select_backend()`). Unknown values also fall back to `ollama`. Safety: when Ollama is unreachable, `OllamaBackend.polish()` returns `""` and PolishEngine falls back to `apply_tone(light_cleanup())` — the documented guardrail-fallback path.
 - [x] **Commit** — 326 Python (318 + 8 golden, 9 live-Ollama skipped without Ollama) + 256 Swift = 582 tests green.
 
-### 3.5 — FLAN-T5 removal (~1h)
+### 3.5 — FLAN-T5 removal (~1h) ✅
 
-- [ ] Remove `FlanT5Backend` class entirely
-- [ ] Remove FLAN-T5 weights download logic from `scripts/download_models.py`
-- [ ] Remove FLAN-T5 lazy-load + env vars from codebase
-- [ ] Update `CLAUDE.md` (drop FLAN-T5 references)
-- [ ] Verify: `grep -r "flan" backend/ --include="*.py"` returns zero non-`__pycache__`, non-`test_` hits
-- [ ] Verify: regex `apply_tone(light_cleanup())` remains the guardrail-fallback path
-- [ ] **Commit**
+- [x] Removed `FlanT5Backend` class entirely from `engines/llm_backend.py`.
+- [x] Removed FLAN-T5 weights download logic from `scripts/download_models.py` (`--polish-model` arg dropped; Gemma 4 flows through Ollama via `ollama pull`, not huggingface_hub).
+- [x] Removed FLAN-T5 lazy-load + env vars: `VOXFLOW_POLISH_MODEL` no longer read; `select_backend()` always returns `OllamaBackend()` (legacy `flan_t5` env value logs a warning and still returns Ollama, covered by `test_legacy_flan_t5_value_falls_back_to_ollama`).
+- [x] `engines/__init__.py` and `engines/polish.py` no longer import or export `FlanT5Backend`.
+- [x] Updated `CLAUDE.md` (Overview line — FLAN-T5-Small → Gemma 4 via Ollama).
+- [x] Verified: `grep -r "flan" backend/ --include="*.py" | grep -v __pycache__ | grep -v "test_"` returns zero hits.
+- [x] Verified: regex `apply_tone(light_cleanup())` remains the guardrail-fallback path (covered by `TestPolishEngineWithFakeBackend.test_empty_backend_response_falls_back_silently` + `test_guardrail_triggers_on_runaway_length`).
+- [x] **Commit** — 325 Python (-1 net after removing 4 FLAN-specific tests and adding 1 legacy-value guard) + 9 live-Ollama skipped + 256 Swift = 581 tests green. `./scripts/test_all.sh --skip-runtime-checks`: all green.
 
 ## Constraints (carry these into every commit)
 
