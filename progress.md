@@ -111,6 +111,30 @@ Each iteration:
 
 If blocked, add a `## Blockers` section with the blocker text and output `<promise>PHASE_3_BLOCKED: short reason</promise>`.
 
+## Blockers
+
+**Remaining 3.4 and all of 3.5 require a running Ollama server.** This Ralph Loop iteration cannot honestly complete them:
+
+1. **Latency measurement** (3.4) — needs `gemma4:e2b-mlx` and `gemma4:e4b-mlx` actually pulled and served by Ollama to time real polish requests.
+2. **< 15% guardrail trigger rate validation** (3.4 acceptance bar) — gated test (`VOXFLOW_OLLAMA_GOLDEN=1`) skips when `OllamaBackend().is_available()` is False.
+3. **Default flip to `ollama`** (3.4) — premature without the acceptance bar being met on this user's hardware.
+4. **FlanT5Backend removal** (3.5) — only safe to remove once Ollama is the validated default; otherwise the default fallback path stops being a model and silently becomes the regex pipeline for every user without Ollama.
+
+**Unblocking step (user action):**
+
+```bash
+# Install Ollama (https://ollama.com/download)
+ollama serve &
+ollama pull gemma4:e2b-mlx  # or gemma4:e4b-mlx
+# Re-run the loop with VOXFLOW_OLLAMA_GOLDEN=1 ./scripts/test_all.sh
+```
+
+Once those tests pass, this loop's next iteration can:
+- Commit the measured latencies to a Markdown table inside progress.md
+- Change `VOXFLOW_POLISH_BACKEND` default in `engines/llm_backend.py:select_backend()` from `"flan_t5"` to `"ollama"`
+- Delete `FlanT5Backend` + its env vars + the FLAN-T5 model download logic in `scripts/`
+- Emit `<promise>PHASE_3_COMPLETE</promise>`
+
 ## Design notes (for future iterations)
 
 - `TextLLMBackend` is a `typing.Protocol` — duck-typed. PolishEngine holds a `_backend: TextLLMBackend` instance selected at construction-time from `VOXFLOW_POLISH_BACKEND`. Guardrail + fallback live in PolishEngine, not the backends.
