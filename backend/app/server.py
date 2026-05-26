@@ -543,14 +543,37 @@ def ollama_pull(payload: OllamaPullRequest) -> StreamingResponse:
     )
 
 
+_WEBSOCKET_IDLE_TIMEOUT_S = 60.0
+
+
 @app.websocket("/v1/events")
 async def events(websocket: WebSocket) -> None:
+    """Event stream with idle timeout (Phase 5.4).
+
+    A stalled client (network hung, app crashed) would otherwise hold the
+    coroutine indefinitely. ``asyncio.wait_for`` enforces a 60-second
+    idle ceiling on ``receive_text()``; on timeout the server sends a
+    clean WebSocket close frame (code 1000) so the client sees a graceful
+    disconnect rather than a half-open socket.
+    """
+    import asyncio
+
     await websocket.accept()
     await websocket.send_json({"event": "connected", "message": "VoxFlow event stream ready"})
     try:
         while True:
-            # Keep socket open; client may send pings.
-            _msg: Any = await websocket.receive_text()
+            try:
+                _msg: Any = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=_WEBSOCKET_IDLE_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.info(
+                    "WebSocket idle for %.0fs — closing cleanly",
+                    _WEBSOCKET_IDLE_TIMEOUT_S,
+                )
+                await websocket.close(code=1000, reason="idle timeout")
+                return
             await websocket.send_json({"event": "ack"})
     except Exception as exc:
         logger.debug("WebSocket closed: %s", exc)
