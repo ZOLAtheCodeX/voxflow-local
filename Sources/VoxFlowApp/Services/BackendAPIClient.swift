@@ -279,6 +279,51 @@ enum BackendAPIClient {
         return try await performGetRequest(path: "v1/ollama/models")
     }
 
+    /// Cockpit Layer 0 — apply a smart action to a captured transcript.
+    static func performSmartAction(
+        _ action: SmartActionId,
+        transcript: String
+    ) async throws -> SmartActionResult {
+        struct Request: Encodable {
+            let actionId: String
+            let transcript: String
+
+            enum CodingKeys: String, CodingKey {
+                case actionId = "action_id"
+                case transcript
+            }
+        }
+        struct Response: Decodable {
+            let actionId: String
+            let output: String
+            let guardrailTriggered: Bool
+            let error: String?
+
+            enum CodingKeys: String, CodingKey {
+                case actionId = "action_id"
+                case output
+                case guardrailTriggered = "guardrail_triggered"
+                case error
+            }
+        }
+
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/smart_action"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(Request(actionId: action.rawValue, transcript: transcript))
+
+        let (data, response) = try await session.data(for: request)
+        try checkHTTPStatus(response, data: data)
+        let parsed = try JSONDecoder().decode(Response.self, from: data)
+        let actionId = SmartActionId(rawValue: parsed.actionId) ?? action
+        return SmartActionResult(
+            actionId: actionId,
+            output: parsed.output,
+            guardrailTriggered: parsed.guardrailTriggered,
+            error: parsed.error
+        )
+    }
+
     /// Trigger an Ollama model pull. Streams NDJSON progress lines back from
     /// the backend; ``onProgress`` is invoked once per line so the UI can
     /// surface status and byte-progress. Returns when the stream terminates

@@ -548,7 +548,7 @@ enum CommandLaneHotkeyPreset: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-struct FocusTargetSnapshot {
+struct FocusTargetSnapshot: Codable, Sendable, Equatable {
     let hasFocusedTextInput: Bool
     let hasInsertionCursor: Bool
     let appName: String?
@@ -695,6 +695,82 @@ struct PrivacyPreview {
     let token: String
     let originalText: String
     let redactedText: String
+}
+
+// MARK: - Cockpit Layer 0 (Smart Actions)
+
+enum SmartActionId: String, Codable, CaseIterable, Sendable {
+    case memo
+    case mece
+    case items
+    case steel
+    case pyramid
+    case disclaimer
+
+    var label: String {
+        switch self {
+        case .memo: return "memo"
+        case .mece: return "MECE"
+        case .items: return "action items"
+        case .steel: return "steel-man"
+        case .pyramid: return "Pyramid"
+        case .disclaimer: return "disclaimer"
+        }
+    }
+
+    var shortDescription: String {
+        switch self {
+        case .memo: return "Issue / Analysis / Recommendation"
+        case .mece: return "Mutually exclusive bullet groups"
+        case .items: return "Extract action items"
+        case .steel: return "Steel-man the position"
+        case .pyramid: return "Pyramid Principle structure"
+        case .disclaimer: return "Append your disclaimer"
+        }
+    }
+}
+
+struct SmartActionResult: Sendable, Equatable {
+    let actionId: SmartActionId
+    let output: String
+    let guardrailTriggered: Bool
+    let error: String?
+}
+
+struct AppliedAction: Codable, Sendable, Equatable {
+    let actionId: SmartActionId
+    let appliedAt: Date
+    let beforeText: String
+    let afterText: String
+}
+
+struct LongFormSession: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    let createdAt: Date
+    var transcript: String
+    var targetApp: FocusTargetSnapshot?
+    var appliedActions: [AppliedAction]
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        transcript: String = "",
+        targetApp: FocusTargetSnapshot? = nil
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.transcript = transcript
+        self.targetApp = targetApp
+        self.appliedActions = []
+        self.updatedAt = createdAt
+    }
+}
+
+enum LongFormState: Equatable, Sendable {
+    case idle
+    case recording(startedAt: Date)
+    case reviewing
 }
 
 extension ContinuousClock.Instant {
