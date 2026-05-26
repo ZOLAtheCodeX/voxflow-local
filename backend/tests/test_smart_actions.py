@@ -203,6 +203,24 @@ def test_apply_calls_polish_when_backend_does_not_expose_availability():
     mock_backend.polish.assert_called_once()
 
 
+def test_smart_action_endpoint_rejects_whitespace_only_transcript():
+    """Whitespace-only transcript fails Pydantic validation with 422, not
+    a misleading 200 with empty output."""
+    from fastapi.testclient import TestClient
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+    import server
+
+    client = TestClient(server.app)
+    resp = client.post("/v1/smart_action", json={
+        "action_id": "memo",
+        "transcript": "   \n   ",
+    })
+    assert resp.status_code == 422
+    body = resp.json()
+    assert "transcript" in str(body).lower()
+
+
 def test_smart_action_endpoint_returns_unavailable_when_polish_engine_offline(monkeypatch):
     """HTTP integration: polish_engine.is_available()==False → 200 with
     error='ollama_unavailable' and output=transcript verbatim."""

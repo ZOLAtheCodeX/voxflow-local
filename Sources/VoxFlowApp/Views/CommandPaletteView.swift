@@ -605,7 +605,7 @@ struct CommandPaletteView: View {
             }
 
             Text(String(format: "%.1f", state.recordingDuration))
-                .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                .font(VF.monoTimerFont)
                 .foregroundStyle(.primary)
 
             Text("Release hotkey to transcribe")
@@ -831,7 +831,7 @@ struct CommandPaletteView: View {
     }
 
     private var dictationReady: Bool {
-        state.canUseSelectedSTTBackend && (!state.workflowNeedsBackend || state.backendReadyForDictation)
+        state.canUseSelectedSTTBackend && (!state.workflowNeedsBackend || state.backendReadiness.readyForDictation)
     }
 
     private var readinessBadgeColor: Color {

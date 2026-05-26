@@ -43,12 +43,15 @@ struct VoxFlowLocalApp: App {
                 Button("Open Dashboard Window") {
                     activateAndOpenWindow(id: "dashboard")
                 }
-                .keyboardShortcut("2", modifiers: [.command])
+                // ⌥⌘2 (not ⌘2) so the shortcut doesn't compete with the
+                // second cockpit chip's ⌘2 binding when the cockpit is key.
+                .keyboardShortcut("2", modifiers: [.command, .option])
 
                 Button("Open Setup Wizard") {
                     activateAndOpenWindow(id: "setup")
                 }
-                .keyboardShortcut("1", modifiers: [.command])
+                // ⌥⌘1 (not ⌘1) — same rationale as the dashboard shortcut.
+                .keyboardShortcut("1", modifiers: [.command, .option])
 
                 Button("Open Cockpit") {
                     coordinator.cockpit.open()

@@ -35,6 +35,10 @@ enum VF {
     static let monoCaptionFont = Font.system(size: 11, design: .monospaced)
     static let monoMicroFont = Font.system(size: 10, design: .monospaced)
     static let microFont = Font.system(size: 10)
+    // Monospaced timer readout — used for the recording-duration counter
+    // in the push-to-talk command palette where the digits jitter without
+    // a fixed-width design and a bigger weight.
+    static let monoTimerFont = Font.system(size: 30, weight: .semibold, design: .monospaced)
 
     // MARK: - Semantic colors
     //

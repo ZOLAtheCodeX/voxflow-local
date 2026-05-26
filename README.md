@@ -7,7 +7,7 @@ Mac-native, local-only dictation app with WhisperKit/Whisper STT, post-capture c
 - Main app window (Dashboard/Settings/Setup tabs) plus menu bar command palette (`SwiftUI` + `AppKit` bridge)
 - Global hold-to-talk hotkey (default `Fn` hold/release, configurable in Settings)
 - System command lane hotkey (default `Fn + Command + Space`, configurable in Settings) with alternate UI color state
-- Keyboard-first palette shortcuts (`Cmd+1` setup, `Cmd+2` dashboard, `Cmd+,` settings, `Cmd+Q` quit, `Esc` cancel capture/review)
+- Keyboard-first palette shortcuts (`Opt+Cmd+1` setup, `Opt+Cmd+2` dashboard, `Opt+Cmd+V` cockpit, `Cmd+,` settings, `Cmd+Q` quit, `Esc` cancel capture/review)
 - Onboarding calibration flow (first run phrase capture)
 - Target-aware activation (focused text field / active cursor)
 - Cleanup mode chips (`Raw`, `Light`, `Polish`)
@@ -68,6 +68,17 @@ Mac-native, local-only dictation app with WhisperKit/Whisper STT, post-capture c
   - Explicit approve action (`Approve Redacted` or `Approve Raw`)
   - Consent token required on backend for API execution
   - Metadata-only audit logging (no transcript content in logs)
+- Cockpit (Layer 0) — long-form workspace:
+  - Opens via `Option+Cmd+V` (menu bar → "Open Cockpit")
+  - Continuous dictation into a scrollable transcript pane; auto-saves every 5 s to `~/Library/Application Support/VoxFlow/sessions/`
+  - Crash recovery on launch (resumes the most recently updated session)
+  - Six smart actions (memo / MECE / action items / steel-man / Pyramid / disclaimer) wired to local Gemma 4 via Ollama; `POST /v1/smart_action` endpoint
+  - PII redaction (Luhn-validated card numbers, SSN, phone, email) applied before the LLM sees the transcript
+  - Fails closed when Ollama is unreachable (returns `error="ollama_unavailable"` rather than silently substituting regex output)
+  - Action chip row with MRU promotion (3 uses → promoted), persisted across launches; `Cmd+K` palette surfaces every action
+  - 20-entry undo (`Cmd+Z`) — guardrail trips and unchanged echoes are filtered from the stack
+  - Insert into the originally-focused app (`Cmd+Return`) via a frozen PID, not `NSWorkspace.frontmost` at insert time
+  - Single-keyword voice commands (memo / MECE / items / cancel / undo) — only fire in review state, multi-word utterances are ignored
 
 ## Repo Layout
 

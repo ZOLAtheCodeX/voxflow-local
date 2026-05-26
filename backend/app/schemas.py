@@ -7,7 +7,7 @@ acyclic (api -> routing -> schemas; api also imports schemas directly).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TranscribeRequest(BaseModel):
@@ -132,6 +132,17 @@ class PrivacyPreviewResponse(BaseModel):
 class SmartActionRequest(BaseModel):
     action_id: str = Field(min_length=1, max_length=32)
     transcript: str = Field(min_length=1, max_length=50_000)
+
+    @field_validator("transcript")
+    @classmethod
+    def _transcript_not_blank(cls, value: str) -> str:
+        # ``min_length=1`` counts characters not non-whitespace, so "   "
+        # would pass and yield ``output=""`` after PolishEngine's empty-text
+        # short-circuit. Reject explicitly so the client gets a 422 instead
+        # of a misleading 200 with an empty output.
+        if not value.strip():
+            raise ValueError("transcript must not be blank")
+        return value
 
 
 class SmartActionResponse(BaseModel):
