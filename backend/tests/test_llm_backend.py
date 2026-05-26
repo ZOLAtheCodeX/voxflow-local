@@ -1,0 +1,275 @@
+"""Unit tests for TextLLMBackend implementations (FLAN-T5, Ollama, selector).
+
+Mocks live network I/O — these tests never touch the real Ollama server or
+the FLAN-T5 model.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import sys
+from pathlib import Path
+from unittest.mock import patch
+from urllib import error as urlerror
+
+# Insert the app package so engines/* is importable.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+
+import pytest
+
+from engines.llm_backend import (
+    FlanT5Backend,
+    OllamaBackend,
+    TextLLMBackend,
+    select_backend,
+)
+from engines.polish import PolishEngine
+
+
+class _FakeBackend:
+    """In-test backend used to assert PolishEngine routing without ML deps."""
+
+    name = "fake"
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.calls: list[tuple[str, str]] = []
+
+    def polish(self, text: str, tone: str) -> str:
+        self.calls.append((text, tone))
+        return self.response
+
+
+def _ollama_response(content: str) -> bytes:
+    return json.dumps(
+        {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    ).encode("utf-8")
+
+
+class _FakeHTTPResponse:
+    """Context-manager mimicking urllib.request.urlopen()'s return value."""
+
+    def __init__(self, body: bytes, status: int = 200) -> None:
+        self._body = body
+        self.status = status
+
+    def __enter__(self) -> "_FakeHTTPResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+class TestOllamaBackendSuccess:
+    def test_returns_cleaned_content(self) -> None:
+        backend = OllamaBackend(model="gemma4:e4b-mlx")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_ollama_response("Please send the report by Friday.")),
+        ) as urlopen_mock:
+            result = backend.polish("uh send the report by friday", "neutral")
+
+        assert result == "Please send the report by Friday."
+        urlopen_mock.assert_called_once()
+        # System-role tone constraint, not user-role
+        sent_request = urlopen_mock.call_args.args[0]
+        body = json.loads(sent_request.data.decode("utf-8"))
+        assert body["model"] == "gemma4:e4b-mlx"
+        assert body["stream"] is False
+        roles = [m["role"] for m in body["messages"]]
+        assert roles == ["system", "user"]
+        assert "cleaned text" in body["messages"][0]["content"].lower()
+        assert body["messages"][1]["content"] == "uh send the report by friday"
+
+    def test_strips_whitespace_from_response(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_ollama_response("\n  trimmed  \n")),
+        ):
+            assert backend.polish("hi", "neutral") == "trimmed"
+
+    def test_empty_input_returns_empty(self) -> None:
+        backend = OllamaBackend()
+        # Should never hit the network for empty input.
+        with patch("engines.llm_backend.urlrequest.urlopen") as urlopen_mock:
+            assert backend.polish("", "neutral") == ""
+            assert backend.polish("   ", "neutral") == ""
+            urlopen_mock.assert_not_called()
+
+
+class TestOllamaBackendFailure:
+    """Connection / parse failures must return "" — never raise to callers."""
+
+    def test_connection_refused_returns_empty(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=urlerror.URLError("Connection refused"),
+        ):
+            assert backend.polish("hello world", "neutral") == ""
+
+    def test_timeout_returns_empty(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=TimeoutError("timed out"),
+        ):
+            assert backend.polish("hello world", "neutral") == ""
+
+    def test_malformed_json_returns_empty(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(b"not json"),
+        ):
+            assert backend.polish("hello world", "neutral") == ""
+
+    def test_missing_choices_returns_empty(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(b'{"unexpected": "shape"}'),
+        ):
+            assert backend.polish("hello world", "neutral") == ""
+
+    def test_unexpected_exception_returns_empty(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=RuntimeError("boom"),
+        ):
+            assert backend.polish("hello world", "neutral") == ""
+
+
+class TestOllamaBackendAvailability:
+    def test_is_available_true_on_200(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(b'{"models": []}', status=200),
+        ):
+            assert backend.is_available() is True
+
+    def test_is_available_false_on_connection_refused(self) -> None:
+        backend = OllamaBackend()
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=urlerror.URLError("refused"),
+        ):
+            assert backend.is_available() is False
+
+
+class TestPolishEngineWithFakeBackend:
+    """PolishEngine guardrail + fallback behaviour, independent of any model."""
+
+    def test_passes_clean_candidate_through(self) -> None:
+        backend = _FakeBackend(response="This is a clean polished sentence.")
+        engine = PolishEngine(backend=backend)
+        output, triggered = engine.polish("this is a clean polished sentence", "neutral")
+        assert output == "This is a clean polished sentence."
+        assert triggered is False
+        assert backend.calls == [("this is a clean polished sentence", "neutral")]
+
+    def test_empty_backend_response_falls_back_silently(self) -> None:
+        backend = _FakeBackend(response="")
+        engine = PolishEngine(backend=backend)
+        original = "send the report to the team"
+        output, triggered = engine.polish(original, "neutral")
+        # Fell back to apply_tone(light_cleanup()) — non-empty, similar.
+        assert output
+        assert original.split()[0].lower() in output.lower()
+        # Empty backend response is treated as "declined", not a guardrail trip.
+        assert triggered is False
+
+    def test_guardrail_triggers_on_runaway_length(self) -> None:
+        # 11-word original; runaway candidate (>1.8x).
+        runaway = " ".join(["filler"] * 30)
+        backend = _FakeBackend(response=runaway)
+        engine = PolishEngine(backend=backend)
+        original = "send the deck to the marketing team by end of day today"
+        output, triggered = engine.polish(original, "neutral")
+        assert triggered is True
+        # Output is the regex fallback, not the runaway candidate.
+        assert runaway not in output
+
+    def test_echo_falls_back_without_triggering_guardrail(self) -> None:
+        # Backend echoes the input verbatim — should fall back, but NOT flag
+        # the guardrail (echo is a "did nothing", not a "did something bad").
+        backend = _FakeBackend(response="Hello world")
+        engine = PolishEngine(backend=backend)
+        output, triggered = engine.polish("hello world", "neutral")
+        assert triggered is False
+        # Fallback path runs light_cleanup which adds a period.
+        assert output.strip().lower().startswith("hello world")
+
+    def test_backend_exception_falls_back(self) -> None:
+        class _ExplodingBackend:
+            name = "exploding"
+
+            def polish(self, text: str, tone: str) -> str:
+                raise RuntimeError("network exploded")
+
+        engine = PolishEngine(backend=_ExplodingBackend())
+        output, triggered = engine.polish("hello world", "neutral")
+        # Fallback ran; output is non-empty.
+        assert output
+        assert triggered is False
+
+    def test_empty_input_returns_empty_without_calling_backend(self) -> None:
+        backend = _FakeBackend(response="should-not-be-used")
+        engine = PolishEngine(backend=backend)
+        assert engine.polish("", "neutral") == ("", False)
+        assert engine.polish("   ", "neutral") == ("", False)
+        assert backend.calls == []
+
+
+class TestSelectBackend:
+    def test_default_is_flan_t5(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("VOXFLOW_POLISH_BACKEND", raising=False)
+        backend = select_backend()
+        assert isinstance(backend, FlanT5Backend)
+        assert backend.name == "flan_t5"
+
+    def test_explicit_ollama(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "ollama")
+        backend = select_backend()
+        assert isinstance(backend, OllamaBackend)
+        assert backend.name == "ollama"
+
+    def test_explicit_flan_t5(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "flan_t5")
+        backend = select_backend()
+        assert isinstance(backend, FlanT5Backend)
+
+    def test_unknown_value_falls_back_to_flan_t5(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "made-up-backend")
+        backend = select_backend()
+        assert isinstance(backend, FlanT5Backend)
+
+    def test_case_insensitive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "Ollama")
+        backend = select_backend()
+        assert isinstance(backend, OllamaBackend)
+
+
+class TestProtocolConformance:
+    """Sanity-check that both concrete backends satisfy the duck-typed Protocol."""
+
+    def test_ollama_backend_has_polish(self) -> None:
+        backend: TextLLMBackend = OllamaBackend()
+        assert hasattr(backend, "polish")
+        assert callable(backend.polish)
+        assert backend.name == "ollama"
+
+    def test_flan_t5_backend_has_polish(self) -> None:
+        backend: TextLLMBackend = FlanT5Backend()
+        assert hasattr(backend, "polish")
+        assert callable(backend.polish)
+        assert backend.name == "flan_t5"

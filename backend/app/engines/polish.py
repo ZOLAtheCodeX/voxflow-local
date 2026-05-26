@@ -1,102 +1,77 @@
-"""PolishEngine — FLAN-T5-Small based text polish + tone application.
+"""PolishEngine — pluggable text-LLM polish + tone application.
 
-Uses HuggingFace text2text-generation pipeline. On any failure or guardrail
-trigger, falls back to apply_tone(light_cleanup(text), tone) — the regex
-floor — so callers always get usable output.
+Wraps a ``TextLLMBackend`` (FLAN-T5 today, Ollama after Phase 3.4) with:
+  - the guardrail / echo / similarity / length-ratio rules
+  - the ``apply_tone(light_cleanup(text), tone)`` regex fallback floor
 
-The guardrail catches model echoes, length explosions, and low-similarity
-outputs that would be worse than a clean light_cleanup result.
+Callers always get usable output: backend declined (empty string) → fallback;
+backend returned a degenerate candidate → guardrail fires → fallback.
+
+Backend choice is driven by ``VOXFLOW_POLISH_BACKEND`` (see ``llm_backend.py``).
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import re
 from difflib import SequenceMatcher
 from threading import Lock
 
 from nlp import apply_tone, light_cleanup
 
-from ._utils import preferred_torch_device, resolve_model_ref
+from .llm_backend import FlanT5Backend, TextLLMBackend, select_backend
 
 logger = logging.getLogger("voxflow")
 
 
 class PolishEngine:
-    _TONE_INSTRUCTIONS = {
-        "concise": "Remove unnecessary words. Be direct and brief.",
-        "formal": "Use professional language. Avoid contractions and slang.",
-        "friendly": "Use warm, approachable language.",
-        "neutral": "Use clear, natural language.",
-    }
-
-    def __init__(self) -> None:
-        model_ref = os.environ.get("VOXFLOW_POLISH_MODEL", "google/flan-t5-small")
-        self.model_id = resolve_model_ref(model_ref)
-        self._pipeline = None
-        self._load_failed = False
+    def __init__(self, backend: TextLLMBackend | None = None) -> None:
+        self._backend: TextLLMBackend = backend or select_backend()
         self._lock = Lock()
 
-    def _load_pipeline(self) -> None:
-        if self._pipeline is not None:
-            return
-        if self._load_failed:
-            return
+    @property
+    def backend_name(self) -> str:
+        return getattr(self._backend, "name", "unknown")
 
-        with self._lock:
-            if self._pipeline is not None:
-                return
-            if self._load_failed:
-                return
-            try:
-                from transformers import pipeline
+    @property
+    def model_id(self) -> str:
+        """Compat with prior API surface (used in /v1/ready logging).
 
-                self._pipeline = pipeline(
-                    task="text2text-generation",
-                    model=self.model_id,
-                    device=preferred_torch_device(),
-                )
-                logger.info("Loaded polish model: %s", self.model_id)
-            except Exception as exc:
-                logger.error("Failed to load polish model %s: %s", self.model_id, exc)
-                self._load_failed = True
+        Returns the underlying model identifier when the backend exposes one.
+        """
+        return getattr(self._backend, "model_id", None) or getattr(self._backend, "model", "") or ""
 
     def retry_load(self) -> None:
-        """Reset failure state to allow retrying model load."""
-        self._load_failed = False
-        self._load_pipeline()
+        """Reset failure state for backends that support lazy reload."""
+        retry = getattr(self._backend, "retry_load", None)
+        if callable(retry):
+            with self._lock:
+                retry()
 
     def polish(self, text: str, tone: str) -> tuple[str, bool]:
-        self._load_pipeline()
-
         if not text.strip():
             return "", False
 
-        if self._pipeline:
-            tone_instruction = self._TONE_INSTRUCTIONS.get(tone.lower(), self._TONE_INSTRUCTIONS["neutral"])
-            prompt = (
-                f"Rewrite this spoken transcript as clean written text. "
-                f"Do not add new information. {tone_instruction} "
-                f"Transcript: {text}"
-            )
-            word_count = len(text.split())
-            max_tokens = min(200, max(60, word_count * 3))
-            try:
-                result = self._pipeline(prompt, max_new_tokens=max_tokens)[0]["generated_text"].strip()
-                if self._guardrail_triggered(text, result):
-                    return apply_tone(light_cleanup(text), tone), True
-                if self._is_echo(text, result):
-                    return apply_tone(light_cleanup(text), tone), False
-                return result, False
-            except Exception as exc:
-                logger.error("Polish inference failed: %s", exc)
+        try:
+            candidate = self._backend.polish(text, tone)
+        except Exception as exc:
+            logger.error("Polish backend %s raised: %s", self.backend_name, exc)
+            candidate = ""
 
-        return apply_tone(light_cleanup(text), tone), False
+        if not candidate:
+            return apply_tone(light_cleanup(text), tone), False
+
+        if self._guardrail_triggered(text, candidate):
+            return apply_tone(light_cleanup(text), tone), True
+
+        if self._is_echo(text, candidate):
+            return apply_tone(light_cleanup(text), tone), False
+
+        return candidate, False
 
     @staticmethod
     def _is_echo(original: str, candidate: str) -> bool:
-        """Check if the model just echoed the input back (possibly with minor punctuation changes)."""
+        """Backend just echoed the input (modulo punctuation/case)."""
         def _normalize(s: str) -> str:
             return re.sub(r"[^\w\s]", "", s.strip().lower())
         return _normalize(original) == _normalize(candidate)

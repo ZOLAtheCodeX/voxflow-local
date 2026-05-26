@@ -9,18 +9,18 @@ Phase 2 status: Tasks 1–4 (nlp, privacy, engines, routing) committed. Task 5 (
 
 ## Task tracker
 
-### 3.1 — OllamaBackend class (~2h)
+### 3.1 — OllamaBackend class (~2h) ✅
 
-- [ ] Define `TextLLMBackend` Protocol in `backend/app/engines/llm_backend.py` (`async def polish(text, tone) -> str`)
-- [ ] `FlanT5Backend` wrapping current `PolishEngine.polish()` logic unchanged
-- [ ] `OllamaBackend` POSTing to `http://localhost:11434/v1/chat/completions` via stdlib `urllib` (zero new pip deps)
+- [x] Define `TextLLMBackend` Protocol in `backend/app/engines/llm_backend.py` (sync `polish(text, tone) -> str`; async deferred to Phase 2 Task 9 executor wrap — see file docstring)
+- [x] `FlanT5Backend` wrapping current `PolishEngine.polish()` logic unchanged
+- [x] `OllamaBackend` POSTing to `http://localhost:11434/v1/chat/completions` via stdlib `urllib` (zero new pip deps)
   - System prompt: "You clean up dictated speech. Return only the cleaned text, no explanation, no preamble."
   - Per-tone constraint folded into the system role, not user role
-  - Connection errors fall back to `apply_tone(light_cleanup(text))` — never surface as 500
-- [ ] `VOXFLOW_POLISH_BACKEND` env var selector (`flan_t5` | `ollama`; default `flan_t5` for this sub-phase)
-- [ ] Guardrail (`_guardrail_triggered`) stays in `PolishEngine` and wraps **both** backends
-- [ ] Unit tests with mocked Ollama responses
-- [ ] **Commit**
+  - Connection errors / timeouts / malformed JSON all collapse to "" — PolishEngine falls back to `apply_tone(light_cleanup(text))`; never surfaces as 500
+- [x] `VOXFLOW_POLISH_BACKEND` env var selector (`flan_t5` | `ollama`; default `flan_t5` for this sub-phase)
+- [x] Guardrail (`_guardrail_triggered`) stays in `PolishEngine` and wraps **both** backends (PolishEngine now delegates the candidate to the backend, guardrail + echo + fallback live at the engine layer)
+- [x] Unit tests with mocked Ollama responses (`test_llm_backend.py`, 23 cases)
+- [x] **Commit** — 305 Python (282 + 23 new) + 256 Swift = 561 tests green
 
 ### 3.2 — Readiness reporting (~1h)
 
