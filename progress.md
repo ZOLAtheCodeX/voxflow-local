@@ -26,11 +26,13 @@ The user's task list numbered engines first; I'm reordering to match the import 
   - [x] `privacy/consent.py` — ConsentRecord, ConsentStore, AuditLogger
   - [x] `privacy/redaction.py` — redact_sensitive_text
   - server.py: 1782 → 1693 lines. 282 Python + 256 Swift tests still green.
-- [ ] **Task 1 (renumbered to 3):** Extract `backend/app/engines/` package
-  - [ ] `engines/whisper.py` — WhisperEngine, OpenAIAudioClient
-  - [ ] `engines/polish.py` — PolishEngine
-  - [ ] `engines/translate.py` — TranslateEngine
-  - [ ] `engines/prompt_framing.py` — PromptFramingEngine
+- [x] **Task 1:** Extract `backend/app/engines/` package ✅
+  - [x] `engines/whisper.py` — WhisperEngine, OpenAIAudioClient
+  - [x] `engines/polish.py` — PolishEngine
+  - [x] `engines/translate.py` — TranslateEngine
+  - [x] `engines/prompt_framing.py` — PromptFramingEngine
+  - Also moved: `engines/_utils.py` (resolve_model_ref, preferred_torch_device), `engines/results.py` (STTExecutionResult).
+  - server.py: 1693 → 1054 lines (639 lines moved into engines/). 282 Python + 256 Swift tests still green.
 - [ ] **Task 3 (renumbered to 4):** Extract `backend/app/routing/` package
   - [ ] `routing/private_api.py` — PrivateAPIClient, PrivateAPIPolicy
   - [ ] `routing/provider.py` — ProviderRouter, ResolvedProviderInput
