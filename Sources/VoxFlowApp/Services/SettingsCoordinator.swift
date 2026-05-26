@@ -327,23 +327,23 @@ final class SettingsCoordinator: SettingsCoordinating {
     func restartBackendWithCurrentConfiguration(status: String) {
         let launchConfiguration = currentBackendLaunchConfiguration()
         if state.backendShouldRun {
-            state.backendProcessRunning = true
-            state.backendWarmupInProgress = true
-            state.backendReadyForDictation = false
-            state.backendReadinessIssue = nil
-            state.backendStatusSummary = backendManager.isRunning
+            state.backendReadiness.processRunning = true
+            state.backendReadiness.warmupInProgress = true
+            state.backendReadiness.readyForDictation = false
+            state.backendReadiness.readinessIssue = nil
+            state.backendReadiness.statusSummary = backendManager.isRunning
                 ? "Backend reloading — applying new configuration"
                 : "Backend starting — waiting for warmup"
-            state.backendActiveSTTModel = ""
+            state.backendReadiness.activeSTTModel = ""
             backendManager.startIfNeededAsync(configuration: launchConfiguration)
         } else {
             backendManager.stopAsync()
-            state.backendProcessRunning = false
-            state.backendWarmupInProgress = false
-            state.backendReadyForDictation = false
-            state.backendReadinessIssue = nil
-            state.backendStatusSummary = "Backend idle — current workflow runs in app"
-            state.backendActiveSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
+            state.backendReadiness.processRunning = false
+            state.backendReadiness.warmupInProgress = false
+            state.backendReadiness.readyForDictation = false
+            state.backendReadiness.readinessIssue = nil
+            state.backendReadiness.statusSummary = "Backend idle — current workflow runs in app"
+            state.backendReadiness.activeSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
         }
 
         state.statusLine = status

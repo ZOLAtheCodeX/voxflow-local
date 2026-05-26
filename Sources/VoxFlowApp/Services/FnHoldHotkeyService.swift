@@ -54,7 +54,7 @@ final class FnHoldHotkeyService {
         unregister()
     }
 
-    private func handleFlagsChanged(_ event: NSEvent) {
+    func handleFlagsChanged(_ event: NSEvent) {
         let fnAloneNow = Self.isFnAlone(event.modifierFlags)
         guard fnAloneNow != isFnAlonePressed else { return }
 

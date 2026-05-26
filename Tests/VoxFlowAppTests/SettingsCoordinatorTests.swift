@@ -210,12 +210,12 @@ final class SettingsCoordinatorTests: XCTestCase {
 
         sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
 
-        XCTAssertFalse(state.backendProcessRunning)
-        XCTAssertFalse(state.backendWarmupInProgress)
-        XCTAssertFalse(state.backendReadyForDictation)
-        XCTAssertNil(state.backendReadinessIssue)
-        XCTAssertEqual(state.backendStatusSummary, "Backend idle — current workflow runs in app")
-        XCTAssertEqual(state.backendActiveSTTModel, "whisperkit (in-app)")
+        XCTAssertFalse(state.backendReadiness.processRunning)
+        XCTAssertFalse(state.backendReadiness.warmupInProgress)
+        XCTAssertFalse(state.backendReadiness.readyForDictation)
+        XCTAssertNil(state.backendReadiness.readinessIssue)
+        XCTAssertEqual(state.backendReadiness.statusSummary, "Backend idle — current workflow runs in app")
+        XCTAssertEqual(state.backendReadiness.activeSTTModel, "whisperkit (in-app)")
         XCTAssertEqual(state.statusLine, "Dictation mode active")
     }
 
@@ -228,11 +228,11 @@ final class SettingsCoordinatorTests: XCTestCase {
 
         sut.restartBackendWithCurrentConfiguration(status: "Meeting mode active")
 
-        XCTAssertTrue(state.backendProcessRunning)
-        XCTAssertTrue(state.backendWarmupInProgress)
-        XCTAssertFalse(state.backendReadyForDictation)
-        XCTAssertNil(state.backendReadinessIssue)
-        XCTAssertEqual(state.backendStatusSummary, "Backend starting — waiting for warmup")
+        XCTAssertTrue(state.backendReadiness.processRunning)
+        XCTAssertTrue(state.backendReadiness.warmupInProgress)
+        XCTAssertFalse(state.backendReadiness.readyForDictation)
+        XCTAssertNil(state.backendReadiness.readinessIssue)
+        XCTAssertEqual(state.backendReadiness.statusSummary, "Backend starting — waiting for warmup")
         XCTAssertEqual(state.statusLine, "Meeting mode active")
     }
 }

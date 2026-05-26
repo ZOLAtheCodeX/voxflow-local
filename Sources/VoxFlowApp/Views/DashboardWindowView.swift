@@ -64,22 +64,22 @@ struct DashboardWindowView: View {
                     Circle()
                         .fill(backendStatusColor)
                         .frame(width: 8, height: 8)
-                    Text(state.backendStatusSummary)
+                    Text(state.backendReadiness.statusSummary)
                         .font(VF.bodyEmphasizedFont)
                         .foregroundStyle(backendStatusColor)
                 }
 
-                Text("Process \(state.backendProcessRunning ? "running" : "stopped") · STT \(state.sttBackend.displayName)")
+                Text("Process \(state.backendReadiness.processRunning ? "running" : "stopped") · STT \(state.sttBackend.displayName)")
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
 
-                if !state.backendActiveSTTModel.isEmpty {
-                    Text("Active backend STT model: \(state.backendActiveSTTModel)")
+                if !state.backendReadiness.activeSTTModel.isEmpty {
+                    Text("Active backend STT model: \(state.backendReadiness.activeSTTModel)")
                         .font(VF.secondaryFont)
                         .foregroundStyle(.secondary)
                 }
 
-                if let issue = state.backendReadinessIssue, !issue.isEmpty {
+                if let issue = state.backendReadiness.readinessIssue, !issue.isEmpty {
                     Text("Issue: \(issue)")
                         .font(VF.secondaryFont)
                         .foregroundStyle(.secondary)
@@ -242,13 +242,13 @@ struct DashboardWindowView: View {
     }
 
     private var backendStatusColor: Color {
-        if !state.backendShouldRun && !state.backendProcessRunning && !state.backendWarmupInProgress {
+        if !state.backendShouldRun && !state.backendReadiness.processRunning && !state.backendReadiness.warmupInProgress {
             return VF.colorNeutral
         }
-        if state.backendReadyForDictation {
+        if state.backendReadiness.readyForDictation {
             return VF.colorSuccess
         }
-        if state.backendWarmupInProgress {
+        if state.backendReadiness.warmupInProgress {
             return VF.colorWarning
         }
         return VF.colorError

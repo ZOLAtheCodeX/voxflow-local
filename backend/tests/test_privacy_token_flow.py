@@ -80,6 +80,7 @@ class PrivacyTokenFlowTests(unittest.TestCase):
         return server.privacy_preview(request)
 
     def test_cleanup_preview_then_approve_redacted(self) -> None:
+        import asyncio
         preview = self._preview(
             operation="cleanup",
             text="Email me at alice@example.com or call 415-555-1212",
@@ -87,7 +88,7 @@ class PrivacyTokenFlowTests(unittest.TestCase):
         self.assertIn("[EMAIL]", preview.redacted_text)
         self.assertIn("[PHONE]", preview.redacted_text)
 
-        response = server.cleanup(
+        response = asyncio.run(server.cleanup(
             server.CleanupRequest(
                 session_id="session-privacy",
                 mode="light",
@@ -97,16 +98,17 @@ class PrivacyTokenFlowTests(unittest.TestCase):
                 consent_token=preview.token,
                 allow_raw=False,
             )
-        )
+        ))
         self.assertIn("[EMAIL]", response.output_text)
         self.assertNotIn("alice@example.com", response.output_text)
 
     def test_cleanup_preview_then_approve_raw(self) -> None:
+        import asyncio
         preview = self._preview(
             operation="cleanup",
             text="Contact bob@example.com right now",
         )
-        response = server.cleanup(
+        response = asyncio.run(server.cleanup(
             server.CleanupRequest(
                 session_id="session-privacy",
                 mode="polish",
@@ -116,16 +118,17 @@ class PrivacyTokenFlowTests(unittest.TestCase):
                 consent_token=preview.token,
                 allow_raw=True,
             )
-        )
+        ))
         self.assertIn("bob@example.com", response.output_text)
 
     def test_translate_and_meeting_use_preview_token(self) -> None:
+        import asyncio
         translate_preview = self._preview(
             operation="translate",
             text="Please email me at owner@example.com with status.",
             session_id="session-translate",
         )
-        translate_response = server.translate(
+        translate_response = asyncio.run(server.translate(
             server.TranslateRequest(
                 session_id="session-translate",
                 source_text=translate_preview.original_text,
@@ -135,7 +138,7 @@ class PrivacyTokenFlowTests(unittest.TestCase):
                 consent_token=translate_preview.token,
                 allow_raw=False,
             )
-        )
+        ))
         self.assertTrue(translate_response.translated_text.startswith("DE:"))
         self.assertIn("[EMAIL]", translate_response.source_text)
 
@@ -144,7 +147,7 @@ class PrivacyTokenFlowTests(unittest.TestCase):
             text="We agreed to follow up with client@example.com tomorrow.",
             session_id="session-meeting",
         )
-        meeting_response = server.meeting_summarize(
+        meeting_response = asyncio.run(server.meeting_summarize(
             server.MeetingRequest(
                 session_id="session-meeting",
                 transcript=meeting_preview.original_text,
@@ -153,13 +156,14 @@ class PrivacyTokenFlowTests(unittest.TestCase):
                 consent_token=meeting_preview.token,
                 allow_raw=False,
             )
-        )
+        ))
         self.assertIn("[EMAIL]", meeting_response.transcript)
         self.assertTrue(any("Action" in item for item in meeting_response.action_items))
 
     def test_private_api_rejects_invalid_or_missing_token(self) -> None:
+        import asyncio
         with self.assertRaises(HTTPException) as invalid_ctx:
-            server.cleanup(
+            asyncio.run(server.cleanup(
                 server.CleanupRequest(
                     session_id="missing-token-session",
                     mode="light",
@@ -169,12 +173,12 @@ class PrivacyTokenFlowTests(unittest.TestCase):
                     consent_token="invalid-token",
                     allow_raw=False,
                 )
-            )
+            ))
         self.assertEqual(invalid_ctx.exception.status_code, 400)
         self.assertIn("Invalid or expired", invalid_ctx.exception.detail)
 
         with self.assertRaises(HTTPException) as missing_ctx:
-            server.translate(
+            asyncio.run(server.translate(
                 server.TranslateRequest(
                     session_id="missing-token-session",
                     source_text="hello world",
@@ -184,7 +188,7 @@ class PrivacyTokenFlowTests(unittest.TestCase):
                     consent_token=None,
                     allow_raw=False,
                 )
-            )
+            ))
         self.assertEqual(missing_ctx.exception.status_code, 400)
         self.assertIn("consent_token", missing_ctx.exception.detail)
 

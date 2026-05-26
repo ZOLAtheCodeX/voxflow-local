@@ -27,7 +27,7 @@ struct CockpitTopBarView: View {
     }
 
     private var modelPill: some View {
-        let model = state.ollamaAvailable ? "gemma4:e4b-mlx" : "regex fallback"
+        let model = state.backendReadiness.ollamaAvailable ? "gemma4:e4b-mlx" : "regex fallback"
         return pill(model, tint: VF.colorNeutral)
     }
 

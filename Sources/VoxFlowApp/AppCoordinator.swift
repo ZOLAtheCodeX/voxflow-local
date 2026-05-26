@@ -92,6 +92,13 @@ final class AppCoordinator: ObservableObject {
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
     private(set) lazy var translationWorkflow: TranslationWorkflowCoordinating = TranslationWorkflowCoordinator(state: state)
     private(set) lazy var promptWorkflow: PromptWorkflowCoordinating = PromptWorkflowCoordinator(state: state, textInsertion: textInsertion)
+    private(set) lazy var dictationWorkflow: DictationWorkflowCoordinating = DictationWorkflowCoordinator(
+        state: state,
+        textInsertion: textInsertion,
+        pushToSessionMemory: { [weak self] candidate in
+            self?.pushToSessionMemory(candidate)
+        }
+    )
 
     // Cockpit Layer 0 — long-form workspace + smart actions.
     // Constructed lazily so the autoSaveDirectory is resolved relative to
@@ -171,29 +178,29 @@ final class AppCoordinator: ObservableObject {
             await loadWhisperKitModel()
         }
 
-        let shouldPollBackend = state.backendShouldRun || state.backendWarmupInProgress
+        let shouldPollBackend = state.backendShouldRun || state.backendReadiness.warmupInProgress
         guard shouldPollBackend else {
             await refreshBackendReadiness()
             return
         }
 
         if state.backendShouldRun && !backendManager.isRunning {
-            state.backendProcessRunning = true
-            state.backendWarmupInProgress = true
-            state.backendReadyForDictation = false
-            state.backendReadinessIssue = nil
-            state.backendStatusSummary = "Backend starting — waiting for warmup"
-            state.backendActiveSTTModel = ""
+            state.backendReadiness.processRunning = true
+            state.backendReadiness.warmupInProgress = true
+            state.backendReadiness.readyForDictation = false
+            state.backendReadiness.readinessIssue = nil
+            state.backendReadiness.statusSummary = "Backend starting — waiting for warmup"
+            state.backendReadiness.activeSTTModel = ""
             backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
         }
 
         for attempt in 0..<24 {
             guard !Task.isCancelled else { return }
             await refreshBackendReadiness()
-            if state.backendReadyForDictation {
+            if state.backendReadiness.readyForDictation {
                 return
             }
-            if !state.backendShouldRun && !state.backendWarmupInProgress {
+            if !state.backendShouldRun && !state.backendReadiness.warmupInProgress {
                 return
             }
             let delay: UInt64 = attempt < 4 ? 2_000_000_000 : 5_000_000_000
@@ -212,10 +219,10 @@ final class AppCoordinator: ObservableObject {
         state.statusLine = "Loading WhisperKit model..."
         do {
             try await whisperKitService.load(modelFolder: modelFolder)
-            state.whisperKitReady = true
+            state.backendReadiness.whisperKitReady = true
             state.statusLine = "WhisperKit ready"
         } catch {
-            state.whisperKitReady = false
+            state.backendReadiness.whisperKitReady = false
             state.statusLine = "WhisperKit failed: \(error.localizedDescription)"
             log.error("WhisperKit load failed: \(error.localizedDescription)")
         }
@@ -242,7 +249,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func scheduleRuntimeWarmupIfNeeded() {
-        guard state.backendShouldRun || state.backendWarmupInProgress || (state.sttBackend == .whisperKit && !state.whisperKitReady) else {
+        guard state.backendShouldRun || state.backendReadiness.warmupInProgress || (state.sttBackend == .whisperKit && !state.backendReadiness.whisperKitReady) else {
             return
         }
         beginWarmupMonitoring()
@@ -251,24 +258,24 @@ final class AppCoordinator: ObservableObject {
     private func refreshBackendReadiness() async {
         let startupIssue = backendManager.lastStartupFailureReason
         let backendRunning = backendManager.isRunning
-        state.backendProcessRunning = backendRunning
+        state.backendReadiness.processRunning = backendRunning
 
-        if !backendRunning && !state.backendShouldRun && !state.backendWarmupInProgress {
-            state.backendReadyForDictation = false
-            state.backendReadinessIssue = nil
-            state.backendActiveSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
-            state.backendStatusSummary = "Backend idle — current workflow runs in app"
+        if !backendRunning && !state.backendShouldRun && !state.backendReadiness.warmupInProgress {
+            state.backendReadiness.readyForDictation = false
+            state.backendReadiness.readinessIssue = nil
+            state.backendReadiness.activeSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
+            state.backendReadiness.statusSummary = "Backend idle — current workflow runs in app"
             return
         }
 
         do {
             let readiness = try await BackendAPIClient.ready()
-            state.backendReadyForDictation = readiness.readyForDictation
-            state.backendWarmupInProgress = false
-            state.backendReadinessIssue = readiness.issues.first
-            state.backendActiveSTTModel = readiness.activeSttModel
-            state.ollamaAvailable = readiness.ollamaAvailable
-            state.backendStatusSummary = readiness.readyForDictation
+            state.backendReadiness.readyForDictation = readiness.readyForDictation
+            state.backendReadiness.warmupInProgress = false
+            state.backendReadiness.readinessIssue = readiness.issues.first
+            state.backendReadiness.activeSTTModel = readiness.activeSttModel
+            state.backendReadiness.ollamaAvailable = readiness.ollamaAvailable
+            state.backendReadiness.statusSummary = readiness.readyForDictation
                 ? "Backend ready (\(readiness.activeSttModel))"
                 : "Backend not ready: \(readiness.issues.first ?? "unknown issue")"
             if shouldSurfaceBackendStatusInStatusLine(),
@@ -277,26 +284,26 @@ final class AppCoordinator: ObservableObject {
                 state.statusLine = "Backend not ready: \(firstIssue)"
             }
         } catch {
-            state.backendReadyForDictation = false
-            state.backendActiveSTTModel = ""
+            state.backendReadiness.readyForDictation = false
+            state.backendReadiness.activeSTTModel = ""
             if let startupIssue {
-                state.backendWarmupInProgress = false
-                state.backendReadinessIssue = startupIssue
-                state.backendStatusSummary = "Backend startup issue: \(startupIssue)"
+                state.backendReadiness.warmupInProgress = false
+                state.backendReadiness.readinessIssue = startupIssue
+                state.backendReadiness.statusSummary = "Backend startup issue: \(startupIssue)"
                 if shouldSurfaceBackendStatusInStatusLine() {
                     state.statusLine = "Backend startup issue: \(startupIssue)"
                 }
-            } else if backendRunning || state.backendWarmupInProgress {
-                state.backendWarmupInProgress = true
-                state.backendReadinessIssue = nil
-                state.backendStatusSummary = "Backend starting — waiting for warmup"
+            } else if backendRunning || state.backendReadiness.warmupInProgress {
+                state.backendReadiness.warmupInProgress = true
+                state.backendReadiness.readinessIssue = nil
+                state.backendReadiness.statusSummary = "Backend starting — waiting for warmup"
                 if shouldSurfaceBackendStatusInStatusLine() {
                     state.statusLine = "Backend starting — wait for warmup"
                 }
             } else {
-                state.backendWarmupInProgress = false
-                state.backendReadinessIssue = "Backend offline"
-                state.backendStatusSummary = "Backend offline"
+                state.backendReadiness.warmupInProgress = false
+                state.backendReadiness.readinessIssue = "Backend offline"
+                state.backendReadiness.statusSummary = "Backend offline"
                 if shouldSurfaceBackendStatusInStatusLine() {
                     state.statusLine = "Backend offline. Start backend in Settings."
                 }
@@ -311,7 +318,7 @@ final class AppCoordinator: ObservableObject {
         if state.workflowNeedsBackend {
             return true
         }
-        return state.sttBackend != .whisperKit || !state.whisperKitReady
+        return state.sttBackend != .whisperKit || !state.backendReadiness.whisperKitReady
     }
 
     func configureHotkeysIfNeeded() {
@@ -392,8 +399,8 @@ final class AppCoordinator: ObservableObject {
 
         let canTranscribe = state.canUseSelectedSTTBackend
         if !canTranscribe {
-            let backendReady = state.backendReadyForDictation
-            let whisperReady = state.whisperKitReady
+            let backendReady = state.backendReadiness.readyForDictation
+            let whisperReady = state.backendReadiness.whisperKitReady
             log.warning("startCapture blocked: no STT backend ready (backend=\(backendReady), whisperKit=\(whisperReady))")
             state.statusLine = state.sttBackend == .whisperKit
                 ? "WhisperKit not ready — wait for model load"
@@ -402,7 +409,7 @@ final class AppCoordinator: ObservableObject {
         }
 
         // Some workflows still depend on backend services even when STT is local.
-        if state.workflowNeedsBackend && !state.backendReadyForDictation {
+        if state.workflowNeedsBackend && !state.backendReadiness.readyForDictation {
             let modeName = state.workflowMode.displayName
             log.warning("startCapture blocked: \(modeName) requires backend but backend not ready")
             state.statusLine = "\(modeName) requires backend — wait for model warmup"
@@ -952,11 +959,11 @@ final class AppCoordinator: ObservableObject {
     }
 
     func startBackend() {
-        state.backendProcessRunning = true
-        state.backendWarmupInProgress = true
-        state.backendReadyForDictation = false
-        state.backendReadinessIssue = nil
-        state.backendStatusSummary = "Backend starting — waiting for warmup"
+        state.backendReadiness.processRunning = true
+        state.backendReadiness.warmupInProgress = true
+        state.backendReadiness.readyForDictation = false
+        state.backendReadiness.readinessIssue = nil
+        state.backendReadiness.statusSummary = "Backend starting — waiting for warmup"
         backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
         beginWarmupMonitoring()
     }
@@ -964,12 +971,12 @@ final class AppCoordinator: ObservableObject {
     func stopBackend() {
         warmupTask?.cancel()
         backendManager.stopAsync()
-        state.backendProcessRunning = false
-        state.backendWarmupInProgress = false
-        state.backendReadyForDictation = false
-        state.backendActiveSTTModel = ""
-        state.backendReadinessIssue = "Backend stopped"
-        state.backendStatusSummary = "Backend stopped"
+        state.backendReadiness.processRunning = false
+        state.backendReadiness.warmupInProgress = false
+        state.backendReadiness.readyForDictation = false
+        state.backendReadiness.activeSTTModel = ""
+        state.backendReadiness.readinessIssue = "Backend stopped"
+        state.backendReadiness.statusSummary = "Backend stopped"
     }
 
     private func enableWorkflowModeIfNeeded(_ mode: WorkflowMode) {
@@ -1113,117 +1120,22 @@ final class AppCoordinator: ObservableObject {
             let effectiveTone = profile?.tone ?? self.state.toneStyle
             let effectiveInsert = profile?.insertBehavior ?? self.state.insertBehavior
 
-            // Auto-insert raw skips cleanup entirely
-            if effectiveInsert == .autoInsertRaw && providerMode == .localOnly {
-                let candidate = TranscriptCandidate(
-                    rawText: rawText, lightText: rawText,
-                    polishText: rawText, selectedMode: .raw,
-                    confidence: self.lastTranscriptionConfidence,
-                    timestamp: Date()
-                )
-                self.state.transcriptCandidate = candidate
-                self.pushToSessionMemory(candidate)
-                let appLabel = self.state.focusTarget.appName ?? "app"
-                let insertStarted = ContinuousClock.now
-                if await self.textInsertion.insertText(rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: self.capturedTargetApp) {
-                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=raw")
-                    self.state.sessionState = .idle
-                } else {
-                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=raw, result=fallback")
-                    self.state.sessionState = .review
-                }
-                return
-            }
-
-            // Local cleanup for WhisperKit — no backend needed
-            if providerMode == .localOnly && self.state.sttBackend == .whisperKit {
-                let lightStarted = ContinuousClock.now
-                let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: effectiveTone)
-                trace.recordStage("cleanup_light_local", startedAt: lightStarted, detail: "tone=\(effectiveTone.rawValue)")
-                let polishStarted = ContinuousClock.now
-                let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: effectiveTone)
-                trace.recordStage("cleanup_polish_local", startedAt: polishStarted, detail: "tone=\(effectiveTone.rawValue)")
-
-                let candidate = TranscriptCandidate(
-                    rawText: rawText, lightText: lightText,
-                    polishText: polishText, selectedMode: .raw,
-                    confidence: self.lastTranscriptionConfidence,
-                    timestamp: Date()
-                )
-                self.state.transcriptCandidate = candidate
-                self.state.selectedMode = .raw
-                self.pushToSessionMemory(candidate)
-
-                // Auto-insert light/polish
-                if let autoMode = effectiveInsert.cleanupMode {
-                    let text = candidate.text(for: autoMode)
-                    let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
-                    let appLabel = self.state.focusTarget.appName ?? "app"
-                    let insertStarted = ContinuousClock.now
-                    if await self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
-                        trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue)")
-                        self.state.sessionState = .idle
-                    } else {
-                        trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue), result=fallback")
-                        self.state.sessionState = .review
-                        self.state.statusLine = "Auto-insert failed — review and retry"
-                    }
-                    return
-                }
-
-                self.state.sessionState = .review
-                self.state.statusLine = "Review and insert"
-                return
-            }
-
-            let lightStarted = ContinuousClock.now
-            let lightText = try await BackendAPIClient.cleanup(
-                sessionID: sessionID, mode: .light, inputText: rawText,
-                toneStyle: effectiveTone, providerMode: providerMode,
-                consentToken: consentToken, allowRaw: allowRaw
-            ).outputText
-            trace.recordStage("cleanup_light_api", startedAt: lightStarted, detail: "tone=\(effectiveTone.rawValue), provider=\(providerMode.rawValue)")
-            let polishStarted = ContinuousClock.now
-            let polishText = try await BackendAPIClient.cleanup(
-                sessionID: sessionID, mode: .polish, inputText: rawText,
-                toneStyle: effectiveTone, providerMode: providerMode,
-                consentToken: consentToken, allowRaw: allowRaw
-            ).outputText
-            trace.recordStage("cleanup_polish_api", startedAt: polishStarted, detail: "tone=\(effectiveTone.rawValue), provider=\(providerMode.rawValue)")
-            // Private-API: default to .light so the redacted/cleaned version
-            // is shown first — .raw would expose the unredacted original.
-            let defaultMode: CleanupMode = providerMode == .privateAPI ? .light : .raw
-            let candidate = TranscriptCandidate(
-                rawText: rawText, lightText: lightText,
-                polishText: polishText, selectedMode: defaultMode,
-                confidence: self.lastTranscriptionConfidence,
-                timestamp: Date()
+            let request = DictationWorkflowRequest(
+                sessionID: sessionID,
+                rawText: rawText,
+                providerMode: providerMode,
+                consentToken: consentToken,
+                allowRaw: allowRaw,
+                toneStyle: effectiveTone,
+                insertBehavior: effectiveInsert,
+                sttBackend: self.state.sttBackend,
+                lastTranscriptionConfidence: self.lastTranscriptionConfidence,
+                targetApp: self.capturedTargetApp
             )
-            self.state.transcriptCandidate = candidate
-            self.state.selectedMode = defaultMode
-            if providerMode == .localOnly { self.pushToSessionMemory(candidate) }
 
-            // Auto-insert light/polish
-            if let autoMode = effectiveInsert.cleanupMode, providerMode == .localOnly {
-                let text = candidate.text(for: autoMode)
-                let toneLabel = effectiveTone != self.state.toneStyle ? ", \(effectiveTone.displayName)" : ""
-                let appLabel = self.state.focusTarget.appName ?? "app"
-                let insertStarted = ContinuousClock.now
-                if await self.textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: self.capturedTargetApp) {
-                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue)")
-                    self.state.sessionState = .idle
-                } else {
-                    trace.recordStage("insert", startedAt: insertStarted, detail: "mode=\(autoMode.rawValue), result=fallback")
-                    self.state.sessionState = .review
-                    self.state.statusLine = "Auto-insert failed — review and retry"
-                }
-                return
+            try await self.dictationWorkflow.processDictation(request) { name, startedAt, detail in
+                trace.recordStage(name, startedAt: startedAt, detail: detail)
             }
-
-            self.state.sessionState = .review
-            self.state.statusLine = providerMode == .privateAPI
-                ? (allowRaw ? "Private API cleanup complete" : "Private API cleanup complete (redacted)")
-                : "Review and insert"
         }
     }
 

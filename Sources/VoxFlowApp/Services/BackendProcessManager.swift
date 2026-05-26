@@ -39,7 +39,7 @@ final class BackendProcessManager: @unchecked Sendable {
     private var stderrPipe: Pipe?
     private var _lastStartupFailureReason: String?
     private var lastSpawnedPID: pid_t?
-    private var crashRestartCount: Int = 0
+    var crashRestartCount: Int = 0
     private var intentionalShutdown = false
     private static let maxCrashRestarts = 3
 
@@ -191,7 +191,7 @@ final class BackendProcessManager: @unchecked Sendable {
         }
     }
 
-    private func handleUnexpectedExit(statusCode: Int32, configuration: BackendLaunchConfiguration) {
+    func handleUnexpectedExit(statusCode: Int32, configuration: BackendLaunchConfiguration) {
         guard !self.intentionalShutdown else {
             log.info("Backend exited after intentional shutdown; not auto-restarting")
             return

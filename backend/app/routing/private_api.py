@@ -75,25 +75,32 @@ class PrivateAPIClient:
             "max_tokens": max_tokens,
         }
 
-        body = json.dumps(payload).encode("utf-8")
-        request = urlrequest.Request(
-            url=self._endpoint("/v1/chat/completions"),
-            data=body,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-        )
+        import concurrent.futures
+        import httpx
 
-        try:
-            with urlrequest.urlopen(request, timeout=20) as response:
-                response_body = response.read().decode("utf-8")
-        except urlerror.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise HTTPException(status_code=502, detail=f"Private API HTTP error: {detail[:160]}") from exc
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Private API request failed: {exc}") from exc
+        url = self._endpoint("/v1/chat/completions")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        def do_request() -> str:
+            with httpx.Client(timeout=20.0) as client:
+                response = client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                return response.text
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(do_request)
+            try:
+                response_body = future.result(timeout=20.0)
+            except concurrent.futures.TimeoutError as exc:
+                raise HTTPException(status_code=502, detail="Private API request timed out") from exc
+            except httpx.HTTPStatusError as exc:
+                detail = exc.response.text
+                raise HTTPException(status_code=502, detail=f"Private API HTTP error: {detail[:160]}") from exc
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"Private API request failed: {exc}") from exc
 
         try:
             parsed = json.loads(response_body)

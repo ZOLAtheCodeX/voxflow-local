@@ -168,7 +168,7 @@ struct SettingsView: View {
             }
             .task { await refreshOllamaStatus() }
 
-            if !state.ollamaAvailable && !state.ollamaNudgeDismissed {
+            if !state.backendReadiness.ollamaAvailable && !state.ollamaNudgeDismissed {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top) {
@@ -407,12 +407,12 @@ struct SettingsView: View {
                         Circle()
                             .fill(backendStatusColor)
                             .frame(width: 8, height: 8)
-                        Text(state.backendStatusSummary)
+                        Text(state.backendReadiness.statusSummary)
                             .font(VF.captionEmphasizedFont)
                             .foregroundStyle(backendStatusColor)
                     }
 
-                    if state.backendWarmupInProgress {
+                    if state.backendReadiness.warmupInProgress {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
@@ -422,13 +422,13 @@ struct SettingsView: View {
                         }
                     }
 
-                    if !state.backendActiveSTTModel.isEmpty {
-                        Text("Active STT path: \(state.backendActiveSTTModel)")
+                    if !state.backendReadiness.activeSTTModel.isEmpty {
+                        Text("Active STT path: \(state.backendReadiness.activeSTTModel)")
                             .font(VF.captionFont)
                             .foregroundStyle(.secondary)
                     }
 
-                    if let issue = state.backendReadinessIssue, !issue.isEmpty {
+                    if let issue = state.backendReadiness.readinessIssue, !issue.isEmpty {
                         Text("Issue: \(issue)")
                             .font(VF.captionFont)
                             .foregroundStyle(.secondary)
@@ -540,13 +540,13 @@ struct SettingsView: View {
     }
 
     private var backendStatusColor: Color {
-        if !state.backendShouldRun && !state.backendProcessRunning && !state.backendWarmupInProgress {
+        if !state.backendShouldRun && !state.backendReadiness.processRunning && !state.backendReadiness.warmupInProgress {
             return VF.colorNeutral
         }
-        if state.backendReadyForDictation {
+        if state.backendReadiness.readyForDictation {
             return VF.colorSuccess
         }
-        if state.backendWarmupInProgress {
+        if state.backendReadiness.warmupInProgress {
             return VF.colorWarning
         }
         return VF.colorError

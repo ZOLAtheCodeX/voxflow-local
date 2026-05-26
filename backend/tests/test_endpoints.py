@@ -323,3 +323,43 @@ class TestTranscribeChunking:
         assert isinstance(data["stage_timings_ms"], dict)
         assert "request_decode" in data["stage_timings_ms"]
         assert isinstance(data["cold_start"], bool)
+
+
+class TestConcurrencySemaphore:
+    @pytest.mark.anyio
+    async def test_concurrency_semaphore_saturate(self, client: httpx.AsyncClient):
+        import asyncio
+        from unittest.mock import patch
+        import time
+
+        def mock_cleanup(*args, **kwargs):
+            time.sleep(0.5)
+            from routing import ResolvedProviderInput
+            resolved = ResolvedProviderInput(
+                provider_mode="localOnly",
+                effective_text="text",
+                redacted=False,
+            )
+            return "cleaned_text", False, resolved
+
+        with patch.object(server.provider_router, "cleanup", side_effect=mock_cleanup):
+            tasks = [
+                client.post("/v1/cleanup", json={
+                    "session_id": f"session-sem-{i}",
+                    "mode": "light",
+                    "input_text": f"text-{i}",
+                    "tone_style": "neutral",
+                    "provider_mode": "localOnly",
+                    "consent_token": None,
+                    "allow_raw": False,
+                })
+                for i in range(3)
+            ]
+            
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            status_codes = [r.status_code for r in responses if not isinstance(r, Exception)]
+            assert 503 in status_codes
+            assert 200 in status_codes
+            assert status_codes.count(503) == 1
+            assert status_codes.count(200) == 2

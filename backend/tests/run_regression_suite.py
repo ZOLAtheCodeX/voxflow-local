@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import json
 import os
@@ -177,7 +178,7 @@ def run_stt_checks(manifest: dict[str, Any], clips_root: Path, backends: list[st
                     chunk_index=run_index,
                 )
                 started = time.perf_counter()
-                response = server.transcribe(request)
+                response = asyncio.run(server.transcribe(request))
                 elapsed_ms = (time.perf_counter() - started) * 1000.0
                 measured_latency = max(float(response.latency_ms), elapsed_ms)
                 backend_latencies[backend].append(measured_latency)
@@ -278,7 +279,7 @@ def run_cleanup_checks(manifest: dict[str, Any]) -> list[CheckResult]:
                 tone_style=tone,
                 provider_mode="localOnly",
             )
-            response = server.cleanup(request)
+            response = asyncio.run(server.cleanup(request))
             error = validate_cleanup_output(case_id, mode, source_text, response.output_text, constraints)
             test_id = f"{case_id}:{mode}"
             if error:
