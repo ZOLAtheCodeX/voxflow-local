@@ -1,7 +1,6 @@
-"""Unit tests for TextLLMBackend implementations (FLAN-T5, Ollama, selector).
+"""Unit tests for TextLLMBackend implementations and Ollama admin helpers.
 
-Mocks live network I/O — these tests never touch the real Ollama server or
-the FLAN-T5 model.
+Mocks live network I/O — these tests never touch a real Ollama server.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import pytest
 
 from engines.llm_backend import (
-    FlanT5Backend,
     OllamaBackend,
     TextLLMBackend,
     probe_ollama_available,
@@ -243,11 +241,6 @@ class TestSelectBackend:
         assert isinstance(backend, OllamaBackend)
         assert backend.name == "ollama"
 
-    def test_explicit_flan_t5(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "flan_t5")
-        backend = select_backend()
-        assert isinstance(backend, FlanT5Backend)
-
     def test_unknown_value_falls_back_to_ollama(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -256,9 +249,18 @@ class TestSelectBackend:
         assert isinstance(backend, OllamaBackend)
 
     def test_case_insensitive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "FLAN_T5")
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "OLLAMA")
         backend = select_backend()
-        assert isinstance(backend, FlanT5Backend)
+        assert isinstance(backend, OllamaBackend)
+
+    def test_legacy_flan_t5_value_falls_back_to_ollama(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Existing user configs that still set flan_t5 should not crash;
+        # they get ollama instead with a warning logged.
+        monkeypatch.setenv("VOXFLOW_POLISH_BACKEND", "flan_t5")
+        backend = select_backend()
+        assert isinstance(backend, OllamaBackend)
 
 
 class TestRecommendOllamaModel:
@@ -395,16 +397,10 @@ class TestProbeOllamaAvailable:
 
 
 class TestProtocolConformance:
-    """Sanity-check that both concrete backends satisfy the duck-typed Protocol."""
+    """Sanity-check the concrete backend satisfies the duck-typed Protocol."""
 
     def test_ollama_backend_has_polish(self) -> None:
         backend: TextLLMBackend = OllamaBackend()
         assert hasattr(backend, "polish")
         assert callable(backend.polish)
         assert backend.name == "ollama"
-
-    def test_flan_t5_backend_has_polish(self) -> None:
-        backend: TextLLMBackend = FlanT5Backend()
-        assert hasattr(backend, "polish")
-        assert callable(backend.polish)
-        assert backend.name == "flan_t5"

@@ -6,9 +6,8 @@ the async bridge will be introduced — uniformly for *all* engines, not pieceme
 inside one Protocol. Until then PolishEngine keeps the existing sync contract
 expected by `provider.cleanup` and the FastAPI route handler.
 
-Selector: ``VOXFLOW_POLISH_BACKEND`` env var
-  - ``flan_t5`` (default in 3.1, removed in 3.5)
-  - ``ollama`` (default after 3.4)
+Selector: ``VOXFLOW_POLISH_BACKEND`` env var — only ``ollama`` is recognised.
+Any other value is logged as a warning and falls back to ollama.
 
 PolishEngine wraps the backend with its existing guardrail + echo detection
 + ``apply_tone(light_cleanup())`` fallback. Backends therefore only need to
@@ -53,70 +52,6 @@ _TONE_INSTRUCTIONS = {
 
 def _tone_instruction(tone: str) -> str:
     return _TONE_INSTRUCTIONS.get(tone.lower(), _TONE_INSTRUCTIONS["neutral"])
-
-
-class FlanT5Backend:
-    """Wraps the existing FLAN-T5 text2text-generation pipeline.
-
-    This backend exists so the model swap is a Protocol-level concern. The
-    FLAN-T5 path is scheduled for full removal in 3.5; until then it remains
-    the default so the rollout is risk-bounded.
-    """
-
-    name = "flan_t5"
-
-    def __init__(self) -> None:
-        from ._utils import preferred_torch_device, resolve_model_ref
-
-        model_ref = os.environ.get("VOXFLOW_POLISH_MODEL", "google/flan-t5-small")
-        self.model_id = resolve_model_ref(model_ref)
-        self._device = preferred_torch_device()
-        self._pipeline = None
-        self._load_failed = False
-
-    def _load_pipeline(self) -> None:
-        if self._pipeline is not None or self._load_failed:
-            return
-        try:
-            from transformers import pipeline
-
-            self._pipeline = pipeline(
-                task="text2text-generation",
-                model=self.model_id,
-                device=self._device,
-            )
-            logger.info("Loaded polish model: %s", self.model_id)
-        except Exception as exc:
-            logger.error("Failed to load polish model %s: %s", self.model_id, exc)
-            self._load_failed = True
-
-    def retry_load(self) -> None:
-        self._load_failed = False
-        self._load_pipeline()
-
-    @property
-    def loaded(self) -> bool:
-        return self._pipeline is not None
-
-    def polish(self, text: str, tone: str) -> str:
-        self._load_pipeline()
-        if not self._pipeline:
-            return ""
-
-        tone_instruction = _tone_instruction(tone)
-        prompt = (
-            f"Rewrite this spoken transcript as clean written text. "
-            f"Do not add new information. {tone_instruction} "
-            f"Transcript: {text}"
-        )
-        word_count = len(text.split())
-        max_tokens = min(200, max(60, word_count * 3))
-        try:
-            result = self._pipeline(prompt, max_new_tokens=max_tokens)[0]["generated_text"].strip()
-            return result
-        except Exception as exc:
-            logger.error("FLAN-T5 polish inference failed: %s", exc)
-            return ""
 
 
 _OLLAMA_SYSTEM_PROMPT_BASE = (
@@ -244,23 +179,25 @@ def reset_ollama_probe_cache() -> None:
 
 
 def select_backend() -> TextLLMBackend:
-    """Construct the backend selected by ``VOXFLOW_POLISH_BACKEND``.
+    """Construct the polish backend.
 
-    Default flipped to ``ollama`` after Phase 3.4 validation. When Ollama
-    is unreachable the OllamaBackend collapses to an empty string and
-    PolishEngine falls back to ``apply_tone(light_cleanup())`` — so the
-    new default is safe even on machines without Ollama installed.
+    Ollama is the only backend after Phase 3.5. When Ollama is unreachable
+    the OllamaBackend collapses to an empty string and PolishEngine falls
+    back to ``apply_tone(light_cleanup())`` — so the default is safe even
+    on machines without Ollama installed; the regex pipeline is the
+    documented guardrail-fallback.
 
-    ``flan_t5`` is still selectable until 3.5 deletes the backend class.
+    ``VOXFLOW_POLISH_BACKEND`` env var is read for forward compatibility;
+    today only ``ollama`` is recognised, any other value logs a warning
+    and still returns ``OllamaBackend()``.
     """
     choice = os.environ.get("VOXFLOW_POLISH_BACKEND", "ollama").strip().lower()
-    if choice == "ollama":
-        return OllamaBackend()
-    if choice == "flan_t5":
-        return FlanT5Backend()
-    logger.warning(
-        "Unknown VOXFLOW_POLISH_BACKEND=%r; falling back to ollama", choice
-    )
+    if choice and choice != "ollama":
+        logger.warning(
+            "Unknown VOXFLOW_POLISH_BACKEND=%r; only 'ollama' is supported "
+            "post-3.5 — using ollama.",
+            choice,
+        )
     return OllamaBackend()
 
 

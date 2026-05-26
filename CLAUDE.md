@@ -2,7 +2,7 @@
 
 ## Overview
 
-VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Python FastAPI backend with on-device ML inference (WhisperKit, Whisper-Small, FLAN-T5-Small).
+VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Python FastAPI backend with on-device ML inference (WhisperKit, Whisper-Small, and Gemma 4 via local Ollama for text polish).
 
 ## Architecture
 

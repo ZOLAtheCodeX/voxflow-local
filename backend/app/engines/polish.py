@@ -1,13 +1,13 @@
 """PolishEngine — pluggable text-LLM polish + tone application.
 
-Wraps a ``TextLLMBackend`` (FLAN-T5 today, Ollama after Phase 3.4) with:
+Wraps a ``TextLLMBackend`` (today: Ollama / Gemma 4) with:
   - the guardrail / echo / similarity / length-ratio rules
   - the ``apply_tone(light_cleanup(text), tone)`` regex fallback floor
 
 Callers always get usable output: backend declined (empty string) → fallback;
 backend returned a degenerate candidate → guardrail fires → fallback.
 
-Backend choice is driven by ``VOXFLOW_POLISH_BACKEND`` (see ``llm_backend.py``).
+Backend construction is driven by ``select_backend()`` in ``llm_backend.py``.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from threading import Lock
 
 from nlp import apply_tone, light_cleanup
 
-from .llm_backend import FlanT5Backend, TextLLMBackend, select_backend
+from .llm_backend import TextLLMBackend, select_backend
 
 logger = logging.getLogger("voxflow")
 

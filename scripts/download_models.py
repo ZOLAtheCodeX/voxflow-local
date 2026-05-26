@@ -13,8 +13,11 @@ def main() -> None:
     parser.add_argument("--cache-dir", default="./models", help="Local cache directory for model snapshots")
     parser.add_argument("--stt-model", default="openai/whisper-small")
     parser.add_argument("--whisper-model", default="openai/whisper-small")
-    parser.add_argument("--polish-model", default="google/flan-t5-small")
     parser.add_argument("--translate-model", default="google/translategemma-4b-it")
+    # Polish model was FLAN-T5-Small until Phase 3.5. Polish now flows
+    # through Ollama (gemma4:*) and isn't downloaded via huggingface_hub
+    # — see scripts/measure_polish_latency.py + 'ollama pull' guidance
+    # in the README.
     parser.add_argument(
         "--skip-translate",
         action="store_true",
@@ -25,7 +28,7 @@ def main() -> None:
     cache_dir = Path(args.cache_dir).resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    model_ids = [args.stt_model, args.whisper_model, args.polish_model]
+    model_ids = [args.stt_model, args.whisper_model]
     if not args.skip_translate:
         model_ids.append(args.translate_model)
 
