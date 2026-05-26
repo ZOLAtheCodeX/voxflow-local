@@ -44,6 +44,14 @@ final class LongFormSessionService: ObservableObject {
     // MARK: - Lifecycle
 
     func start(targetApp: FocusTargetSnapshot? = nil) {
+        // Only legal transition from idle. Starting while recording would
+        // leak the prior auto-save Task; starting while reviewing would
+        // silently destroy the ready-to-insert transcript. Both are user-
+        // surprise bugs that the documented state machine excludes.
+        guard case .idle = state else {
+            log.warning("start() ignored: already in state \(String(describing: self.state))")
+            return
+        }
         let session = LongFormSession(targetApp: targetApp)
         currentSession = session
         state = .recording(startedAt: clock.currentTime())
@@ -78,10 +86,13 @@ final class LongFormSessionService: ObservableObject {
     }
 
     /// Directly overwrite the current session's transcript — used by undo.
-    /// No-op when no session is active.
+    /// No-op when no session is active. Persists immediately so a crash
+    /// after undo can't restore the post-action transcript from disk.
     func setTranscript(_ text: String) {
+        guard currentSession != nil else { return }
         currentSession?.transcript = text
         currentSession?.updatedAt = clock.currentTime()
+        save()
     }
 
     func recordAppliedAction(_ applied: AppliedAction) {

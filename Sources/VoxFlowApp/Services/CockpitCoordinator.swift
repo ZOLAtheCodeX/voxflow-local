@@ -58,6 +58,7 @@ final class CockpitCoordinator: ObservableObject {
     func applyAction(_ action: SmartActionId, to transcript: String) async throws -> SmartActionResult {
         let result = try await actionService.apply(action, to: transcript)
         state.chipInvocationCounts[action, default: 0] += 1
+        state.persistChipInvocationCounts()
         promoteIfNeeded(action)
         // Mirror SmartActionService's undo-stack filter on the session
         // history: guardrail trips and unchanged echoes aren't real
@@ -155,6 +156,7 @@ final class CockpitCoordinator: ObservableObject {
         let count = state.chipInvocationCounts[action] ?? 0
         if count >= Self.promotionThreshold {
             state.chipMRU.append(action)
+            state.persistChipMRU()
         }
     }
 
@@ -166,5 +168,6 @@ final class CockpitCoordinator: ObservableObject {
         // Preserve any default-set actions that haven't been used yet.
         let extras = state.chipMRU.filter { !known.contains($0) }
         state.chipMRU = Array((sorted + extras).prefix(6))
+        state.persistChipMRU()
     }
 }

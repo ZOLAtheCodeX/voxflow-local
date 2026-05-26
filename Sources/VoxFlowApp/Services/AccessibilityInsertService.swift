@@ -35,18 +35,28 @@ final class AccessibilityInsertService {
         )
     }
 
+    /// Convenience overload that explicitly captures the frontmost app at
+    /// call time. Use this only when there is no frozen target snapshot to
+    /// thread through — the cockpit and dictation paths both have one and
+    /// must pass it via ``insert(text:targetApp:)`` so AX targets the
+    /// intended app and not the cockpit / menu-bar panel.
     func insert(text: String) async -> InsertResult {
-        await insert(text: text, targetApp: nil)
+        await insert(text: text, targetApp: NSWorkspace.shared.frontmostApplication)
     }
 
     func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
-        let effectiveTarget = targetApp ?? NSWorkspace.shared.frontmostApplication
-
+        // No ``?? NSWorkspace.shared.frontmostApplication`` fallback here —
+        // callers must commit to a target. The frozen snapshot is the
+        // source of truth for "where the user was typing"; resolving
+        // frontmost at insert time is the bug the cockpit (and dictation
+        // path) explicitly freeze against. The parameterless overload
+        // above keeps the legacy "use frontmost" behaviour available, but
+        // makes the choice explicit at the call site.
         if insertDirectly(text: text) {
             return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
         }
 
-        if await simulatePaste(text: text, targetApp: effectiveTarget) {
+        if await simulatePaste(text: text, targetApp: targetApp) {
             return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
         }
 

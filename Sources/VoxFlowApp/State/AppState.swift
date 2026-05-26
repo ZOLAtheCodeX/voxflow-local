@@ -51,14 +51,7 @@ final class AppState: ObservableObject {
     @Published var privacyPreview: PrivacyPreview?
     @Published var launchedAt: Date = Date()
     @Published var captureCount = 0
-    @Published var backendReadyForDictation = false
-    @Published var backendProcessRunning = false
-    @Published var backendWarmupInProgress = false
-    @Published var whisperKitReady = false
-    @Published var backendReadinessIssue: String?
-    @Published var backendStatusSummary: String = "Backend not checked"
-    @Published var backendActiveSTTModel: String = ""
-    @Published var ollamaAvailable: Bool = false
+    @Published var backendReadiness = BackendReadinessState()
     @Published var ollamaNudgeDismissed: Bool = UserDefaults.standard.bool(forKey: "VoxFlow.ollamaNudgeDismissed")
 
     // MARK: - Cockpit Layer 0
@@ -67,8 +60,10 @@ final class AppState: ObservableObject {
     /// Visible chip order; defaults to the three Layer-0-shipping actions.
     /// MRU + promotion logic in CockpitCoordinator mutates this after 30+
     /// total invocations or when an unpromoted action hits the threshold.
-    @Published var chipMRU: [SmartActionId] = [.memo, .mece, .items]
-    @Published var chipInvocationCounts: [SmartActionId: Int] = [:]
+    /// Persisted across launches via UserDefaults — chip promotions the
+    /// user earned should survive quit + reopen.
+    @Published var chipMRU: [SmartActionId] = AppState.loadChipMRU()
+    @Published var chipInvocationCounts: [SmartActionId: Int] = AppState.loadChipInvocationCounts()
     @Published var totalCaptureCount: Int = UserDefaults.standard.integer(forKey: "VoxFlow.totalCaptureCount")
     @Published var voicePromptStripDismissed: Bool = UserDefaults.standard.bool(forKey: "VoxFlow.voicePromptStripDismissed")
     @Published var localCaptureCount = 0
@@ -143,7 +138,7 @@ final class AppState: ObservableObject {
     }
 
     var canUseSelectedSTTBackend: Bool {
-        backendReadyForDictation || (sttBackend == .whisperKit && whisperKitReady)
+        backendReadiness.readyForDictation || (sttBackend == .whisperKit && backendReadiness.whisperKitReady)
     }
 
     var workflowNeedsBackend: Bool {
@@ -167,13 +162,13 @@ final class AppState: ObservableObject {
     }
 
     var backendStatusColorName: String {
-        if !backendShouldRun && !backendProcessRunning && !backendWarmupInProgress {
+        if !backendShouldRun && !backendReadiness.processRunning && !backendReadiness.warmupInProgress {
             return "secondary"
         }
-        if backendReadyForDictation {
+        if backendReadiness.readyForDictation {
             return "green"
         }
-        if backendWarmupInProgress {
+        if backendReadiness.warmupInProgress {
             return "orange"
         }
         return "red"
@@ -271,5 +266,41 @@ final class AppState: ObservableObject {
         workflowCaptureCounts = [:]
         benchmarkHistoryByProfile = [:]
         lastPipelineTrace = nil
+    }
+
+    // MARK: - Cockpit MRU persistence (UserDefaults)
+
+    static let chipMRUKey = "VoxFlow.cockpit.chipMRU"
+    static let chipInvocationCountsKey = "VoxFlow.cockpit.chipInvocationCounts"
+    private static let defaultChipMRU: [SmartActionId] = [.memo, .mece, .items]
+
+    static func loadChipMRU() -> [SmartActionId] {
+        guard let raw = UserDefaults.standard.array(forKey: chipMRUKey) as? [String] else {
+            return defaultChipMRU
+        }
+        let parsed = raw.compactMap(SmartActionId.init(rawValue:))
+        return parsed.isEmpty ? defaultChipMRU : parsed
+    }
+
+    static func loadChipInvocationCounts() -> [SmartActionId: Int] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: chipInvocationCountsKey) as? [String: Int] else {
+            return [:]
+        }
+        var result: [SmartActionId: Int] = [:]
+        for (key, value) in raw {
+            if let id = SmartActionId(rawValue: key) {
+                result[id] = value
+            }
+        }
+        return result
+    }
+
+    func persistChipMRU() {
+        UserDefaults.standard.set(chipMRU.map(\.rawValue), forKey: Self.chipMRUKey)
+    }
+
+    func persistChipInvocationCounts() {
+        let dict = Dictionary(uniqueKeysWithValues: chipInvocationCounts.map { ($0.key.rawValue, $0.value) })
+        UserDefaults.standard.set(dict, forKey: Self.chipInvocationCountsKey)
     }
 }

@@ -173,6 +173,13 @@ _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX_REQUESTS = 120
 _LAST_CLEANUP_TIME = 0.0
 _CLEANUP_INTERVAL = 300.0  # 5 minutes
+# Short critical section around the read-modify-write of
+# ``_rate_limit_timestamps``. Under single-worker async uvicorn the GIL
+# already serializes the non-await spans, but the lock makes the invariant
+# explicit and survives moves to multi-worker or to a future stdlib that
+# preempts at instruction boundaries. CLAUDE.md "Do Not" cites this lock by
+# name — don't remove it without updating the docs too.
+_RATE_LIMIT_LOCK = Lock()
 
 
 @app.middleware("http")
@@ -181,27 +188,28 @@ async def rate_limit_middleware(request: Request, call_next):  # type: ignore[no
     client = request.client.host if request.client else "unknown"
     now = time.time()
 
-    # Periodic cleanup of stale clients (every 5 minutes)
-    if now - _LAST_CLEANUP_TIME > _CLEANUP_INTERVAL:
-        stale_cutoff = now - _RATE_LIMIT_WINDOW
-        # Create a list of keys to remove to avoid modifying dict during iteration
-        stale_clients = [
-            ip for ip, timestamps in _rate_limit_timestamps.items()
-            if not timestamps or timestamps[-1] < stale_cutoff
-        ]
-        for ip in stale_clients:
-            _rate_limit_timestamps.pop(ip, None)
-        _LAST_CLEANUP_TIME = now
+    with _RATE_LIMIT_LOCK:
+        # Periodic cleanup of stale clients (every 5 minutes)
+        if now - _LAST_CLEANUP_TIME > _CLEANUP_INTERVAL:
+            stale_cutoff = now - _RATE_LIMIT_WINDOW
+            # Create a list of keys to remove to avoid modifying dict during iteration
+            stale_clients = [
+                ip for ip, timestamps in _rate_limit_timestamps.items()
+                if not timestamps or timestamps[-1] < stale_cutoff
+            ]
+            for ip in stale_clients:
+                _rate_limit_timestamps.pop(ip, None)
+            _LAST_CLEANUP_TIME = now
 
-    timestamps = _rate_limit_timestamps[client]
-    # Filter only current client's timestamps
-    valid_timestamps = [ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW]
-    _rate_limit_timestamps[client] = valid_timestamps
+        timestamps = _rate_limit_timestamps[client]
+        # Filter only current client's timestamps
+        valid_timestamps = [ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW]
+        _rate_limit_timestamps[client] = valid_timestamps
 
-    if len(valid_timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
-        return JSONResponse(status_code=429, content={"detail": "Rate limited"})
+        if len(valid_timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
+            return JSONResponse(status_code=429, content={"detail": "Rate limited"})
 
-    valid_timestamps.append(now)
+        valid_timestamps.append(now)
     return await call_next(request)
 state = RuntimeState()
 whisper_engine = WhisperEngine()

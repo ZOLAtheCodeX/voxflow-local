@@ -4,6 +4,15 @@ import XCTest
 @MainActor
 final class CockpitCoordinatorTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        // Clear chip-MRU UserDefaults so persistence from prior runs doesn't
+        // bleed into invocation counts / promotion thresholds. AppState reads
+        // these defaults at construction time.
+        UserDefaults.standard.removeObject(forKey: AppState.chipMRUKey)
+        UserDefaults.standard.removeObject(forKey: AppState.chipInvocationCountsKey)
+    }
+
     // MARK: - Visibility
 
     func test_open_sets_cockpitVisible_true() {
