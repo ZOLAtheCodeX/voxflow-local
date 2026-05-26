@@ -48,12 +48,27 @@ class PolishEngine:
             with self._lock:
                 retry()
 
-    def polish(self, text: str, tone: str) -> tuple[str, bool]:
+    def polish(
+        self,
+        text: str,
+        tone: str,
+        system_prompt: str | None = None,
+    ) -> tuple[str, bool]:
+        """Polish ``text`` through the configured backend.
+
+        When ``system_prompt`` is supplied (e.g. from SmartActionEngine for
+        memo / MECE / steel-man transformations), it overrides the backend's
+        default polish prompt. The guardrail + echo + fallback rules still
+        apply uniformly.
+        """
         if not text.strip():
             return "", False
 
         try:
-            candidate = self._backend.polish(text, tone)
+            if system_prompt is not None:
+                candidate = self._backend.polish(text, tone, system_prompt=system_prompt)
+            else:
+                candidate = self._backend.polish(text, tone)
         except Exception as exc:
             logger.error("Polish backend %s raised: %s", self.backend_name, exc)
             candidate = ""

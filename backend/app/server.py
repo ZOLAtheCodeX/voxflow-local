@@ -92,6 +92,8 @@ from schemas import (
     PromptFrameRequest,
     PromptFrameResponse,
     ReadyResponse,
+    SmartActionRequest,
+    SmartActionResponse,
     TranscribeRequest,
     TranscribeResponse,
     TranslateRequest,
@@ -218,6 +220,12 @@ provider_router = ProviderRouter(
     consent_store=consent_store,
     prompt_framing_engine=prompt_framing_engine,
 )
+
+# Cockpit Layer 0: smart-action engine wraps the polish backend with
+# action-specific system prompts (memo / MECE / steel-man / etc.).
+from smart_actions import SmartActionEngine  # noqa: E402
+
+smart_action_engine = SmartActionEngine(polish_backend=polish_engine)
 
 def resolve_effective_text(
     *,
@@ -469,6 +477,28 @@ def meeting_summarize(payload: MeetingRequest) -> MeetingSummaryResponse:
         ),
         markdown_export=str(structured.get("markdown_export", "")).strip(),
         notion_export=str(structured.get("notion_export", "")).strip(),
+    )
+
+
+@app.post("/v1/smart_action", response_model=SmartActionResponse)
+def smart_action(payload: SmartActionRequest) -> SmartActionResponse:
+    """Cockpit Layer 0 — apply a smart action to a captured transcript.
+
+    Routes to ``SmartActionEngine`` which builds an action-specific system
+    prompt (memo / MECE / steel-man / Pyramid / action items / disclaimer)
+    and delegates to the polish backend. Guardrail decisions still live
+    in ``PolishEngine`` so degenerate output falls back to
+    ``apply_tone(light_cleanup())`` uniformly.
+    """
+    result = smart_action_engine.apply(
+        action_id=payload.action_id,
+        transcript=payload.transcript,
+    )
+    return SmartActionResponse(
+        action_id=result.action_id,
+        output=result.output,
+        guardrail_triggered=result.guardrail_triggered,
+        error=result.error,
     )
 
 

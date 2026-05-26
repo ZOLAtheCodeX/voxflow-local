@@ -38,7 +38,12 @@ class TextLLMBackend(Protocol):
 
     name: str
 
-    def polish(self, text: str, tone: str) -> str:  # pragma: no cover - Protocol
+    def polish(
+        self,
+        text: str,
+        tone: str,
+        system_prompt: str | None = None,
+    ) -> str:  # pragma: no cover - Protocol
         ...
 
 
@@ -89,14 +94,25 @@ class OllamaBackend:
         self.model = model or os.environ.get("VOXFLOW_OLLAMA_MODEL", "gemma4:e4b-mlx")
         self.timeout = timeout
 
-    def polish(self, text: str, tone: str) -> str:
+    def polish(
+        self,
+        text: str,
+        tone: str,
+        system_prompt: str | None = None,
+    ) -> str:
         if not text.strip():
             return ""
 
         # Per-tone constraint goes in the SYSTEM role, not user role, so the
         # model treats tone as a stable constraint rather than a re-negotiable
         # request alongside the transcript itself.
-        system_prompt = f"{_OLLAMA_SYSTEM_PROMPT_BASE} {_tone_instruction(tone)}"
+        #
+        # SmartActionEngine (Cockpit Layer 0, Task 3) overrides the system
+        # prompt with an action-specific instruction (memo / MECE / steel-man).
+        # Tone is fixed to "neutral" by that caller, so the tone-instruction
+        # append is a no-op in that case.
+        if system_prompt is None:
+            system_prompt = f"{_OLLAMA_SYSTEM_PROMPT_BASE} {_tone_instruction(tone)}"
         payload = {
             "model": self.model,
             "messages": [

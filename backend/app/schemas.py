@@ -129,6 +129,18 @@ class PrivacyPreviewResponse(BaseModel):
     redacted_text: str
 
 
+class SmartActionRequest(BaseModel):
+    action_id: str = Field(min_length=1, max_length=32)
+    transcript: str = Field(min_length=1, max_length=50_000)
+
+
+class SmartActionResponse(BaseModel):
+    action_id: str
+    output: str
+    guardrail_triggered: bool
+    error: str | None = None
+
+
 class OllamaModelInfo(BaseModel):
     name: str
     size: int = 0
