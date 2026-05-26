@@ -77,7 +77,7 @@ struct SettingsView: View {
                 }
 
                 Text("Hotkey changes apply immediately. Avoid combinations reserved by macOS or other apps.")
-                    .font(.system(size: 11))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -114,7 +114,7 @@ struct SettingsView: View {
                         .buttonStyle(.borderedProminent)
 
                         Text("Private API calls always require per-request privacy preview and approval.")
-                            .font(.system(size: 11))
+                            .font(VF.captionFont)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.top, 4)
@@ -126,13 +126,13 @@ struct SettingsView: View {
                 if let status = ollamaStatus {
                     if !status.models.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Installed models").font(.system(size: 11, weight: .semibold))
+                            Text("Installed models").font(VF.captionEmphasizedFont)
                             ForEach(status.models) { model in
                                 HStack {
-                                    Text(model.name).font(.system(size: 11))
+                                    Text(model.name).font(VF.captionFont)
                                     Spacer()
                                     Text(formatBytes(model.size))
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .font(VF.monoCaptionFont)
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -142,7 +142,7 @@ struct SettingsView: View {
                        !status.models.contains(where: { $0.name == recommended }) {
                         HStack {
                             Text("Recommended: \(recommended)")
-                                .font(.system(size: 11))
+                                .font(VF.captionFont)
                             Spacer()
                             Button(ollamaPullActive ? "Pulling…" : "Pull Model") {
                                 pullModel(recommended)
@@ -151,18 +151,18 @@ struct SettingsView: View {
                         }
                         if let progress = ollamaPullProgress {
                             Text(progress)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(VF.monoMicroFont)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
                     Text("Host memory: \(String(format: "%.1f", status.hostMemoryGb)) GB")
-                        .font(.system(size: 10))
+                        .font(VF.microFont)
                         .foregroundStyle(.secondary)
                 }
                 if let error = ollamaLoadError {
                     Text(error)
-                        .font(.system(size: 11))
+                        .font(VF.captionFont)
                         .foregroundStyle(.orange)
                 }
             }
@@ -176,9 +176,9 @@ struct SettingsView: View {
                                 .foregroundStyle(.blue)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Ollama not detected")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(VF.labelFont)
                                 Text("Install Ollama and pull a Gemma 4 model for higher-quality polish. The dictation flow keeps working without it.")
-                                    .font(.system(size: 11))
+                                    .font(VF.captionFont)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -188,7 +188,7 @@ struct SettingsView: View {
                                 UserDefaults.standard.set(true, forKey: "VoxFlow.ollamaNudgeDismissed")
                             }
                             .buttonStyle(.borderless)
-                            .font(.system(size: 11))
+                            .font(VF.captionFont)
                         }
                     }
                     .padding(.vertical, 4)
@@ -209,7 +209,7 @@ struct SettingsView: View {
                 }
 
                 Text(sttBackendNote)
-                    .font(.system(size: 11))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -263,17 +263,17 @@ struct SettingsView: View {
                 }
 
                 Text(insertBehaviorNote)
-                    .font(.system(size: 11))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
 
                 Divider()
 
                 Text("App Profiles")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(VF.labelFont)
 
                 if state.appProfiles.isEmpty {
                     Text("No custom overrides. Apps use your selected settings or built-in defaults (Slack → Concise, Mail → Formal, etc).")
-                        .font(.system(size: 11))
+                        .font(VF.captionFont)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(Array(state.appProfiles.keys.sorted()), id: \.self) { bundleID in
@@ -281,7 +281,7 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     Text(bundleID.components(separatedBy: ".").last ?? bundleID)
-                                        .font(.system(size: 12, weight: .medium))
+                                        .font(VF.labelFont)
                                     Spacer()
                                     Button("Remove") {
                                         coordinator.updateAppProfile(bundleID: bundleID, profile: nil)
@@ -312,7 +312,7 @@ struct SettingsView: View {
                                     }
                                     .frame(width: 150)
                                 }
-                                .font(.system(size: 11))
+                                .font(VF.captionFont)
                             }
                             .padding(.vertical, 2)
                         }
@@ -330,7 +330,7 @@ struct SettingsView: View {
                 Text(state.targetingMode == .cursorAware
                      ? "Dictation is enabled when an insertion cursor is active in any text target."
                      : "Dictation is enabled only when a text input field is focused.")
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -360,11 +360,11 @@ struct SettingsView: View {
                 )
 
                 Text("Dictation mode is always enabled as the release-quality core workflow.")
-                    .font(.system(size: 11))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
 
                 Text("Host memory: \(state.hostMemoryGB) GB")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(VF.labelFont)
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -375,11 +375,11 @@ struct SettingsView: View {
                 .padding(.top, 4)
 
                 Text(state.translationProfile.runtimeHint(forHostMemoryGB: state.hostMemoryGB).summary)
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
 
                 Text("Changing translate model restarts backend automatically.")
-                    .font(.system(size: 11))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -404,7 +404,7 @@ struct SettingsView: View {
                             .fill(backendStatusColor)
                             .frame(width: 8, height: 8)
                         Text(state.backendStatusSummary)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(VF.captionEmphasizedFont)
                             .foregroundStyle(backendStatusColor)
                     }
 
@@ -413,20 +413,20 @@ struct SettingsView: View {
                             ProgressView()
                                 .controlSize(.small)
                             Text("Backend process is running and waiting to answer readiness checks.")
-                                .font(.system(size: 11))
+                                .font(VF.captionFont)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
                     if !state.backendActiveSTTModel.isEmpty {
                         Text("Active STT path: \(state.backendActiveSTTModel)")
-                            .font(.system(size: 11))
+                            .font(VF.captionFont)
                             .foregroundStyle(.secondary)
                     }
 
                     if let issue = state.backendReadinessIssue, !issue.isEmpty {
                         Text("Issue: \(issue)")
-                            .font(.system(size: 11))
+                            .font(VF.captionFont)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -451,15 +451,15 @@ struct SettingsView: View {
                         ForEach(state.translationBenchmarkResults) { result in
                             HStack {
                                 Text(result.profile.displayName)
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(VF.labelFont)
                                 Spacer()
                                 if result.placeholderDetected {
                                     Text("Model Missing")
-                                        .font(.system(size: 11, weight: .semibold))
+                                        .font(VF.captionEmphasizedFont)
                                         .foregroundStyle(.orange)
                                 } else {
                                     Text("med \(result.medianLatencyMs)ms · p95 \(result.p95LatencyMs)ms")
-                                        .font(.system(size: 11, weight: .semibold))
+                                        .font(VF.captionEmphasizedFont)
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -475,7 +475,7 @@ struct SettingsView: View {
 
                 if let benchmarkStatusLine = state.benchmarkStatusLine {
                     Text(benchmarkStatusLine)
-                        .font(.system(size: 11))
+                        .font(VF.captionFont)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -537,15 +537,15 @@ struct SettingsView: View {
 
     private var backendStatusColor: Color {
         if !state.backendShouldRun && !state.backendProcessRunning && !state.backendWarmupInProgress {
-            return .secondary
+            return VF.colorNeutral
         }
         if state.backendReadyForDictation {
-            return .green
+            return VF.colorSuccess
         }
         if state.backendWarmupInProgress {
-            return .orange
+            return VF.colorWarning
         }
-        return .red
+        return VF.colorError
     }
 
     private func profileRow(_ profile: TranslationProfile) -> some View {
@@ -560,13 +560,13 @@ struct SettingsView: View {
                     .foregroundStyle(selected ? Color.accentColor : Color.secondary)
 
                 Text(profile.displayName)
-                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .font(selected ? VF.bodyEmphasizedFont : VF.bodyFont)
                     .foregroundStyle(.primary)
 
                 Spacer()
 
                 Text(hint.badge)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(VF.captionEmphasizedFont)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(suitabilityColor(hint.suitability).opacity(0.18))
@@ -581,11 +581,11 @@ struct SettingsView: View {
     private func suitabilityColor(_ suitability: TranslationSuitability) -> Color {
         switch suitability {
         case .recommended:
-            return .green
+            return VF.colorSuccess
         case .caution:
-            return .orange
+            return VF.colorWarning
         case .heavy:
-            return .red
+            return VF.colorError
         }
     }
 
@@ -607,9 +607,9 @@ struct SettingsView: View {
                 Task { await refreshOllamaStatus() }
             }
             .buttonStyle(.borderless)
-            .font(.system(size: 11))
+            .font(VF.captionFont)
         }
-        .font(.system(size: 12))
+        .font(VF.secondaryFont)
     }
 
     @MainActor

@@ -22,7 +22,7 @@ struct OnboardingCalibrationView: View {
                     .font(.system(size: 16, weight: .medium))
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.gray.opacity(0.10))
+                    .background(VF.elevatedBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
 

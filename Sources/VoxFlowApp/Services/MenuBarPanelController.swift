@@ -34,7 +34,12 @@ final class MenuBarPanelController {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.currentIconName = iconName
 
-        // Non-activating panel
+        // Non-activating panel.
+        //
+        // Translucency (Phase 4 headliner): the NSPanel itself is transparent
+        // and the SwiftUI root supplies its own .ultraThinMaterial background,
+        // letting the desktop wallpaper / underlying windows show through with
+        // the system blur. This is the single biggest visual delta of Phase 4.
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 430, height: 600),
             styleMask: [.nonactivatingPanel, .borderless],
@@ -46,14 +51,22 @@ final class MenuBarPanelController {
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = false
         panel.hasShadow = true
-        panel.backgroundColor = .windowBackgroundColor
-        panel.isOpaque = true
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
         panel.appearance = NSApp.effectiveAppearance
         panel.animationBehavior = .utilityWindow
 
-        let hostingView = NSHostingView(rootView: content)
+        let translucentContent = content
+            .background(VF.panelMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: VFPanel.cornerRadius, style: .continuous))
+
+        let hostingView = NSHostingView(rootView: translucentContent)
         hostingView.layer?.cornerRadius = VFPanel.cornerRadius
         hostingView.layer?.masksToBounds = true
+        // Hosting view must be transparent so the SwiftUI material above is
+        // what actually fills the rounded rect — an opaque CALayer behind
+        // would defeat the .ultraThinMaterial blur.
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
 
         self.panel = panel

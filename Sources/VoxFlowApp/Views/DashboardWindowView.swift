@@ -23,9 +23,9 @@ struct DashboardWindowView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("VoxFlow Dashboard")
-                    .font(.system(size: 22, weight: .bold))
+                    .font(VF.displayFont)
                 Text("Session telemetry and app compatibility")
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -33,7 +33,7 @@ struct DashboardWindowView: View {
 
             VStack(alignment: .trailing, spacing: 8) {
                 Text("Uptime \(sessionDurationText)")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(VF.labelFont)
                     .foregroundStyle(.secondary)
 
                 Button("Reset Session Metrics") {
@@ -56,7 +56,7 @@ struct DashboardWindowView: View {
     private var backendSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Backend Runtime")
-                .font(.system(size: 14, weight: .semibold))
+                .font(VF.headingFont)
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -65,29 +65,29 @@ struct DashboardWindowView: View {
                         .fill(backendStatusColor)
                         .frame(width: 8, height: 8)
                     Text(state.backendStatusSummary)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(VF.bodyEmphasizedFont)
                         .foregroundStyle(backendStatusColor)
                 }
 
                 Text("Process \(state.backendProcessRunning ? "running" : "stopped") · STT \(state.sttBackend.displayName)")
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
 
                 if !state.backendActiveSTTModel.isEmpty {
                     Text("Active backend STT model: \(state.backendActiveSTTModel)")
-                        .font(.system(size: 12))
+                        .font(VF.secondaryFont)
                         .foregroundStyle(.secondary)
                 }
 
                 if let issue = state.backendReadinessIssue, !issue.isEmpty {
                     Text("Issue: \(issue)")
-                        .font(.system(size: 12))
+                        .font(VF.secondaryFont)
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.gray.opacity(0.08))
+            .background(VF.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
@@ -95,16 +95,16 @@ struct DashboardWindowView: View {
     private var compatibilitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("App Compatibility Matrix")
-                .font(.system(size: 14, weight: .semibold))
+                .font(VF.headingFont)
                 .foregroundStyle(.secondary)
 
             if state.appInsertStatsSummary.isEmpty {
                 Text("No insert attempts recorded yet. Dictate and insert text to build compatibility data.")
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.gray.opacity(0.08))
+                    .background(VF.cardBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
                 VStack(spacing: 8) {
@@ -120,17 +120,17 @@ struct DashboardWindowView: View {
     private var modeUsageSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Mode Usage")
-                .font(.system(size: 14, weight: .semibold))
+                .font(VF.headingFont)
                 .foregroundStyle(.secondary)
 
             let used = state.workflowUsageSummary.filter { $0.captures > 0 }
             if used.isEmpty {
                 Text("No mode usage captured yet. Dictate in Dictation, Translate, or Meeting mode to populate this section.")
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.gray.opacity(0.08))
+                    .background(VF.cardBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
                 VStack(spacing: 8) {
@@ -140,7 +140,7 @@ struct DashboardWindowView: View {
                         Text("Captures")
                             .frame(width: 90, alignment: .trailing)
                     }
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(VF.captionEmphasizedFont)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
 
@@ -150,12 +150,12 @@ struct DashboardWindowView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text("\(metric.captures)")
                                 .frame(width: 90, alignment: .trailing)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(VF.labelFont)
                         }
-                        .font(.system(size: 12))
+                        .font(VF.secondaryFont)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 6)
-                        .background(Color.gray.opacity(0.08))
+                        .background(VF.cardBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
@@ -166,18 +166,18 @@ struct DashboardWindowView: View {
     private var benchmarkRecommendationSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Benchmark Recommendation")
-                .font(.system(size: 14, weight: .semibold))
+                .font(VF.headingFont)
                 .foregroundStyle(.secondary)
 
             if let recommended = state.recommendedProfileFromHistory {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recommended: \(recommended.profile.displayName)")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(VF.bodyEmphasizedFont)
                     Text("avg median \(recommended.averageMedianLatencyMs)ms · avg p95 \(recommended.averageP95LatencyMs)ms")
-                        .font(.system(size: 12))
+                        .font(VF.secondaryFont)
                         .foregroundStyle(.secondary)
                     Text("Successful runs \(recommended.successfulRuns)/\(recommended.benchmarkRuns) · placeholders \(recommended.placeholderRuns)")
-                        .font(.system(size: 11))
+                        .font(VF.captionFont)
                         .foregroundStyle(.secondary)
                 }
                 .padding(12)
@@ -186,11 +186,11 @@ struct DashboardWindowView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
                 Text("No benchmark history yet. Run Translate Benchmark in Settings to generate a recommendation.")
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.gray.opacity(0.08))
+                    .background(VF.cardBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
 
@@ -206,7 +206,7 @@ struct DashboardWindowView: View {
                         Text("succ/run")
                             .frame(width: 90, alignment: .trailing)
                     }
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(VF.captionEmphasizedFont)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
 
@@ -221,10 +221,10 @@ struct DashboardWindowView: View {
                             Text("\(row.successfulRuns)/\(row.benchmarkRuns)")
                                 .frame(width: 90, alignment: .trailing)
                         }
-                        .font(.system(size: 12))
+                        .font(VF.secondaryFont)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 6)
-                        .background(Color.gray.opacity(0.08))
+                        .background(VF.cardBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
@@ -243,15 +243,15 @@ struct DashboardWindowView: View {
 
     private var backendStatusColor: Color {
         if !state.backendShouldRun && !state.backendProcessRunning && !state.backendWarmupInProgress {
-            return .secondary
+            return VF.colorNeutral
         }
         if state.backendReadyForDictation {
-            return .green
+            return VF.colorSuccess
         }
         if state.backendWarmupInProgress {
-            return .orange
+            return VF.colorWarning
         }
-        return .red
+        return VF.colorError
     }
 
     private var headerRow: some View {
@@ -267,7 +267,7 @@ struct DashboardWindowView: View {
             Text("Status")
                 .frame(width: 110, alignment: .trailing)
         }
-        .font(.system(size: 11, weight: .semibold))
+        .font(VF.captionEmphasizedFont)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 6)
     }
@@ -286,12 +286,12 @@ struct DashboardWindowView: View {
             Text(status.label)
                 .frame(width: 110, alignment: .trailing)
                 .foregroundStyle(status.color)
-                .font(.system(size: 11, weight: .semibold))
+                .font(VF.captionEmphasizedFont)
         }
-        .font(.system(size: 12))
+        .font(VF.secondaryFont)
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
-        .background(Color.gray.opacity(0.08))
+        .background(VF.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -309,17 +309,17 @@ struct DashboardWindowView: View {
     private func statCard(title: String, value: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(VF.captionEmphasizedFont)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(size: 18, weight: .bold))
+                .font(VF.largeFont)
             Text(detail)
-                .font(.system(size: 11))
+                .font(VF.captionFont)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
         .padding(12)
-        .background(Color.gray.opacity(0.10))
+        .background(VF.elevatedBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 

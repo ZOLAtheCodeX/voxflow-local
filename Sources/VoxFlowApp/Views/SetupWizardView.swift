@@ -37,9 +37,9 @@ struct SetupWizardView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Setup Wizard")
-                .font(.system(size: 22, weight: .bold))
+                .font(VF.displayFont)
             Text("Complete permissions, backend readiness, and calibration before first use.")
-                .font(.system(size: 12))
+                .font(VF.secondaryFont)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
@@ -59,20 +59,20 @@ struct SetupWizardView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.08))
+        .background(VF.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var permissionsCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("1. Permissions")
-                .font(.system(size: 15, weight: .semibold))
+                .font(VF.titleFont)
 
             HStack {
                 Text("Microphone")
                 Spacer()
                 Text(permissions.microphoneAuthorized ? "Granted" : "Missing")
-                    .foregroundStyle(permissions.microphoneAuthorized ? .green : .orange)
+                    .foregroundStyle(permissions.microphoneAuthorized ? VF.colorSuccess : VF.colorWarning)
             }
 
             HStack {
@@ -84,7 +84,7 @@ struct SetupWizardView: View {
 
             if !permissions.accessibilityAuthorized {
                 Text("If already granted: remove VoxFlow from System Settings → Privacy → Accessibility, then re-add it. Rebuilding the app invalidates the prior grant.")
-                    .font(.system(size: 11))
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -102,21 +102,21 @@ struct SetupWizardView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.08))
+        .background(VF.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var backendCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("2. Local Backend Readiness")
-                .font(.system(size: 15, weight: .semibold))
+                .font(VF.titleFont)
 
             Text("STT backend: \(state.sttBackend.displayName)")
-                .font(.system(size: 12))
+                .font(VF.secondaryFont)
                 .foregroundStyle(.secondary)
 
             Text(healthStatusLine)
-                .font(.system(size: 12, weight: .medium))
+                .font(VF.labelFont)
                 .foregroundStyle(backendHealth["model_loaded"] == "true" ? .green : .orange)
 
             if didRunHealthCheck {
@@ -132,7 +132,7 @@ struct SetupWizardView: View {
                         healthLine("Issues", issues)
                     }
                 }
-                .font(.system(size: 11))
+                .font(VF.captionFont)
                 .foregroundStyle(.secondary)
             }
 
@@ -160,7 +160,7 @@ struct SetupWizardView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.08))
+        .background(VF.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -168,10 +168,10 @@ struct SetupWizardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("3. Voice Calibration")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(VF.titleFont)
                 Spacer()
                 Text(state.onboardingPhase == .complete ? "Complete" : "Required")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(VF.captionEmphasizedFont)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background((state.onboardingPhase == .complete ? Color.green : Color.orange).opacity(0.15))
@@ -184,7 +184,7 @@ struct SetupWizardView: View {
                     .padding(.top, 4)
             } else {
                 Text("Calibration is complete. You can rerun it if dictation quality is poor.")
-                    .font(.system(size: 12))
+                    .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
             }
 
@@ -202,26 +202,26 @@ struct SetupWizardView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.08))
+        .background(VF.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var validationCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("4. Functional Check")
-                .font(.system(size: 15, weight: .semibold))
+                .font(VF.titleFont)
 
             Text("Focus any text field (Notes, browser input, chat app), then hold `\(state.dictationHotkeyPreset.displayName)` to dictate and release to insert.")
-                .font(.system(size: 12))
+                .font(VF.secondaryFont)
                 .foregroundStyle(.secondary)
 
             if state.canStartCaptureForDictation {
                 Text("Target ready in \(state.focusTarget.appName ?? "active app").")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(VF.labelFont)
                     .foregroundStyle(.green)
             } else {
                 Text("No active text cursor/field detected yet.")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(VF.labelFont)
                     .foregroundStyle(.orange)
             }
 
@@ -235,13 +235,13 @@ struct SetupWizardView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.gray.opacity(0.08))
+        .background(VF.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func statusPill(title: String, ok: Bool) -> some View {
         Text("\(title): \(ok ? "OK" : "Pending")")
-            .font(.system(size: 11, weight: .semibold))
+            .font(VF.captionEmphasizedFont)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background((ok ? Color.green : Color.orange).opacity(0.18))
