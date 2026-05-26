@@ -77,6 +77,13 @@ final class LongFormSessionService: ObservableObject {
         lastChunkAt = now
     }
 
+    /// Directly overwrite the current session's transcript — used by undo.
+    /// No-op when no session is active.
+    func setTranscript(_ text: String) {
+        currentSession?.transcript = text
+        currentSession?.updatedAt = clock.currentTime()
+    }
+
     func recordAppliedAction(_ applied: AppliedAction) {
         currentSession?.appliedActions.append(applied)
         currentSession?.transcript = applied.afterText

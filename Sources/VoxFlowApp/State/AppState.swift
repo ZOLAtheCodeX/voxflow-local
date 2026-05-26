@@ -60,6 +60,17 @@ final class AppState: ObservableObject {
     @Published var backendActiveSTTModel: String = ""
     @Published var ollamaAvailable: Bool = false
     @Published var ollamaNudgeDismissed: Bool = UserDefaults.standard.bool(forKey: "VoxFlow.ollamaNudgeDismissed")
+
+    // MARK: - Cockpit Layer 0
+    @Published var cockpitVisible: Bool = false
+    @Published var cockpitSession: LongFormSession?
+    /// Visible chip order; defaults to the three Layer-0-shipping actions.
+    /// MRU + promotion logic in CockpitCoordinator mutates this after 30+
+    /// total invocations or when an unpromoted action hits the threshold.
+    @Published var chipMRU: [SmartActionId] = [.memo, .mece, .items]
+    @Published var chipInvocationCounts: [SmartActionId: Int] = [:]
+    @Published var totalCaptureCount: Int = UserDefaults.standard.integer(forKey: "VoxFlow.totalCaptureCount")
+    @Published var voicePromptStripDismissed: Bool = UserDefaults.standard.bool(forKey: "VoxFlow.voicePromptStripDismissed")
     @Published var localCaptureCount = 0
     @Published var privateAPICaptureCount = 0
     @Published var totalTranscriptionLatencyMs = 0
