@@ -46,10 +46,10 @@ struct DashboardWindowView: View {
 
     private var metricsGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            statCard(title: "Captures", value: "\(state.captureCount)", detail: "Local \(state.localCaptureCount) · API \(state.privateAPICaptureCount)")
-            statCard(title: "Transcription", value: "\(state.averageTranscriptionLatencyMs)ms avg", detail: "Last \(state.lastTranscriptionLatencyMs ?? 0)ms")
-            statCard(title: "Insert Success", value: "\(Int((state.insertSuccessRate * 100).rounded()))%", detail: "Fallback \(state.fallbackInsertCount) · Failed \(state.failedInsertCount)")
-            statCard(title: "Approvals", value: "T\(state.approvedTranslationCount) · M\(state.approvedMeetingCount)", detail: "Raw \(state.privacyApproveRawCount) · Redacted \(state.privacyApproveRedactedCount)")
+            MetricCardView(title: "Captures", value: "\(state.captureCount)", detail: "Local \(state.localCaptureCount) · API \(state.privateAPICaptureCount)", minHeight: 74)
+            MetricCardView(title: "Transcription", value: "\(state.averageTranscriptionLatencyMs)ms avg", detail: "Last \(state.lastTranscriptionLatencyMs ?? 0)ms", minHeight: 74)
+            MetricCardView(title: "Insert Success", value: "\(Int((state.insertSuccessRate * 100).rounded()))%", detail: "Fallback \(state.fallbackInsertCount) · Failed \(state.failedInsertCount)", minHeight: 74)
+            MetricCardView(title: "Approvals", value: "Translate \(state.approvedTranslationCount) · Meeting \(state.approvedMeetingCount)", detail: "Raw \(state.privacyApproveRawCount) · Redacted \(state.privacyApproveRedactedCount)", minHeight: 74)
         }
     }
 
@@ -306,36 +306,19 @@ struct DashboardWindowView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    private func statCard(title: String, value: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(VF.captionEmphasizedFont)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(VF.largeFont)
-            Text(detail)
-                .font(VF.captionFont)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
-        .padding(12)
-        .background(VF.elevatedBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
     private func compatibilityStatus(for stats: AppInsertStats) -> (label: String, color: Color) {
         if stats.totalAttempts == 0 {
-            return ("No Data", .secondary)
+            return ("No Data", VF.colorNeutral)
         }
         if stats.successRate >= 0.95 && stats.failedCount == 0 {
-            return ("Excellent", .green)
+            return ("Excellent", VF.colorSuccess)
         }
         if stats.successRate >= 0.80 {
             return ("Good", .blue)
         }
         if stats.successRate >= 0.60 {
-            return ("Needs Tuning", .orange)
+            return ("Needs Tuning", VF.colorWarning)
         }
-        return ("Unstable", .red)
+        return ("Unstable", VF.colorError)
     }
 }

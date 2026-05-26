@@ -25,33 +25,37 @@ final class ConfidenceBadgeTests: XCTestCase {
         XCTAssertEqual(candidate.confidence, 0.0, accuracy: 0.001)
     }
 
-    func testConfidenceBadgeGreenThreshold() {
+    // Phase 4: ConfidenceBadge now pulls its colors from VF semantic tokens
+    // so the design system controls the success/warning/error palette.
+    // .yellow → VF.colorWarning (.orange) is intentional — Apple's HIG uses
+    // orange for warnings, yellow is reserved for highlights.
+    func testConfidenceBadgeSuccessAboveThreshold() {
         let badge = ConfidenceBadge(confidence: 0.85)
-        XCTAssertEqual(badge.color, .green)
+        XCTAssertEqual(badge.color, VF.colorSuccess)
     }
 
-    func testConfidenceBadgeGreenAtBoundary() {
+    func testConfidenceBadgeSuccessAtBoundary() {
         let badge = ConfidenceBadge(confidence: 0.7)
-        XCTAssertEqual(badge.color, .green)
+        XCTAssertEqual(badge.color, VF.colorSuccess)
     }
 
-    func testConfidenceBadgeYellowRange() {
+    func testConfidenceBadgeWarningRange() {
         let badge = ConfidenceBadge(confidence: 0.5)
-        XCTAssertEqual(badge.color, .yellow)
+        XCTAssertEqual(badge.color, VF.colorWarning)
     }
 
-    func testConfidenceBadgeYellowAtBoundary() {
+    func testConfidenceBadgeWarningAtBoundary() {
         let badge = ConfidenceBadge(confidence: 0.4)
-        XCTAssertEqual(badge.color, .yellow)
+        XCTAssertEqual(badge.color, VF.colorWarning)
     }
 
-    func testConfidenceBadgeRedBelowThreshold() {
+    func testConfidenceBadgeErrorBelowThreshold() {
         let badge = ConfidenceBadge(confidence: 0.3)
-        XCTAssertEqual(badge.color, .red)
+        XCTAssertEqual(badge.color, VF.colorError)
     }
 
-    func testConfidenceBadgeRedAtZero() {
+    func testConfidenceBadgeErrorAtZero() {
         let badge = ConfidenceBadge(confidence: 0.0)
-        XCTAssertEqual(badge.color, .red)
+        XCTAssertEqual(badge.color, VF.colorError)
     }
 }

@@ -20,35 +20,35 @@ struct DashboardPanelView: View {
             }
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: VF.spacingSmall) {
-                metricCard(
+                MetricCardView(
                     title: "Captures",
                     value: "\(state.captureCount)",
                     detail: "Local \(state.localCaptureCount) · API \(state.privateAPICaptureCount)"
                 )
-                metricCard(
+                MetricCardView(
                     title: "Transcription",
                     value: "\(state.averageTranscriptionLatencyMs)ms avg",
                     detail: "Last \(state.lastTranscriptionLatencyMs ?? 0)ms"
                 )
-                metricCard(
+                MetricCardView(
                     title: "Insert Success",
                     value: "\(Int((state.insertSuccessRate * 100).rounded()))%",
                     detail: "Fallback \(state.fallbackInsertCount) · Failed \(state.failedInsertCount)"
                 )
-                metricCard(
+                MetricCardView(
                     title: "Approvals",
-                    value: "T\(state.approvedTranslationCount) · M\(state.approvedMeetingCount)",
+                    value: "Translate \(state.approvedTranslationCount) · Meeting \(state.approvedMeetingCount)",
                     detail: "Raw \(state.privacyApproveRawCount) · Redacted \(state.privacyApproveRedactedCount)"
                 )
             }
 
-            metricCard(
+            MetricCardView(
                 title: "Mode Usage",
                 value: modeUsageHeadline,
                 detail: modeUsageDetail
             )
 
-            metricCard(
+            MetricCardView(
                 title: "Recommended Profile",
                 value: recommendedProfileHeadline,
                 detail: recommendedProfileDetail
@@ -128,21 +128,4 @@ struct DashboardPanelView: View {
         return "avg \(recommended.averageMedianLatencyMs)ms · p95 \(recommended.averageP95LatencyMs)ms · successful \(recommended.successfulRuns)/\(recommended.benchmarkRuns)"
     }
 
-    private func metricCard(title: String, value: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(VF.captionFont.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(VF.titleFont.weight(.bold))
-                .foregroundStyle(.primary)
-            Text(detail)
-                .font(VF.captionFont)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-        .padding(10)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
-    }
 }
