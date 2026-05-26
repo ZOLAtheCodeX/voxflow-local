@@ -79,7 +79,7 @@ struct SetupWizardView: View {
                 Text("Accessibility")
                 Spacer()
                 Text(permissions.accessibilityAuthorized ? "Granted" : "Missing")
-                    .foregroundStyle(permissions.accessibilityAuthorized ? .green : .orange)
+                    .foregroundStyle(permissions.accessibilityAuthorized ? VF.colorSuccess : VF.colorWarning)
             }
 
             if !permissions.accessibilityAuthorized {
@@ -174,8 +174,8 @@ struct SetupWizardView: View {
                     .font(VF.captionEmphasizedFont)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background((state.onboardingPhase == .complete ? Color.green : Color.orange).opacity(0.15))
-                    .foregroundStyle(state.onboardingPhase == .complete ? .green : .orange)
+                    .background(VF.tintedBackground(state.onboardingPhase == .complete ? VF.colorSuccess : VF.colorWarning))
+                    .foregroundStyle(state.onboardingPhase == .complete ? VF.colorSuccess : VF.colorWarning)
                     .clipShape(Capsule())
             }
 
@@ -218,11 +218,11 @@ struct SetupWizardView: View {
             if state.canStartCaptureForDictation {
                 Text("Target ready in \(state.focusTarget.appName ?? "active app").")
                     .font(VF.labelFont)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(VF.colorSuccess)
             } else {
                 Text("No active text cursor/field detected yet.")
                     .font(VF.labelFont)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(VF.colorWarning)
             }
 
             Button("Run Full Setup Reset") {
@@ -240,12 +240,13 @@ struct SetupWizardView: View {
     }
 
     private func statusPill(title: String, ok: Bool) -> some View {
-        Text("\(title): \(ok ? "OK" : "Pending")")
+        let tint = ok ? VF.colorSuccess : VF.colorWarning
+        return Text("\(title): \(ok ? "OK" : "Pending")")
             .font(VF.captionEmphasizedFont)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background((ok ? Color.green : Color.orange).opacity(0.18))
-            .foregroundStyle(ok ? .green : .orange)
+            .background(VF.tintedBackground(tint, opacity: 0.18))
+            .foregroundStyle(tint)
             .clipShape(Capsule())
     }
 

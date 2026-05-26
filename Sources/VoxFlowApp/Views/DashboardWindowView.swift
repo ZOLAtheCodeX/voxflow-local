@@ -182,7 +182,7 @@ struct DashboardWindowView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.green.opacity(0.10))
+                .background(VF.tintedBackground(VF.colorSuccess, opacity: 0.10))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
                 Text("No benchmark history yet. Run Translate Benchmark in Settings to generate a recommendation.")
