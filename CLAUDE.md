@@ -20,9 +20,15 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
     SessionMemoryStore.swift            Ring buffer for recent dictations
     MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem
     FocusContextMonitor.swift           Focused-target poller; frozen during capture
-  Models/AppModels.swift        Domain types
-  State/AppState.swift          @Published app state
+    CockpitCoordinator.swift            @MainActor cockpit orchestration — chip MRU + voice routing + insert/copy/undo
+    LongFormSessionService.swift        State machine (idle → recording → reviewing) + JSON auto-save (~5 s)
+    SmartActionService.swift            actor: smart-action backend dispatch + 20-entry undo history
+    VoiceCommandRouter.swift            Single-keyword parser for in-review voice commands
+  Models/AppModels.swift        Domain types — includes SmartActionId, AppliedAction, LongFormSession, LongFormState
+  State/AppState.swift          @Published app state — cockpitVisible / cockpitSession / chipMRU / voicePromptStripDismissed
   Views/                        SwiftUI views — VFDesignTokens.swift is the single source of truth for typography / colors / motion / materials
+    Cockpit/                    Cockpit Layer 0 views (TopBar, Transcript, ChipRow, SidePanel, Palette, VoicePromptStrip, KeyEventBridge)
+    CockpitWindowView.swift     Top-level cockpit window — wires shortcuts ⌘R/⌘./⌘Z/⌘↩/⌘C/⌘\/⌘W/esc
 
 backend/app/                    FastAPI server, decomposed in Phase 2
   server.py                     Composition root: app instance, middleware, route mounting, runtime singletons
@@ -94,6 +100,15 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - All typography, colors, motion presets, and material surfaces flow through `VFDesignTokens.swift` (`VF.*Font`, `VF.color*`, `VF.animation*`, `VF.cardBackground` / `VF.elevatedBackground` / `VF.panelMaterial`). Phase 4 eliminated raw `.font(.system(size:))` literals and `Color.gray.opacity(...)` from `SetupWizardView`, `SettingsView`, `DashboardWindowView`, and the `Views/` tree.
 - Keychain for secrets (`KeychainService`); never UserDefaults.
 
+### Cockpit (Layer 0)
+- Long-form workspace opened via `⌥⌘V` (VoxFlow menu → "Open Cockpit"). Window scene `id: "cockpit"` in `VoxFlowLocalApp`.
+- `LongFormSessionService` is a `@MainActor ObservableObject` with a 3-state machine — `.idle → .recording(startedAt:) → .reviewing` — and Codable `LongFormSession` persisted as JSON to `~/Library/Application Support/VoxFlow/sessions/`. Auto-save fires every ~5 s during recording. `appendChunk(_:)` inserts a `\n\n` paragraph break if ≥4 s of silence elapsed since the last chunk. `recoverLatestSession()` returns the most recently updated session for crash recovery.
+- `SmartActionService` is an `actor` that wraps a `SmartActionBackend` and keeps a 20-entry undo stack (`AppliedAction`). Guardrail trips and unchanged echoes don't go on the stack — they aren't undoable. The default backend is `BackendAPISmartActionAdapter`, which POSTs to `/v1/smart_action`.
+- `CockpitCoordinator` (@MainActor) routes chip taps + voice utterances + keyboard shortcuts. Chip MRU promotion threshold is 3 invocations (`promotionThreshold`); voice-prompt strip auto-dismisses after 10 review states (`voicePromptStripDismissThreshold`).
+- `VoiceCommandRouter.parse(_:)` is intentionally simple: single keyword, trailing punctuation stripped, case-insensitive. Multi-word utterances return `.none` — Layer 0 ships memo/MECE/items/cancel/undo only.
+- Six `SmartActionId`s ship in Layer 0: `.memo`, `.mece`, `.items`, `.steel` (steel-man), `.pyramid`, `.disclaimer`. System prompts live backend-side in `backend/app/smart_actions.py` (`_ACTION_DESCRIPTIONS` + `_SYSTEM_PROMPT_TEMPLATE`). Unknown `action_id` returns the transcript verbatim — never 5xx.
+- Keyboard shortcuts (wired via `KeyEventBridge`): `⌘R` start, `⌘.` stop, `⌘Z` undo, `⌘↩` insert into target + close + reset, `⌘C` copy, `⌘\` toggle side panel, `⌘W` / esc close. Visible chips bind `⌘1`-`⌘6`; `⌘K` opens the full action palette.
+
 ### Python
 - ConsentStore: 30-min TTL, thread-safe (`threading.Lock`); bounded-use tokens.
 - Rate limiter: 120 req/60 s per IP, single-worker assumption, lock-guarded (Phase 5.3).
@@ -106,8 +121,8 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 ## Testing
 
 ```bash
-swift test                                              # ~256 Swift tests
-./.venv/bin/python -m pytest backend/tests              # ~344 Python tests (+9 live-Ollama skipped)
+swift test                                              # ~294 Swift tests
+./.venv/bin/python -m pytest backend/tests              # ~354 Python tests (+9 live-Ollama skipped)
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
 VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py  # live Ollama acceptance
@@ -149,3 +164,8 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - `codesign --sign -` (ad-hoc) for installed builds — use the auto-detected Apple Development cert.
 - Reintroduce raw `.font(.system(size:))` literals in views or `Color.gray.opacity(...)` anywhere in `Sources/VoxFlowApp/Views/` — go through `VFDesignTokens.swift`.
 - Skip `_RATE_LIMIT_LOCK` when touching `_rate_limit_timestamps` — short critical sections only.
+- Push smart actions onto the cockpit undo stack when they fail the guardrail or return the transcript unchanged — `SmartActionService` filters those before recording history.
+- Mutate `LongFormSession.transcript` from outside `LongFormSessionService` — `currentSession` is `@Published private(set)`. Use `setTranscript(_:)` so the auto-save Task sees the change.
+- Add a new `SmartActionId` to `AppModels.swift` without adding the matching system-prompt entry in `backend/app/smart_actions.py` — the engine will fall back to a generic prompt template and the action label/tooltip will look fine while the LLM output stays generic.
+- Have the cockpit voice router fire actions while the session is `.recording` — voice keywords only resolve in `.reviewing`. Multi-word utterances must remain `.none` for Layer 0.
+- Bypass `BackendAPISmartActionAdapter` to call `/v1/smart_action` directly from views — go through `CockpitCoordinator.applyAction` so MRU + undo stay correct.
