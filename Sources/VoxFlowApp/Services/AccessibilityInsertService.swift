@@ -106,11 +106,15 @@ final class AccessibilityInsertService {
 
         // Restore the user's previous clipboard after a brief delay
         // so the target app has time to process the paste event
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            if let previous = previousContents {
-                pasteboard.clearContents()
-                pasteboard.setString(previous, forType: .string)
-            }
+        do {
+            try await Task.sleep(nanoseconds: 300_000_000) // 300ms
+        } catch {
+            // Even if cancelled, we fall through to restore
+        }
+
+        if let previous = previousContents {
+            pasteboard.clearContents()
+            pasteboard.setString(previous, forType: .string)
         }
 
         return pasted

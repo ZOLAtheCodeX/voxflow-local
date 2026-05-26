@@ -49,7 +49,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         let appName = state.focusTarget.appName ?? "Unknown App"
         let started = ContinuousClock.now
         let result = await insertService.insert(text: state.displayText, targetApp: targetApp)
-        let elapsedMs = Self.elapsedMilliseconds(since: started)
+        let elapsedMs = started.elapsedMilliseconds()
         log.info("insertCurrentText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)
@@ -86,7 +86,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         let appName = state.focusTarget.appName ?? "Unknown App"
         let started = ContinuousClock.now
         let result = await insertService.insert(text: text, targetApp: targetApp)
-        let elapsedMs = Self.elapsedMilliseconds(since: started)
+        let elapsedMs = started.elapsedMilliseconds()
         log.info("insertText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
         recordInsertStats(forApp: appName, result: result)
@@ -151,11 +151,5 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         }
 
         state.insertStatsByApp[appName] = stats
-    }
-
-    private static func elapsedMilliseconds(since startedAt: ContinuousClock.Instant) -> Int {
-        let duration = startedAt.duration(to: .now)
-        return Int(duration.components.seconds) * 1000
-            + Int(duration.components.attoseconds / 1_000_000_000_000_000)
     }
 }

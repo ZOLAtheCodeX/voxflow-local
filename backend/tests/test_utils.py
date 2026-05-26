@@ -468,3 +468,63 @@ class TestSplitSentences:
     def test_single_sentence(self):
         result = split_sentences("Just one sentence.")
         assert result == ["Just one sentence."]
+
+
+# ── TestHallucinationParity ──────────────────────────────────────────
+
+class TestHallucinationParity:
+    def test_hallucination_filter_parity(self):
+        import re
+        from pathlib import Path
+        from server import _WHISPER_HALLUCINATION_ALWAYS, _WHISPER_HALLUCINATION_SHORT_ONLY
+
+        # Locate the Swift hallucination filter file
+        project_root = Path(__file__).resolve().parent.parent.parent
+        swift_filter_path = project_root / "Sources" / "VoxFlowApp" / "Services" / "HallucinationFilter.swift"
+        
+        assert swift_filter_path.exists(), f"Swift filter file not found at {swift_filter_path}"
+        
+        content = swift_filter_path.read_text(encoding="utf-8")
+        
+        # Extract the elements inside Set([ ... ]) for alwaysFiltered
+        always_match = re.search(
+            r"alwaysFiltered:\s*Set<String>\s*=\s*Set\(\[\s*(.*?)\s*\]\)",
+            content,
+            re.DOTALL
+        )
+        assert always_match is not None, "Could not find alwaysFiltered in Swift file"
+        
+        # Extract the elements inside Set([ ... ]) for shortOnlyFiltered
+        short_only_match = re.search(
+            r"shortOnlyFiltered:\s*Set<String>\s*=\s*Set\(\[\s*(.*?)\s*\]\)",
+            content,
+            re.DOTALL
+        )
+        assert short_only_match is not None, "Could not find shortOnlyFiltered in Swift file"
+
+        def parse_swift_set(raw_block: str) -> set[str]:
+            # find all string literals "..." in the block
+            literals = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', raw_block)
+            parsed = set()
+            for s in literals:
+                # decode Swift unicode escapes like \u{266A}
+                decoded = re.sub(r'\\u\{([0-9a-fA-F]+)\}', lambda m: chr(int(m.group(1), 16)), s)
+                # also handle standard escapes like \" or \\ if any
+                decoded = decoded.replace('\\"', '"').replace('\\\\', '\\')
+                parsed.add(decoded.lower())
+            return parsed
+
+        swift_always = parse_swift_set(always_match.group(1))
+        swift_short_only = parse_swift_set(short_only_match.group(1))
+
+        # We assert that the lists match exactly
+        assert swift_always == _WHISPER_HALLUCINATION_ALWAYS, (
+            f"Always-filtered drift detected!\n"
+            f"Swift always-filtered: {sorted(swift_always)}\n"
+            f"Python always-filtered: {sorted(_WHISPER_HALLUCINATION_ALWAYS)}"
+        )
+        assert swift_short_only == _WHISPER_HALLUCINATION_SHORT_ONLY, (
+            f"Short-only filtered drift detected!\n"
+            f"Swift short-only: {sorted(swift_short_only)}\n"
+            f"Python short-only: {sorted(_WHISPER_HALLUCINATION_SHORT_ONLY)}"
+        )

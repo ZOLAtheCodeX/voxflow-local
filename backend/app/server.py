@@ -113,7 +113,7 @@ class TranscribeResponse(BaseModel):
 class CleanupRequest(BaseModel):
     session_id: str
     mode: str
-    input_text: str
+    input_text: str = Field(max_length=50_000)
     tone_style: str = "neutral"
     provider_mode: str = "localOnly"
     consent_token: str | None = None
@@ -128,7 +128,7 @@ class CleanupResponse(BaseModel):
 
 class TranslateRequest(BaseModel):
     session_id: str
-    source_text: str
+    source_text: str = Field(max_length=50_000)
     source_language: str = "en"
     target_language: str = "de"
     provider_mode: str = "localOnly"
@@ -143,7 +143,7 @@ class TranslateResponse(BaseModel):
 
 class MeetingRequest(BaseModel):
     session_id: str
-    transcript: str
+    transcript: str = Field(max_length=50_000)
     tone_style: str = "neutral"
     provider_mode: str = "localOnly"
     consent_token: str | None = None
@@ -939,7 +939,10 @@ _WHISPER_HALLUCINATION_ALWAYS = frozenset(
         "♪",
         "♪♪",
         "♪♪♪",
+        "♫",
+        "♬",
         "...",
+        "…",
         # Common Whisper silence hallucinations — filtered at any duration
         "Hello.",
         "Hello",

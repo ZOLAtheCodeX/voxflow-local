@@ -5,7 +5,7 @@ import Darwin
 private let log = Logger(subsystem: "local.voxflow.app", category: "BackendProcessManager")
 private let pidFilePath = NSTemporaryDirectory() + "voxflow-backend.pid"
 
-struct BackendLaunchConfiguration: Equatable {
+struct BackendLaunchConfiguration: Equatable, Sendable {
     let sttBackend: String
     let sttModel: String
     let whisperModel: String
@@ -34,6 +34,7 @@ final class BackendProcessManager: @unchecked Sendable {
 
     private var process: Process?
     private var activeConfiguration: BackendLaunchConfiguration?
+    private var pendingConfiguration: BackendLaunchConfiguration?
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
     private var _lastStartupFailureReason: String?
@@ -100,12 +101,16 @@ final class BackendProcessManager: @unchecked Sendable {
 
     private func restartOnWorkQueue(configuration: BackendLaunchConfiguration) {
         intentionalShutdown = true
-        stopOnWorkQueue()
-        intentionalShutdown = false
-        startIfNeededOnWorkQueue(configuration: configuration)
+        if process?.isRunning == true {
+            pendingConfiguration = configuration
+            stopOnWorkQueue()
+        } else {
+            startIfNeededOnWorkQueue(configuration: configuration)
+        }
     }
 
     private func startIfNeededOnWorkQueue(configuration: BackendLaunchConfiguration) {
+        intentionalShutdown = false
         _lastStartupFailureReason = nil
 
         if process?.isRunning != true {
@@ -118,7 +123,10 @@ final class BackendProcessManager: @unchecked Sendable {
             if activeConfiguration == configuration {
                 return
             }
+            intentionalShutdown = true
+            pendingConfiguration = configuration
             stopOnWorkQueue()
+            return
         }
 
         let backendPort = resolveBackendPort()
@@ -166,23 +174,12 @@ final class BackendProcessManager: @unchecked Sendable {
             // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts.
             // Skip restart if the shutdown was intentional (stop/restart called).
             task.terminationHandler = { [weak self] terminatedProcess in
-                guard terminatedProcess.terminationStatus != 0 else { return }
-                self?.workQueue.async {
+                let status = terminatedProcess.terminationStatus
+                guard status != 0 else { return }
+                guard let self else { return }
+                self.workQueue.async { [weak self] in
                     guard let self else { return }
-                    guard !self.intentionalShutdown else {
-                        log.info("Backend exited after intentional shutdown; not auto-restarting")
-                        return
-                    }
-                    guard self.crashRestartCount < Self.maxCrashRestarts else {
-                        log.error("Backend crashed \(self.crashRestartCount) times; not restarting")
-                        self._lastStartupFailureReason = "Backend crashed \(Self.maxCrashRestarts) times — restart manually in Settings"
-                        return
-                    }
-                    self.crashRestartCount += 1
-                    log.warning("Backend crashed (exit \(terminatedProcess.terminationStatus)); auto-restart \(self.crashRestartCount)/\(Self.maxCrashRestarts)")
-                    self.process = nil
-                    self.clearPipeHandlers()
-                    self.startIfNeededOnWorkQueue(configuration: configuration)
+                    self.handleUnexpectedExit(statusCode: status, configuration: configuration)
                 }
             }
         } catch {
@@ -194,35 +191,75 @@ final class BackendProcessManager: @unchecked Sendable {
         }
     }
 
+    private func handleUnexpectedExit(statusCode: Int32, configuration: BackendLaunchConfiguration) {
+        guard !self.intentionalShutdown else {
+            log.info("Backend exited after intentional shutdown; not auto-restarting")
+            return
+        }
+        guard self.crashRestartCount < Self.maxCrashRestarts else {
+            log.error("Backend crashed \(self.crashRestartCount) times; not restarting")
+            self._lastStartupFailureReason = "Backend crashed \(Self.maxCrashRestarts) times — restart manually in Settings"
+            return
+        }
+        self.crashRestartCount += 1
+        log.warning("Backend crashed (exit \(statusCode)); auto-restart \(self.crashRestartCount)/\(Self.maxCrashRestarts)")
+        self.process = nil
+        self.clearPipeHandlers()
+        self.startIfNeededOnWorkQueue(configuration: configuration)
+    }
+
     private func stopOnWorkQueue() {
         guard let process, process.isRunning else {
-            self.process = nil
-            activeConfiguration = nil
-            _lastStartupFailureReason = nil
-            clearPipeHandlers()
+            cleanupAfterTermination()
             return
+        }
+
+        let currentProcess = process
+        process.terminationHandler = { [weak self] _ in
+            self?.workQueue.async { [weak self] in
+                self?.cleanupAfterTermination()
+            }
         }
 
         process.terminate()
 
-        let deadline = Date().addingTimeInterval(5)
-        while process.isRunning && Date() < deadline {
-            usleep(100_000)
+        // Schedule async fallbacks to ensure termination if terminate() hangs
+        workQueue.asyncAfter(deadline: .now() + 5.0) { [weak self, weak currentProcess] in
+            guard let self, let currentProcess, currentProcess.isRunning else { return }
+            log.warning("Backend process did not terminate in 5 seconds; sending SIGINT")
+            currentProcess.interrupt()
+
+            self.workQueue.asyncAfter(deadline: .now() + 2.0) { [weak self, weak currentProcess] in
+                guard let self, let currentProcess, currentProcess.isRunning else { return }
+                log.error("Backend process did not respond to SIGINT; sending SIGKILL")
+                _ = kill(currentProcess.processIdentifier, SIGKILL)
+
+                // Force cleanup asynchronously on the work queue in case termination handler doesn't trigger
+                self.workQueue.async { [weak self] in
+                    self?.cleanupAfterTermination()
+                }
+            }
+        }
+    }
+
+    private func cleanupAfterTermination() {
+        dispatchPrecondition(condition: .onQueue(workQueue))
+        
+        let hasActive = (process != nil || activeConfiguration != nil)
+        if hasActive {
+            self.process = nil
+            self.activeConfiguration = nil
+            self._lastStartupFailureReason = nil
+            self.clearPipeHandlers()
+            Self.removePIDFile()
+            log.info("Backend process cleanup completed")
         }
 
-        if process.isRunning {
-            process.interrupt()
+        if let pending = pendingConfiguration {
+            pendingConfiguration = nil
+            intentionalShutdown = false
+            startIfNeededOnWorkQueue(configuration: pending)
         }
-
-        if process.isRunning {
-            _ = kill(process.processIdentifier, SIGKILL)
-        }
-
-        self.process = nil
-        activeConfiguration = nil
-        _lastStartupFailureReason = nil
-        clearPipeHandlers()
-        Self.removePIDFile()
     }
 
     private func isOnWorkQueue() -> Bool {

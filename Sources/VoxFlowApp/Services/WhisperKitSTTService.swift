@@ -42,7 +42,7 @@ final class WhisperKitSTTService {
         let floatSamples = await Task.detached {
             Self.convertPCMInt16ToFloat(audio.pcm)
         }.value
-        let conversionLatencyMs = Self.elapsedMilliseconds(since: conversionStarted)
+        let conversionLatencyMs = conversionStarted.elapsedMilliseconds()
 
         let inferenceStarted = ContinuousClock.now
         let results: [TranscriptionResult] = try await pipe.transcribe(
@@ -52,10 +52,10 @@ final class WhisperKitSTTService {
                 wordTimestamps: true
             )
         )
-        let inferenceLatencyMs = Self.elapsedMilliseconds(since: inferenceStarted)
+        let inferenceLatencyMs = inferenceStarted.elapsedMilliseconds()
 
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        let latencyMs = Self.elapsedMilliseconds(since: started)
+        let latencyMs = started.elapsedMilliseconds()
 
         let confidence: Double = {
             guard let first = results.first, let seg = first.segments.first else { return 0.0 }
@@ -129,12 +129,6 @@ final class WhisperKitSTTService {
                 Float(int16Buffer[i]) / Float(Int16.max)
             }
         }
-    }
-
-    nonisolated private static func elapsedMilliseconds(since started: ContinuousClock.Instant) -> Int {
-        let elapsed = started.duration(to: .now)
-        return Int(elapsed.components.seconds) * 1000
-            + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
     }
 }
 

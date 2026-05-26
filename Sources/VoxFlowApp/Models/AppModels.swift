@@ -696,3 +696,11 @@ struct PrivacyPreview {
     let originalText: String
     let redactedText: String
 }
+
+extension ContinuousClock.Instant {
+    func elapsedMilliseconds() -> Int {
+        let duration = self.duration(to: .now)
+        return Int(duration.components.seconds) * 1000
+            + Int(duration.components.attoseconds / 1_000_000_000_000_000)
+    }
+}

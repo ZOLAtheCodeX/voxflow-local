@@ -40,7 +40,7 @@ private final class CapturePipelineTraceBuilder {
     }
 
     func recordStage(_ name: String, startedAt: ContinuousClock.Instant, detail: String? = nil) {
-        let elapsed = Self.elapsedMilliseconds(since: startedAt)
+        let elapsed = startedAt.elapsedMilliseconds()
         stageTimings.append(PipelineStageTiming(name: name, durationMs: elapsed, detail: detail))
     }
 
@@ -56,7 +56,7 @@ private final class CapturePipelineTraceBuilder {
             providerMode: providerMode,
             commandLane: commandLane,
             audioDurationMs: audioDurationMs,
-            totalDurationMs: Self.elapsedMilliseconds(since: started),
+            totalDurationMs: started.elapsedMilliseconds(),
             sessionState: sessionState,
             statusLine: statusLine,
             recordedAt: recordedAt,
@@ -64,11 +64,6 @@ private final class CapturePipelineTraceBuilder {
         )
     }
 
-    private static func elapsedMilliseconds(since startedAt: ContinuousClock.Instant) -> Int {
-        let duration = startedAt.duration(to: .now)
-        return Int(duration.components.seconds) * 1000
-            + Int(duration.components.attoseconds / 1_000_000_000_000_000)
-    }
 }
 
 @MainActor
@@ -110,6 +105,7 @@ final class AppCoordinator: ObservableObject {
     private static let maxCaptureDuration: TimeInterval = 60
     private static let minCaptureSamples: Int = 4800 // 0.3s at 16kHz mono PCM16 = 4800 samples = 9600 bytes
     private var warmupTask: Task<Void, Never>?
+    private var selectToneStyleTask: Task<Void, Never>?
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
     private var mainWindowController: NSWindowController?
     private(set) var menuBarPanel: MenuBarPanelController?
@@ -355,6 +351,8 @@ final class AppCoordinator: ObservableObject {
     }
 
     func startCapture(commandLane: Bool = false) {
+        selectToneStyleTask?.cancel()
+        selectToneStyleTask = nil
         guard state.sessionState == .idle || state.sessionState == .review || state.sessionState == .error || state.sessionState == .onboarding else {
             let blockedState = state.sessionState
             log.warning("startCapture blocked: sessionState=\(String(describing: blockedState))")
@@ -730,12 +728,15 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        Task { @MainActor in
+        selectToneStyleTask?.cancel()
+        selectToneStyleTask = Task { @MainActor in
             do {
+                try Task.checkCancellation()
                 // Local retone for WhisperKit
                 if self.state.sttBackend == .whisperKit {
                     let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: tone)
                     let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: tone)
+                    try Task.checkCancellation()
                     state.transcriptCandidate = TranscriptCandidate(
                         rawText: rawText, lightText: lightText,
                         polishText: polishText, selectedMode: state.selectedMode,
@@ -752,6 +753,7 @@ final class AppCoordinator: ObservableObject {
                     toneStyle: tone,
                     providerMode: .localOnly
                 ).outputText
+                try Task.checkCancellation()
 
                 let polishText = try await BackendAPIClient.cleanup(
                     sessionID: "retone-\(sessionCounter)",
@@ -760,6 +762,7 @@ final class AppCoordinator: ObservableObject {
                     toneStyle: tone,
                     providerMode: .localOnly
                 ).outputText
+                try Task.checkCancellation()
 
                 state.transcriptCandidate = TranscriptCandidate(
                     rawText: rawText,
@@ -770,6 +773,7 @@ final class AppCoordinator: ObservableObject {
                 )
                 state.statusLine = "Tone: \(tone.displayName)"
             } catch {
+                guard !Task.isCancelled else { return }
                 state.errorMessage = "Unable to apply tone: \(error.localizedDescription)"
             }
         }

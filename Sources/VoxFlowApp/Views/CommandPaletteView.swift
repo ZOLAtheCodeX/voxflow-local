@@ -11,7 +11,6 @@ struct CommandPaletteView: View {
     @State private var showClearHistoryAlert = false
     @State private var showProfilePopover = false
     @State private var transcribingElapsed: Int = 0
-    @State private var transcribingTimer: Timer?
 
     private enum ActivePanel: String, CaseIterable, Identifiable {
         case capture
@@ -639,24 +638,18 @@ struct CommandPaletteView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 150)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
-        .onAppear { startTranscribingTimer() }
-        .onDisappear { stopTranscribingTimer() }
-    }
-
-    private func startTranscribingTimer() {
-        transcribingElapsed = 0
-        transcribingTimer?.invalidate()
-        transcribingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            Task { @MainActor in
-                transcribingElapsed += 1
+        .task {
+            transcribingElapsed = 0
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    transcribingElapsed += 1
+                } catch {
+                    break
+                }
             }
+            transcribingElapsed = 0
         }
-    }
-
-    private func stopTranscribingTimer() {
-        transcribingTimer?.invalidate()
-        transcribingTimer = nil
-        transcribingElapsed = 0
     }
 
     private var footerBar: some View {
