@@ -107,3 +107,44 @@ def test_transcribe_success():
 
     # Verify pipeline was called (engine calls pipeline(...) internally)
     mock_pipeline_instance.assert_called_once()
+
+
+def test_short_audio_disables_chunking():
+    """Phase 5.1: audio < 20s should be inferred without chunking."""
+    engine = WhisperEngine()
+
+    mock_pipeline_instance = MagicMock()
+    mock_pipeline_instance.return_value = {"text": "short clip"}
+    sys.modules["transformers"].pipeline.return_value = mock_pipeline_instance
+
+    # 5 seconds @ 16 kHz mono int16 = 160_000 bytes < 20s threshold.
+    five_sec_pcm = bytes(5 * 16000 * 2)
+    engine.transcribe(five_sec_pcm, 16000, "en")
+
+    mock_pipeline_instance.assert_called_once()
+    call_kwargs = mock_pipeline_instance.call_args.kwargs
+    assert call_kwargs.get("chunk_length_s") == 0, (
+        f"short audio should pass chunk_length_s=0 to disable chunking, "
+        f"got {call_kwargs.get('chunk_length_s')!r}"
+    )
+
+
+def test_long_audio_keeps_default_chunking():
+    """Phase 5.1: audio >= 20s should keep the pipeline's default chunking."""
+    engine = WhisperEngine()
+
+    mock_pipeline_instance = MagicMock()
+    mock_pipeline_instance.return_value = {"text": "long clip"}
+    sys.modules["transformers"].pipeline.return_value = mock_pipeline_instance
+
+    # 25 seconds @ 16 kHz mono int16 = 800_000 bytes >= 20s threshold.
+    twenty_five_sec_pcm = bytes(25 * 16000 * 2)
+    engine.transcribe(twenty_five_sec_pcm, 16000, "en")
+
+    mock_pipeline_instance.assert_called_once()
+    call_kwargs = mock_pipeline_instance.call_args.kwargs
+    # The constructor-time chunking stays in effect; no per-call override.
+    assert "chunk_length_s" not in call_kwargs, (
+        f"long audio should not override chunk_length_s, "
+        f"got {call_kwargs.get('chunk_length_s')!r}"
+    )

@@ -186,13 +186,36 @@ class WhisperEngine:
             )
 
         try:
+            # Skip chunking for short audio: the pipeline was constructed
+            # with chunk_length_s=30 + stride=[5,1] which adds ~6s of
+            # redundant pre/post padding around every chunk. For a 2-10s
+            # dictation that fits in a single chunk anyway, the padding is
+            # pure overhead. We override chunk_length_s=0 per-call to
+            # disable chunking and let the pipeline run the audio as a
+            # single sample. (Phase 5.1.)
+            #
+            # Duration is computed from the raw PCM bytes (int16 = 2 bytes
+            # per sample) rather than the numpy array so the path stays
+            # deterministic under test mocks that stub out numpy.
+            audio_duration_s = (len(pcm) // 2) / max(sample_rate, 1)
+            short_audio = audio_duration_s < 20.0
             inference_started = time.perf_counter()
+            pipeline_kwargs: dict[str, object] = {
+                "generate_kwargs": {"language": language_hint},
+                "return_timestamps": True,
+            }
+            if short_audio:
+                pipeline_kwargs["chunk_length_s"] = 0
+                logger.debug(
+                    "Whisper short-audio fast path: %.2fs < 20s, chunking disabled",
+                    audio_duration_s,
+                )
             output = self._pipeline(
                 {"array": audio, "sampling_rate": sample_rate},
-                generate_kwargs={"language": language_hint},
-                return_timestamps=True,
+                **pipeline_kwargs,
             )
             stage_timings_ms["stt_inference"] = int((time.perf_counter() - inference_started) * 1000)
+            stage_timings_ms["audio_duration_ms"] = int(audio_duration_s * 1000)
             text = str(output.get("text", "")).strip()
             confidence = self._estimate_confidence(output, text, audio, sample_rate)
             return STTExecutionResult(
