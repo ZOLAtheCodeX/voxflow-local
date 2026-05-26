@@ -16,3 +16,4 @@ backend/tests/fixtures/golden_clips/*.tmp.aiff
 backend/tests/fixtures/golden_clips/*.aiff
 .worktrees/
 .claude/settings.local.json
+.superpowers/
