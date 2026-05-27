@@ -252,11 +252,11 @@ export VOXFLOW_MODELS_DIR="$(pwd)/models"
 ```bash
 # Install Ollama from https://ollama.com/download, then:
 ollama serve &
-ollama pull gemma4:e4b-mlx   # recommended for ≥16 GB RAM
+ollama pull gemma4:e4b-mlx   # recommended for ≥16 GB RAM (~8.3 GB resident in unified memory)
 # ollama pull gemma4:e2b-mlx # smaller — recommended for 8–16 GB RAM
 ```
 
-VoxFlow probes Ollama at startup (`GET /v1/ready` exposes `ollama_available`). Settings → Local AI Model shows the reachability pill and lets you pull a model with a live NDJSON progress bar. `VOXFLOW_OLLAMA_URL` (default `http://localhost:11434`) and `VOXFLOW_OLLAMA_MODEL` (default `gemma4:e4b-mlx`) override the connection.
+VoxFlow probes Ollama at startup (`GET /v1/ready` exposes `ollama_available`). That flag only confirms the API socket is reachable — it does not verify that the configured model is pulled; if the model is missing, polish silently falls back to the regex pipeline. Settings → Local AI Model shows the reachability pill and lets you pull a model with a live NDJSON progress bar. `VOXFLOW_OLLAMA_URL` (default `http://localhost:11434`) and `VOXFLOW_OLLAMA_MODEL` (default `gemma4:e4b-mlx`) override the connection. Ollama unloads the model after `OLLAMA_KEEP_ALIVE` (default `5m`); `export OLLAMA_KEEP_ALIVE=24h` before `ollama serve` to pin it in memory and avoid cold-load latency across idle gaps.
 
 - Translate backend options:
   - `VOXFLOW_TRANSLATE_BACKEND=auto` (default; uses `translategemma` for TranslateGemma models, otherwise `marian`)

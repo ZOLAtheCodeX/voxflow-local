@@ -70,7 +70,9 @@ ollama serve &
 ollama pull gemma4:e4b-mlx        # ≥16 GB RAM (recommended) — or gemma4:e2b-mlx for 8–16 GB
 ```
 
-If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanup())`.
+`gemma4:e4b-mlx` holds ~8.3 GB resident in unified memory (verify via `curl localhost:11434/api/ps` → `size_vram`). Ollama unloads the model after `OLLAMA_KEEP_ALIVE` (default `5m`); `export OLLAMA_KEEP_ALIVE=24h` before `ollama serve` to pin it and avoid cold-load latency across idle gaps.
+
+If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanup())`. Same fallback fires when Ollama is reachable but the configured model isn't pulled — `/v1/ready` returns `ollama_available: true` either way (it probes the API socket only, not model presence).
 
 ### Environment Variables
 
@@ -138,7 +140,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 | `ModuleNotFoundError: fastapi` | Broken venv | `rm -rf .venv && ./scripts/bootstrap_backend.sh` |
 | `conditional downcast to CoreFoundation type` | Swift 6.2 CF bridging | `CFGetTypeID` guard + `as!`, not `as?` |
 | Backend unreachable | Backend not running | `./scripts/run_backend.sh`; check port 8765 |
-| Polish output looks like raw light_cleanup | Ollama not running | `ollama serve && ollama pull gemma4:e4b-mlx`; check `/v1/ready` → `ollama_available` |
+| Polish output looks like raw light_cleanup | Ollama unreachable, OR model not pulled | `ollama serve && ollama pull gemma4:e4b-mlx`; confirm pulled via `curl localhost:11434/api/tags` — `ollama_available` alone doesn't catch the missing-model case |
 | Accessibility permission won't stick | Ad-hoc signing CDHash changes per rebuild | Use Apple Development cert; override with `VOXFLOW_SIGN_IDENTITY` |
 | Accessibility shows "Missing" after granting | UI checked before user approved in System Settings | Click "Request" again — polling auto-updates within 2 s |
 
