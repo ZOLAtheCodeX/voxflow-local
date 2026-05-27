@@ -110,3 +110,67 @@ class TestPolishEngineEchoDetection:
 
     def test_minor_edit_not_echo(self):
         assert PolishEngine._is_echo("send the report", "Please send the report.") is False
+
+
+class _StubBackend:
+    """Minimal backend that returns whatever its constructor was given."""
+    name = "stub"
+
+    def __init__(self, response: str = ""):
+        self._response = response
+
+    def polish(self, text: str, tone: str, system_prompt: str | None = None) -> str:
+        return self._response
+
+
+class TestPolishEngineSmartActionBypass:
+    """Smart-action calls (system_prompt supplied) bypass the polish
+    guardrail + echo checks. Structural transformations (memo, MECE,
+    steel-man, Pyramid) intentionally diverge from input — the polish
+    guardrail's similarity + length-ratio thresholds would otherwise
+    silently substitute regex output for legitimate LLM transformations.
+    """
+
+    _ORIGINAL = "we have a question and need to decide a path."
+
+    def test_smart_action_low_similarity_output_is_returned_verbatim(self):
+        memo_output = (
+            "# Issue\nWhich path forward?\n\n"
+            "# Analysis\nTwo options have been raised.\n\n"
+            "# Recommendation\nProceed with option A."
+        )
+        engine = PolishEngine(backend=_StubBackend(memo_output))
+        output, guardrail = engine.polish(
+            text=self._ORIGINAL,
+            tone="neutral",
+            system_prompt="Restructure as memo with Issue/Analysis/Recommendation.",
+        )
+        assert output == memo_output
+        assert guardrail is False
+
+    def test_smart_action_echo_is_returned_verbatim_not_regex_fallback(self):
+        engine = PolishEngine(backend=_StubBackend(self._ORIGINAL))
+        output, guardrail = engine.polish(
+            text=self._ORIGINAL,
+            tone="neutral",
+            system_prompt="Restructure as MECE bullet groups.",
+        )
+        assert output == self._ORIGINAL
+        assert guardrail is False
+
+    def test_smart_action_empty_candidate_still_falls_back_to_regex(self):
+        engine = PolishEngine(backend=_StubBackend(""))
+        output, guardrail = engine.polish(
+            text=self._ORIGINAL,
+            tone="neutral",
+            system_prompt="Extract action items.",
+        )
+        assert output != ""
+        assert guardrail is False
+
+    def test_polish_path_still_applies_guardrail_when_no_system_prompt(self):
+        divergent = "completely unrelated text about kayaking and weather."
+        engine = PolishEngine(backend=_StubBackend(divergent))
+        output, guardrail = engine.polish(text=self._ORIGINAL, tone="neutral")
+        assert guardrail is True
+        assert "kayaking" not in output

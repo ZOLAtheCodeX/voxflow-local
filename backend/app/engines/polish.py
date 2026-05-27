@@ -69,9 +69,12 @@ class PolishEngine:
         """Polish ``text`` through the configured backend.
 
         When ``system_prompt`` is supplied (e.g. from SmartActionEngine for
-        memo / MECE / steel-man transformations), it overrides the backend's
-        default polish prompt. The guardrail + echo + fallback rules still
-        apply uniformly.
+        memo / MECE / steel-man / Pyramid transformations), the guardrail
+        + echo checks are skipped — those rules are designed for polish
+        ("output should look like input but cleaner") and would reject
+        legitimate structural transformations whose whole point is to
+        diverge from the input. The empty-output fallback still applies
+        so a backend failure still gives the caller usable text.
         """
         if not text.strip():
             return "", False
@@ -87,6 +90,12 @@ class PolishEngine:
 
         if not candidate:
             return apply_tone(light_cleanup(text), tone), False
+
+        # Smart-action path: trust the LLM output. Unchanged-echo is filtered
+        # one layer up (SmartActionService undo stack + CockpitCoordinator
+        # session history), so we don't need to detect it here.
+        if system_prompt is not None:
+            return candidate, False
 
         if self._guardrail_triggered(text, candidate):
             return apply_tone(light_cleanup(text), tone), True
