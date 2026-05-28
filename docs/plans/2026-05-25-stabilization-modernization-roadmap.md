@@ -11,12 +11,12 @@
 ## Shipping Status (as of 2026-05-26)
 
 | Phase | Status | Branch | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Phase 1 — Quick Wins (QW-1..8) | ✅ Shipped | `master` (commit `b04badd`) | All 8 quick wins merged before this roadmap exited draft. |
-| Phase 2 — Decompose & Test | ⚠️ Partial | `feature/phase-2-decompose` (tasks 1–4 committed: `c85c933` nlp, `6325c23` privacy, `79617fa` engines, `1b2dac6` routing + schemas). Task 5 (api/ extraction) stashed — 4 privacy-token tests fail under it. Tasks 6–14 (Swift coordinator extraction + concurrency hardening + new tests) deferred. |
+| Phase 2 — Decompose & Test | ⚠️ Partial | `feature/phase-2-decompose` | (tasks 1–4 committed: `c85c933` nlp, `6325c23` privacy, `79617fa` engines, `1b2dac6` routing + schemas). Task 5 (api/ extraction) stashed — 4 privacy-token tests fail under it. Tasks 6–14 (Swift coordinator extraction + concurrency hardening + new tests) deferred. |
 | Phase 3 — Ollama / Gemma 4 Polish | ✅ Shipped | `feature/phase-3-ollama` (tip `370d74c`) | All 5 sub-phases (3.1–3.5) complete; FLAN-T5 fully removed; OllamaBackend is the only polish backend; regex `apply_tone(light_cleanup())` is the documented unavailability fallback. PHASE_3_COMPLETE emitted 2026-05-26. Local-validation owed to user: run `scripts/measure_polish_latency.py` with Ollama up to fill in real latency numbers, and `VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py` to confirm <15% guardrail trigger rate on this user's hardware. |
 | Phase 4 — UI Modernization | ✅ Shipped | `feature/phase-4-ui` (tip `e698e23`) | Translucent panel + materials sweep + token-driven typography/colors/motion + 4-step `StagedProgressView` + target-app indicator + conditional Settings fields + Skip Calibration + `ConfidenceBadge` a11y + T0·M0 expansion + shared `MetricCardView`. Zero hardcoded `.font(.system(size:))` in `SetupWizardView/SettingsView/DashboardWindowView` (was 79). Zero `Color.gray.opacity` in `Sources/VoxFlowApp/Views/`. PHASE_4_COMPLETE emitted 2026-05-26. |
-| Phase 5 — Performance Polish | ⏳ In-flight | `feature/phase-5-perf` (5.1 short-audio whisper fast path, 5.2 Luhn-validated CC redaction, 5.3 lock-guarded rate limiter, 5.4 WebSocket idle timeout, 5.5 FocusContextMonitor frozen-poll short-circuit — all committed). 5.7/5.8 docs (this revision). |
+| Phase 5 — Performance Polish | ⏳ In-flight | `feature/phase-5-perf` | (5.1 short-audio whisper fast path, 5.2 Luhn-validated CC redaction, 5.3 lock-guarded rate limiter, 5.4 WebSocket idle timeout, 5.5 FocusContextMonitor frozen-poll short-circuit — all committed). 5.7/5.8 docs (this revision). |
 
 Phase 5.6 (`AppState` `BackendReadinessState` collapse) overlaps with deferred Phase 2 Task 8 — likely lands as part of the Phase 2 closeout rather than Phase 5.
 
