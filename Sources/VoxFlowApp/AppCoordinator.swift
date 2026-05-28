@@ -616,10 +616,13 @@ final class AppCoordinator: ObservableObject {
         log.info("Transcription: \(rawText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
         #endif
 
-        if rawText.isEmpty || rawText.hasPrefix("[transcription") {
-            log.info("Empty or placeholder transcription — discarding")
+        let audioDurationSec = Double(capturedAudio.pcm.count) / (capturedAudio.sampleRate * Double(MemoryLayout<Int16>.size))
+        let isShortAudio = audioDurationSec < 3.0
+
+        if rawText.isEmpty || rawText.hasPrefix("[transcription") || HallucinationFilter.isLikelyHallucination(rawText, shortAudio: isShortAudio) {
+            log.info("Empty, placeholder, or filtered hallucination transcription — discarding")
             state.sessionState = .idle
-            state.statusLine = rawText.isEmpty ? "No speech detected — try again" : rawText
+            state.statusLine = "No speech detected — try again"
             state.recordingDuration = 0
             return
         }
@@ -628,8 +631,6 @@ final class AppCoordinator: ObservableObject {
         // Single-word results are checked at any duration (Whisper often hallucinates
         // a lone "hello" on long silent/noisy clips). Two-word results only on short audio.
         let wordCount = rawText.split(whereSeparator: \.isWhitespace).count
-        let audioDurationSec = Double(capturedAudio.pcm.count) / (capturedAudio.sampleRate * Double(MemoryLayout<Int16>.size))
-        let isShortAudio = audioDurationSec < 3.0
         let isSuspect = (wordCount == 1 && transcription.confidenceEstimate < 0.15)
             || (isShortAudio && wordCount <= 2 && transcription.confidenceEstimate < 0.08)
         if isSuspect {

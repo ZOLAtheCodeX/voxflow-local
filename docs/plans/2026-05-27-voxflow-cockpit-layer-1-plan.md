@@ -957,23 +957,23 @@ git commit -m "feat(dictionary): side-panel Dictionary card (recent learned term
 
 # Phase C — Notion integration (OUTLINE — needs its own detailed plan)
 
+# Phase C — Notion integration (OUTLINE — needs its own detailed plan)
+
 > Each of C/D/E is an independent shippable subsystem. Expand to full TDD detail when reached. Do NOT start before Phase B ships and is dogfooded.
 
-**Decision:** reuse the Notion MCP. The backend becomes an **MCP client** that spawns the Notion MCP server as a managed subprocess.
-
-**⚠️ Lead with a spike (C0):** prove the Notion MCP server can run **headless** (no Claude running) with credentials supplied via env/config, and that the backend can complete the MCP handshake + a `search` + `append-block` call. **If the spike fails** (auth requires interactive OAuth via Claude), fall back to the design-doc's original approach — backend-proxied Notion REST API with an integration token in Keychain. Budget the spike before committing to the MCP path.
+**Decision:** Leverage the **Notion REST API** with an internal integration token stored securely in the macOS **Keychain**. This avoids the massive complexity of a headless MCP client and is much more robust than relying on third-party CLI wrappers.
 
 **Likely file structure:**
-- `backend/app/integrations/notion_mcp.py` — MCP client: subprocess lifecycle, JSON-RPC over stdio, `search_pages`, `append_blocks`
+- `backend/app/integrations/notion_rest.py` — Python client for the Notion REST API (`httpx` based), handling `search` and `append_block` operations.
 - `backend/app/api/endpoints.py` — `POST /v1/notion/search`, `POST /v1/notion/append` (rate-limit + consent patterns honored)
 - `backend/app/schemas.py` — `NotionSearchRequest/Response`, `NotionAppendRequest/Response`
 - `Sources/VoxFlowApp/Services/BackendAPIClient.swift` — `notionSearch`, `notionAppend` methods
+- `Sources/VoxFlowApp/Services/KeychainService.swift` — Secure storage for the Notion integration token.
 - Cockpit target picker — add "Notion · \<page\>" entries; append-at-cursor behavior
-- `KeychainService` — Notion credentials (never UserDefaults)
 
-**Task sketch:** C0 headless-MCP spike → C1 backend MCP client + tests (mock MCP server) → C2 `/v1/notion/*` endpoints → C3 Swift client methods → C4 target-picker "Notion · page" entries → C5 wire smart-action → Notion append → C6 Settings → Integrations → Notion.
+**Task sketch:** C1 `KeychainService` Swift implementation → C2 Python backend REST client + tests (mocking `httpx`) → C3 `/v1/notion/*` endpoints → C4 Swift client methods → C5 Settings UI to input the token → C6 target-picker "Notion · page" entries → C7 wire smart-action → Notion append.
 
-**Risks:** headless MCP auth (primary); subprocess lifecycle/zombies (use `BackendProcessManager`-style supervision); Notion API rate limits; token storage. All MCP calls must be timeout-bounded.
+**Risks:** Notion API rate limits; handling token expiry/revocation gracefully; securely passing the token from Swift to the Python backend (e.g., via a secure header on the local loopback).
 
 # Phase D — Voice snippets (OUTLINE)
 
