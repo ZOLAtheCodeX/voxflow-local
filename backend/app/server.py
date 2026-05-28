@@ -45,12 +45,15 @@ from context import (  # noqa: F401
     readiness_snapshot,
     resolve_effective_text,
     run_blocking,
+    notion_client,
     smart_action_engine,
     state,
     stt_fallback_active,
     translate_engine,
     whisper_engine,
 )
+
+from integrations.notion_rest import NotionError  # noqa: F401
 
 from engines import (  # noqa: F401
     OpenAIAudioClient,
@@ -104,6 +107,11 @@ from routing import (  # noqa: F401
 from smart_actions import SmartActionEngine  # noqa: F401
 
 from schemas import (  # noqa: F401
+    NotionAppendRequest,
+    NotionAppendResponse,
+    NotionSearchRequest,
+    NotionSearchResponse,
+    NotionSearchResult,
     CleanupRequest,
     CleanupResponse,
     MeetingRequest,
@@ -137,6 +145,8 @@ from api.endpoints import (  # noqa: E402, F401
     events,
     health,
     meeting_summarize,
+    notion_append,
+    notion_search,
     ollama_models,
     ollama_pull,
     privacy_preview,

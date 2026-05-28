@@ -16,6 +16,7 @@ from context import (
     MAX_AUDIO_PAYLOAD_BYTES,
     state,
     audit_logger,
+    notion_client,
     private_api_client,
     openai_audio_client,
     provider_router,
@@ -28,6 +29,8 @@ from context import (
     get_ml_semaphore,
     run_blocking,
 )
+
+from integrations.notion_rest import NotionError
 
 from engines.llm_backend import (
     detect_host_memory_bytes,
@@ -55,6 +58,11 @@ from schemas import (
     CleanupResponse,
     MeetingRequest,
     MeetingSummaryResponse,
+    NotionAppendRequest,
+    NotionAppendResponse,
+    NotionSearchRequest,
+    NotionSearchResponse,
+    NotionSearchResult,
     OllamaModelInfo,
     OllamaModelsResponse,
     OllamaPullRequest,
@@ -367,6 +375,29 @@ def ollama_pull(payload: OllamaPullRequest) -> StreamingResponse:
         pull_ollama_model_stream(payload.model),
         media_type="application/x-ndjson",
     )
+
+
+@router.post("/v1/notion/search", response_model=NotionSearchResponse)
+async def notion_search(payload: NotionSearchRequest) -> NotionSearchResponse:
+    try:
+        results = await run_blocking(
+            notion_client.search, token=payload.notion_token, query=payload.query
+        )
+    except NotionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return NotionSearchResponse(results=[NotionSearchResult(**r) for r in results])
+
+
+@router.post("/v1/notion/append", response_model=NotionAppendResponse)
+async def notion_append(payload: NotionAppendRequest) -> NotionAppendResponse:
+    try:
+        count = await run_blocking(
+            notion_client.append,
+            token=payload.notion_token, page_id=payload.page_id, text=payload.text,
+        )
+    except NotionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return NotionAppendResponse(appended_blocks=count)
 
 
 @router.websocket("/v1/events")

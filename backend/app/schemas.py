@@ -152,6 +152,53 @@ class SmartActionResponse(BaseModel):
     error: str | None = None
 
 
+class NotionSearchRequest(BaseModel):
+    notion_token: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=500)
+
+    @field_validator("notion_token")
+    @classmethod
+    def _token_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("notion_token must not be blank")
+        return value
+
+
+class NotionSearchResult(BaseModel):
+    id: str
+    title: str
+    url: str
+
+
+class NotionSearchResponse(BaseModel):
+    results: list[NotionSearchResult]
+
+
+class NotionAppendRequest(BaseModel):
+    notion_token: str = Field(min_length=1)
+    page_id: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=50_000)
+
+    @field_validator("notion_token")
+    @classmethod
+    def _token_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("notion_token must not be blank")
+        return value
+
+    @field_validator("text")
+    @classmethod
+    def _text_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("text must not be blank")
+        return value
+
+
+class NotionAppendResponse(BaseModel):
+    appended_blocks: int
+    error: str | None = None
+
+
 class OllamaModelInfo(BaseModel):
     name: str
     size: int = 0

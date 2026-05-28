@@ -26,6 +26,7 @@ from routing import (
 from schemas import (
     ReadyResponse,
 )
+from integrations.notion_rest import NotionRestClient
 from smart_actions import SmartActionEngine
 
 logger = logging.getLogger("voxflow")
@@ -68,6 +69,7 @@ provider_router = ProviderRouter(
 )
 
 smart_action_engine = SmartActionEngine(polish_backend=polish_engine)
+notion_client = NotionRestClient()
 
 
 def resolve_effective_text(
