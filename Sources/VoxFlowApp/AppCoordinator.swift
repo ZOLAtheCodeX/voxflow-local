@@ -116,10 +116,17 @@ final class AppCoordinator: ObservableObject {
         actionService: cockpitActionService,
         textInsertionCoordinator: textInsertion as? TextInsertionCoordinator
     )
+    private(set) lazy var cockpitDictionary: DictionaryStore = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let base = appSupport.appendingPathComponent("VoxFlow", isDirectory: true)
+        return DictionaryStore(fileURL: base.appendingPathComponent("dictionary.json"))
+    }()
     private(set) lazy var cockpitCapture: CockpitCaptureCoordinator = CockpitCaptureCoordinator(
         capture: AudioCaptureService(),
         transcriber: whisperKitService,
-        session: cockpitSessionService
+        session: cockpitSessionService,
+        dictionary: cockpitDictionary
     )
 
     private var timer: Timer?

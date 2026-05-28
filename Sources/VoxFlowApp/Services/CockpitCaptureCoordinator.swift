@@ -12,6 +12,7 @@ final class CockpitCaptureCoordinator {
     private let capture: AudioCapturing
     private let transcriber: ChunkTranscribing
     private let session: LongFormSessionService
+    private let dictionary: DictionaryStore?
     private let flushIntervalNs: UInt64
     private let minChunkBytes: Int
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCaptureCoordinator")
@@ -22,12 +23,14 @@ final class CockpitCaptureCoordinator {
         capture: AudioCapturing,
         transcriber: ChunkTranscribing,
         session: LongFormSessionService,
+        dictionary: DictionaryStore? = nil,
         flushIntervalNs: UInt64 = 5_000_000_000,
         minChunkBytes: Int = 8_000
     ) {
         self.capture = capture
         self.transcriber = transcriber
         self.session = session
+        self.dictionary = dictionary
         self.flushIntervalNs = flushIntervalNs
         self.minChunkBytes = minChunkBytes
     }
@@ -86,7 +89,8 @@ final class CockpitCaptureCoordinator {
             let response = try await transcriber.transcribe(audio)
             let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
-            session.appendChunk(text)
+            let corrected = dictionary?.apply(to: text) ?? text
+            session.appendChunk(corrected)
         } catch {
             log.error("chunk transcription failed: \(error.localizedDescription)")
         }

@@ -70,4 +70,18 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         XCTAssertEqual(session.currentSession?.transcript ?? "", "")
         await coord.stopRecording()
     }
+
+    func test_flushNow_applies_dictionary_corrections() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "the wherefor clause"
+        let dictURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        let dict = DictionaryStore(fileURL: dictURL, seedOnFirstRun: false)
+        dict.add(wrong: "wherefor", right: "WHEREFORE", context: nil)
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session, dictionary: dict)
+        coord.startRecording(targetApp: nil)
+        await coord.flushNow()
+        XCTAssertEqual(session.currentSession?.transcript, "the WHEREFORE clause")
+        await coord.stopRecording()
+    }
 }
