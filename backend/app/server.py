@@ -1,14 +1,27 @@
+"""VoxFlow Local Backend — composition root.
+
+This module is the FastAPI application entry point. It constructs the
+``app`` object, registers CORS + rate-limit middleware, mounts the API
+router from :mod:`api.endpoints`, and re-exports every singleton, helper,
+and type that was historically imported as ``from server import X`` so
+that the 360+ existing tests continue to work without modification.
+"""
+
 from __future__ import annotations
 
 import time
-import sys
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# 1. Re-export context variables and helper logic
-from context import (
+# ── Re-exports ────────────────────────────────────────────────────────
+# Everything below is re-exported purely so that ``from server import X``
+# keeps working across the test suite. New code should prefer importing
+# directly from the originating module (context, engines, nlp, …).
+
+from context import (  # noqa: F401
     MAX_AUDIO_BASE64_CHARS,
     MAX_AUDIO_PAYLOAD_BYTES,
     RuntimeState,
@@ -39,8 +52,7 @@ from context import (
     whisper_engine,
 )
 
-# 2. Re-export engines and engine types
-from engines import (
+from engines import (  # noqa: F401
     OpenAIAudioClient,
     PolishEngine,
     PromptFramingEngine,
@@ -49,8 +61,7 @@ from engines import (
     WhisperEngine,
 )
 
-# 3. Re-export NLP functions
-from nlp import (
+from nlp import (  # noqa: F401
     _WHISPER_HALLUCINATION_ALWAYS,
     _WHISPER_HALLUCINATION_SHORT_ONLY,
     apply_tone,
@@ -71,9 +82,14 @@ from nlp import (
     split_sentences,
 )
 
-# 4. Re-export privacy and routing components
-from privacy import AuditLogger, ConsentRecord, ConsentStore, redact_sensitive_text
-from routing import (
+from privacy import (  # noqa: F401
+    AuditLogger,
+    ConsentRecord,
+    ConsentStore,
+    redact_sensitive_text,
+)
+
+from routing import (  # noqa: F401
     PrivateAPIClient,
     PrivateAPIPolicy,
     ProviderRouter,
@@ -84,10 +100,10 @@ from routing import (
     normalize_provider_mode,
     normalize_stt_backend,
 )
-from smart_actions import SmartActionEngine
 
-# 4.5. Re-export schemas
-from schemas import (
+from smart_actions import SmartActionEngine  # noqa: F401
+
+from schemas import (  # noqa: F401
     CleanupRequest,
     CleanupResponse,
     MeetingRequest,
@@ -112,11 +128,10 @@ from schemas import (
     TTSResponse,
 )
 
+# WebSocket idle timeout — tests monkeypatch this via ``server._WEBSOCKET_IDLE_TIMEOUT_S``
 _WEBSOCKET_IDLE_TIMEOUT_S = 60.0
 
-
-# 5. Import APIRouter and endpoint functions
-from api.endpoints import (
+from api.endpoints import (  # noqa: E402, F401
     router as api_router,
     cleanup,
     events,
@@ -133,12 +148,20 @@ from api.endpoints import (
     tts,
 )
 
+# ── Application setup ────────────────────────────────────────────────
+
+
 @asynccontextmanager
 async def app_lifespan(_: FastAPI):
     initialize_runtime_state()
     yield
 
-app = FastAPI(title="VoxFlow Local Backend", version="0.1.0", lifespan=app_lifespan)
+
+app = FastAPI(
+    title="VoxFlow Local Backend",
+    version="0.1.0",
+    lifespan=app_lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -148,10 +171,16 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
+# ── Rate-limit middleware ─────────────────────────────────────────────
+
 _LAST_CLEANUP_TIME = 0.0
 
+
 @app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+async def rate_limit_middleware(
+    request: Request,
+    call_next,
+):  # type: ignore[no-untyped-def]
     global _LAST_CLEANUP_TIME
     client = request.client.host if request.client else "unknown"
     now = time.time()
@@ -160,9 +189,9 @@ async def rate_limit_middleware(request: Request, call_next):  # type: ignore[no
         # Periodic cleanup of stale clients (every 5 minutes)
         if now - _LAST_CLEANUP_TIME > _CLEANUP_INTERVAL:
             stale_cutoff = now - _RATE_LIMIT_WINDOW
-            # Create a list of keys to remove to avoid modifying dict during iteration
             stale_clients = [
-                ip for ip, timestamps in _rate_limit_timestamps.items()
+                ip
+                for ip, timestamps in _rate_limit_timestamps.items()
                 if not timestamps or timestamps[-1] < stale_cutoff
             ]
             for ip in stale_clients:
@@ -170,15 +199,20 @@ async def rate_limit_middleware(request: Request, call_next):  # type: ignore[no
             _LAST_CLEANUP_TIME = now
 
         timestamps = _rate_limit_timestamps[client]
-        # Filter only current client's timestamps
-        valid_timestamps = [ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW]
+        valid_timestamps = [
+            ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW
+        ]
         _rate_limit_timestamps[client] = valid_timestamps
 
         if len(valid_timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
-            return JSONResponse(status_code=429, content={"detail": "Rate limited"})
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limited"},
+            )
 
         valid_timestamps.append(now)
     return await call_next(request)
+
 
 app.include_router(api_router)
 

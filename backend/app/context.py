@@ -3,12 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import time
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any
 
 from engines import (
     OpenAIAudioClient,
@@ -204,4 +202,3 @@ _CLEANUP_INTERVAL = 300.0  # 5 minutes
 _RATE_LIMIT_LOCK = Lock()
 
 _WEBSOCKET_IDLE_TIMEOUT_S = 60.0
-

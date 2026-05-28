@@ -4,7 +4,6 @@ import base64
 import time
 import asyncio
 import os
-import sys
 import logging
 from typing import Any
 
@@ -16,11 +15,6 @@ from context import (
     MAX_AUDIO_BASE64_CHARS,
     MAX_AUDIO_PAYLOAD_BYTES,
     state,
-    whisper_engine,
-    polish_engine,
-    translate_engine,
-    prompt_framing_engine,
-    consent_store,
     audit_logger,
     private_api_client,
     openai_audio_client,
@@ -164,7 +158,10 @@ async def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
         audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
         is_short = audio_duration_s < 3.0
         if is_whisper_hallucination(text, short_audio=is_short):
-            logger.info("Filtered Whisper hallucination (%.1fs, short=%s, backend=%s)", audio_duration_s, is_short, stt_backend)
+            logger.info(
+                "Filtered Whisper hallucination (%.1fs, short=%s, backend=%s)",
+                audio_duration_s, is_short, stt_backend,
+            )
             text = ""
             confidence = 0.0
 
@@ -382,14 +379,14 @@ async def events(websocket: WebSocket) -> None:
     try:
         while True:
             try:
-                _msg: Any = await asyncio.wait_for(
+                _msg: Any = await asyncio.wait_for(  # noqa: F841
                     websocket.receive_text(),
                     timeout=server._WEBSOCKET_IDLE_TIMEOUT_S,
                 )
             except asyncio.TimeoutError:
                 logger.info(
                     "WebSocket idle for %.0fs — closing cleanly",
-                    _WEBSOCKET_IDLE_TIMEOUT_S,
+                    server._WEBSOCKET_IDLE_TIMEOUT_S,
                 )
                 await websocket.close(code=1000, reason="idle timeout")
                 return
