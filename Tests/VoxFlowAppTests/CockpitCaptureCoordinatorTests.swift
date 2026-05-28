@@ -20,6 +20,11 @@ private final class FakeTranscriber: ChunkTranscribing, @unchecked Sendable {
     }
 }
 
+// Note: the `isFlushing` reentrancy guard is correct by inspection — it's a
+// synchronous Bool check evaluated before the first `await` on the @MainActor,
+// so a concurrent flushNow() bails before any stop/restart. A timing-based test
+// for it is inherently racy (continuation-resume ordering) and was removed.
+
 @MainActor
 final class CockpitCaptureCoordinatorTests: XCTestCase {
     private func makeAudio(silent: Bool) -> CapturedAudio {

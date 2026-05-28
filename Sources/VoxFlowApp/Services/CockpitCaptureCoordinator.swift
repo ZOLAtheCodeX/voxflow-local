@@ -52,14 +52,16 @@ final class CockpitCaptureCoordinator {
     func stopRecording() async {
         loopTask?.cancel()
         loopTask = nil
-        await flushNow()
+        await flushNow(force: true)
         _ = try? capture.stopCapture()
         session.stop()
     }
 
     /// Stop→validate→transcribe→append→restart. Serialized: a second call while
     /// one is in flight is dropped (the timer cadence gates normal flow).
-    func flushNow() async {
+    /// - Parameter force: When `true`, bypasses the minimum-chunk-bytes guard so
+    ///   the final tail-audio segment is always transcribed at stop time.
+    func flushNow(force: Bool = false) async {
         guard !isFlushing, case .recording = session.state else { return }
         isFlushing = true
         defer { isFlushing = false }
@@ -69,9 +71,17 @@ final class CockpitCaptureCoordinator {
             log.error("stopCapture failed: \(error.localizedDescription)")
             return
         }
-        try? capture.startCapture()
+        do {
+            try capture.startCapture()
+        } catch {
+            log.error("capture restart failed: \(error.localizedDescription)")
+            loopTask?.cancel()
+            loopTask = nil
+            session.stop()
+            return
+        }
 
-        guard !audio.isSilent, audio.pcm.count >= minChunkBytes else { return }
+        guard !audio.isSilent, (force || audio.pcm.count >= minChunkBytes) else { return }
         do {
             let response = try await transcriber.transcribe(audio)
             let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
