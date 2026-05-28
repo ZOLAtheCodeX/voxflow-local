@@ -56,4 +56,20 @@ final class DictionaryStoreTests: XCTestCase {
         let pairs = DictionaryStore.learn(before: "cited rcw.", after: "cited RCW.")
         XCTAssertEqual(pairs.map(\.right), ["RCW"])
     }
+    func test_applyCorrections_multiword_seed() {
+        let entries = [
+            DictionaryEntry(wrong: "iso forty two thousand one", right: "ISO 42001",
+                            context: nil, learnedAt: .init())
+        ]
+        let out = DictionaryStore.applyCorrections(
+            "certified under iso forty two thousand one last year", using: entries)
+        XCTAssertEqual(out, "certified under ISO 42001 last year")
+    }
+    func test_learnFromEdit_dedups_case_insensitively() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        let store = DictionaryStore(fileURL: url, seedOnFirstRun: false)
+        store.add(wrong: "RCW", right: "RCW", context: nil)        // existing upper-case entry
+        store.learnFromEdit(before: "see rcw now", after: "see RCW now")  // learns lower-case "rcw"
+        XCTAssertEqual(store.entries.filter { $0.right == "RCW" }.count, 1)  // deduped, not 2
+    }
 }

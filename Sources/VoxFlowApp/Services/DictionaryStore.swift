@@ -19,8 +19,12 @@ final class DictionaryStore: ObservableObject {
     init(fileURL: URL, clock: SessionClock = SystemClock(), seedOnFirstRun: Bool = true) {
         self.fileURL = fileURL
         self.clock = clock
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        } catch {
+            log.error("createDirectory failed: \(error.localizedDescription)")
+        }
         if let loaded = Self.load(from: fileURL) {
             entries = loaded
         } else if seedOnFirstRun {
@@ -67,7 +71,7 @@ final class DictionaryStore: ObservableObject {
         for (bw, aw) in zip(b, a) where bw != aw {
             let wrong = bw.trimmingCharacters(in: punct)
             let right = aw.trimmingCharacters(in: punct)
-            if !wrong.isEmpty, !right.isEmpty, (wrong.lowercased() != right.lowercased() || wrong != right) {
+            if !wrong.isEmpty, !right.isEmpty, wrong != right {
                 pairs.append(LearnedPair(wrong: wrong, right: right))
             }
         }
@@ -76,7 +80,7 @@ final class DictionaryStore: ObservableObject {
 
     func learnFromEdit(before: String, after: String) {
         for p in Self.learn(before: before, after: after) {
-            let exists = entries.contains { $0.wrong == p.wrong && $0.right == p.right }
+            let exists = entries.contains { $0.wrong.lowercased() == p.wrong.lowercased() && $0.right == p.right }
             if !exists { add(wrong: p.wrong, right: p.right, context: "learned") }
         }
     }
