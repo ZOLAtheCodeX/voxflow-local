@@ -1,21 +1,37 @@
 import SwiftUI
 
-/// Cockpit transcript pane — read-only display today; future task could
-/// upgrade to inline editable text. The transcript is sourced from the
-/// session service directly so updates flow through the @Published
-/// `currentSession` binding.
+/// Cockpit transcript pane — editable when the session is in `.reviewing` state;
+/// read-only during recording and idle. Focus-loss commits the edit via
+/// `LongFormSessionService.setTranscript(_:)` and fires `onEditCommit` for
+/// downstream consumers (e.g. dictionary learning).
 struct CockpitTranscriptView: View {
     @ObservedObject var sessionService: LongFormSessionService
+    var onEditCommit: ((_ before: String, _ after: String) -> Void)? = nil
+
+    @State private var draft: String = ""
+    @State private var baseline: String = ""
+    @FocusState private var editing: Bool
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: VF.spacingSmall) {
                 if let session = sessionService.currentSession {
                     crumbs(session)
-                    Text(session.transcript.isEmpty ? placeholder : session.transcript)
-                        .font(VF.bodyFont)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    if sessionService.state == .reviewing {
+                        TextEditor(text: $draft)
+                            .font(VF.bodyFont)
+                            .frame(minHeight: 200)
+                            .focused($editing)
+                            .onChange(of: editing) { _, isEditing in
+                                if isEditing { baseline = draft }
+                                else { commitEdit() }
+                            }
+                    } else {
+                        Text(session.transcript.isEmpty ? placeholder : session.transcript)
+                            .font(VF.bodyFont)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
                 } else {
                     Text("Press ⌘R to start a long-form capture.")
                         .font(VF.bodyFont)
@@ -25,6 +41,17 @@ struct CockpitTranscriptView: View {
             }
             .padding(VF.spacingLarge)
         }
+        .onChange(of: sessionService.currentSession?.transcript) { _, new in
+            if !editing { draft = new ?? "" }
+        }
+        .onAppear { draft = sessionService.currentSession?.transcript ?? "" }
+    }
+
+    private func commitEdit() {
+        let after = draft
+        guard after != baseline else { return }
+        sessionService.setTranscript(after)
+        onEditCommit?(baseline, after)
     }
 
     private var placeholder: String {

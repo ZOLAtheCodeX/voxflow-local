@@ -762,6 +762,14 @@ struct AppliedAction: Codable, Sendable, Equatable {
     let afterText: String
 }
 
+struct DictionaryEntry: Codable, Identifiable, Equatable, Sendable {
+    var id: UUID = UUID()
+    let wrong: String
+    let right: String
+    var context: String?
+    let learnedAt: Date
+}
+
 struct LongFormSession: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     let createdAt: Date

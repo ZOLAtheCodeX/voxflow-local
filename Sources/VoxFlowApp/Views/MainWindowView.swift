@@ -41,7 +41,7 @@ struct MainWindowView: View {
                 .tabItem { Label(MainTab.dashboard.title, systemImage: MainTab.dashboard.icon) }
                 .tag(MainTab.dashboard)
 
-            SettingsView(coordinator: coordinator, state: state)
+            SettingsView(coordinator: coordinator, state: state, dictionary: coordinator.cockpitDictionary)
                 .tabItem { Label(MainTab.settings.title, systemImage: MainTab.settings.icon) }
                 .tag(MainTab.settings)
 

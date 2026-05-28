@@ -4,6 +4,9 @@ struct SettingsView: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
+    @ObservedObject var dictionary: DictionaryStore
+    @State private var newWrong = ""
+    @State private var newRight = ""
     @State private var permissions = PermissionSnapshot(microphoneAuthorized: false, accessibilityAuthorized: false)
     @State private var permissionPollTimer: Timer?
     @State private var privateAPIBaseURLDraft = ""
@@ -320,6 +323,34 @@ struct SettingsView: View {
                             }
                             .padding(.vertical, 2)
                         }
+                    }
+                }
+            }
+
+            Section("Dictionary") {
+                if dictionary.entries.isEmpty {
+                    Text("No corrections yet. Fix a mangled term in the cockpit review to teach VoxFlow.")
+                        .font(VF.captionFont).foregroundStyle(.secondary)
+                }
+                ForEach(dictionary.entries) { entry in
+                    HStack {
+                        Text(entry.wrong).foregroundStyle(.secondary)
+                        Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                        Text(entry.right)
+                        Spacer()
+                        Button(role: .destructive) { dictionary.remove(entry.id) } label: {
+                            Image(systemName: "trash")
+                        }.buttonStyle(.borderless)
+                    }
+                }
+                HStack {
+                    TextField("recognized", text: $newWrong)
+                    Image(systemName: "arrow.right")
+                    TextField("correct", text: $newRight)
+                    Button("Add") {
+                        guard !newWrong.isEmpty, !newRight.isEmpty else { return }
+                        dictionary.add(wrong: newWrong, right: newRight, context: "manual")
+                        newWrong = ""; newRight = ""
                     }
                 }
             }

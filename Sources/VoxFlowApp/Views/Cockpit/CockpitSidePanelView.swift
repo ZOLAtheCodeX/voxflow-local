@@ -7,10 +7,12 @@ import SwiftUI
 struct CockpitSidePanelView: View {
     @ObservedObject var state: AppState
     @ObservedObject var sessionService: LongFormSessionService
+    @ObservedObject var dictionary: DictionaryStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: VF.spacingLarge) {
             targetSection
+            dictionarySection
             recentSection
             Spacer()
         }
@@ -61,6 +63,28 @@ struct CockpitSidePanelView: View {
                         Text(entry.timestamp, style: .relative)
                             .font(VF.microFont)
                             .foregroundStyle(.secondary)
+                    }
+                    .padding(VF.spacingSmall)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
+                }
+            }
+        }
+    }
+
+    private var dictionarySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionTitle("Dictionary")
+            let recent = Array(dictionary.entries.suffix(3).reversed())
+            if recent.isEmpty {
+                Text("No learned terms").font(VF.captionFont).foregroundStyle(.secondary)
+            } else {
+                ForEach(recent) { entry in
+                    HStack(spacing: VF.spacingSmall) {
+                        Text(entry.wrong).font(VF.microFont).foregroundStyle(.secondary)
+                        Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                        Text(entry.right).font(VF.captionFont)
+                        Spacer()
                     }
                     .padding(VF.spacingSmall)
                     .frame(maxWidth: .infinity, alignment: .leading)
