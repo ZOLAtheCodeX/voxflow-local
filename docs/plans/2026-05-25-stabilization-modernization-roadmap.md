@@ -13,10 +13,10 @@
 | Phase | Status | Branch | Notes |
 | --- | --- | --- | --- |
 | Phase 1 — Quick Wins (QW-1..8) | ✅ Shipped | `master` (commit `b04badd`) | All 8 quick wins merged before this roadmap exited draft. |
-| Phase 2 — Decompose & Test | ⚠️ Partial | `feature/phase-2-decompose` | (tasks 1–4 committed: `c85c933` nlp, `6325c23` privacy, `79617fa` engines, `1b2dac6` routing + schemas). Task 5 (api/ extraction) stashed — 4 privacy-token tests fail under it. Tasks 6–14 (Swift coordinator extraction + concurrency hardening + new tests) deferred. |
+| Phase 2 — Decompose & Test | ✅ Shipped | `master` (commit `5f7ba52`) | Full backend decomposition, DictationWorkflowCoordinator extraction, readiness properties collapsed, concurrency semaphores added. |
 | Phase 3 — Ollama / Gemma 4 Polish | ✅ Shipped | `feature/phase-3-ollama` (tip `370d74c`) | All 5 sub-phases (3.1–3.5) complete; FLAN-T5 fully removed; OllamaBackend is the only polish backend; regex `apply_tone(light_cleanup())` is the documented unavailability fallback. PHASE_3_COMPLETE emitted 2026-05-26. Local-validation owed to user: run `scripts/measure_polish_latency.py` with Ollama up to fill in real latency numbers, and `VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py` to confirm <15% guardrail trigger rate on this user's hardware. |
 | Phase 4 — UI Modernization | ✅ Shipped | `feature/phase-4-ui` (tip `e698e23`) | Translucent panel + materials sweep + token-driven typography/colors/motion + 4-step `StagedProgressView` + target-app indicator + conditional Settings fields + Skip Calibration + `ConfidenceBadge` a11y + T0·M0 expansion + shared `MetricCardView`. Zero hardcoded `.font(.system(size:))` in `SetupWizardView/SettingsView/DashboardWindowView` (was 79). Zero `Color.gray.opacity` in `Sources/VoxFlowApp/Views/`. PHASE_4_COMPLETE emitted 2026-05-26. |
-| Phase 5 — Performance Polish | ⏳ In-flight | `feature/phase-5-perf` | (5.1 short-audio whisper fast path, 5.2 Luhn-validated CC redaction, 5.3 lock-guarded rate limiter, 5.4 WebSocket idle timeout, 5.5 FocusContextMonitor frozen-poll short-circuit — all committed). 5.7/5.8 docs (this revision). |
+| Phase 5 — Performance Polish | ✅ Shipped | `master` | (5.1 short-audio whisper fast path, 5.2 Luhn-validated CC redaction, 5.3 lock-guarded rate limiter, 5.4 WebSocket idle timeout, 5.5 FocusContextMonitor frozen-poll short-circuit — all merged). |
 
 Phase 5.6 (`AppState` `BackendReadinessState` collapse) overlaps with deferred Phase 2 Task 8 — likely lands as part of the Phase 2 closeout rather than Phase 5.
 
@@ -57,7 +57,7 @@ High-confidence, small-blast-radius fixes. Ship as one PR. Includes the two viab
 
 ---
 
-## Phase 2 — Decompose & Test (~1 week) ⚠️ Partial (tasks 1–4 of 5 committed on `feature/phase-2-decompose`; task 5 stashed)
+## Phase 2 — Decompose & Test (~1 week) ✅ Shipped (`master` @ `5f7ba52`)
 
 Tighten the structure so subsequent phases land cleanly.
 
@@ -79,7 +79,7 @@ Tighten the structure so subsequent phases land cleanly.
 
 - Wrap ML inference calls in `run_in_executor` with `asyncio.Semaphore(2)` cap. Add 503 response when saturated. Document the single-flight assumption.
 - Replace `PrivateAPIClient` `urllib` calls with `httpx.AsyncClient` (or move to executor with thread-level timeout)
-- Align `GlobalHotkeyService` and `FnHoldHotkeyService` on a single Carbon-callback pattern; document the invariant
+- Keep `GlobalHotkeyService` (Carbon) and `FnHoldHotkeyService` (`NSEvent.flagsChanged`) distinct; Carbon requires a non-modifier key code, making alignment impossible and counterproductive for the `Fn` hold gesture.
 
 ### Tests
 
@@ -181,7 +181,7 @@ Then enforce in `SetupWizardView`, `SettingsView`, `DashboardWindowView`, which 
 
 ---
 
-## Phase 5 — Performance Polish (~1 day) ⏳ In-flight (`feature/phase-5-perf`; 5.1–5.5 committed)
+## Phase 5 — Performance Polish (~1 day) ✅ Shipped
 
 | Item | File:line | Change |
 | --- | --- | --- |
@@ -230,3 +230,6 @@ Then enforce in `SetupWizardView`, `SettingsView`, `DashboardWindowView`, which 
   - Phase 5 work in-flight on `feature/phase-5-perf` (5.1–5.5 committed; 5.7/5.8 docs land with this revision).
   - Phase 2 Task 5 (api/ extraction) stashed pending fix to 4 failing privacy-token tests.
   - Added "Shipping Status" table at the top of this document so a reader can see at a glance which phases have landed without reading the whole plan.
+- 2026-05-28 (revision 4) — Post-merge cleanup:
+  - Marked Phase 2 and Phase 5 as ✅ Shipped following merge of `5f7ba52` and Cockpit Layer 0.
+  - Corrected the premise around unifying `GlobalHotkeyService` and `FnHoldHotkeyService`: they must remain distinct mechanisms because Carbon cannot register a bare modifier key.
