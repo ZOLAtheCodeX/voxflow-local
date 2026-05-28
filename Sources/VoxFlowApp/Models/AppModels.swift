@@ -806,3 +806,11 @@ extension ContinuousClock.Instant {
             + Int(duration.components.attoseconds / 1_000_000_000_000_000)
     }
 }
+
+// MARK: - Notion Integration (Phase C)
+
+struct NotionTarget: Codable, Identifiable, Equatable, Sendable {
+    let id: String      // Notion page id
+    let title: String
+    let url: String
+}

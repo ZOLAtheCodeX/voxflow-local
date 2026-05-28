@@ -23,7 +23,7 @@ struct CockpitWindowView: View {
             mainPane
             if !sidePanelHidden {
                 Divider()
-                CockpitSidePanelView(state: state, sessionService: sessionService, dictionary: dictionary)
+                CockpitSidePanelView(state: state, sessionService: sessionService, dictionary: dictionary, coordinator: coordinator)
                     .frame(width: 240)
             }
         }

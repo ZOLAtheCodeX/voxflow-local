@@ -19,6 +19,13 @@ final class CockpitCoordinator: ObservableObject {
     private let textInsertionCoordinator: TextInsertionCoordinator?
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCoordinator")
 
+    // MARK: - Notion target state (Phase C)
+
+    /// Currently selected Notion page target. When non-nil, ⌘↩ appends to
+    /// Notion instead of performing an AX insert.
+    @Published var notionTarget: NotionTarget?
+    @Published var notionSearchError: String?
+
     /// Chip promotion threshold — an action becomes a visible chip after
     /// it has been invoked this many times.
     private static let promotionThreshold = 3
@@ -108,10 +115,30 @@ final class CockpitCoordinator: ObservableObject {
     }
 
     func insertIntoTarget() async {
-        guard let session = sessionService.currentSession,
-              let coordinator = textInsertionCoordinator else { return }
+        guard let session = sessionService.currentSession else { return }
         let text = session.transcript
         guard !text.isEmpty else { return }
+
+        // Phase C — Notion append branch: fires when a Notion page target is selected.
+        if let target = notionTarget {
+            guard let token = KeychainService.load(account: NotionKeychain.account),
+                  !token.isEmpty else {
+                state.statusLine = "Notion token missing — add it in Settings"
+                return
+            }
+            do {
+                _ = try await BackendAPIClient.notionAppend(pageId: target.id, text: text, token: token)
+                state.statusLine = "Appended to Notion · \(target.title)"
+                state.cockpitVisible = false
+                sessionService.reset()
+            } catch {
+                state.statusLine = "Notion append failed: \(error.localizedDescription)"
+            }
+            return
+        }
+
+        // Existing AX-insert path — preserved verbatim.
+        guard let insertionCoordinator = textInsertionCoordinator else { return }
         // Reconstruct NSRunningApplication from the pid frozen at
         // session-start. Required because at insert time the frontmost
         // app *is* the cockpit window itself — resolving via
@@ -119,7 +146,7 @@ final class CockpitCoordinator: ObservableObject {
         // cockpit, not the app the user was dictating into.
         let targetApp: NSRunningApplication? = session.targetApp?.processIdentifier
             .flatMap { NSRunningApplication(processIdentifier: $0) }
-        _ = await coordinator.insertText(text, statusSuffix: "cockpit", targetApp: targetApp)
+        _ = await insertionCoordinator.insertText(text, statusSuffix: "cockpit", targetApp: targetApp)
         state.cockpitVisible = false
         sessionService.reset()
     }
@@ -143,6 +170,32 @@ final class CockpitCoordinator: ObservableObject {
             state.voicePromptStripDismissed = true
             UserDefaults.standard.set(true, forKey: "VoxFlow.voicePromptStripDismissed")
         }
+    }
+
+    // MARK: - Notion search + target selection (Phase C)
+
+    /// Search the user's Notion workspace. Loads the token from the Keychain.
+    /// Sets ``notionSearchError`` (and returns []) when the token is absent or
+    /// the request fails, so the side panel can surface *why* no results appeared
+    /// (e.g. a wrong token) instead of looking like "no matching pages".
+    func searchNotion(_ query: String) async -> [NotionTarget] {
+        guard let token = KeychainService.load(account: NotionKeychain.account),
+              !token.isEmpty else {
+            notionSearchError = "Add your Notion token in Settings"
+            return []
+        }
+        do {
+            let results = try await BackendAPIClient.notionSearch(query: query, token: token)
+            notionSearchError = nil
+            return results
+        } catch {
+            notionSearchError = "Notion search failed: \(error.localizedDescription)"
+            return []
+        }
+    }
+
+    func selectNotionTarget(_ target: NotionTarget?) {
+        notionTarget = target
     }
 
     // MARK: - MRU + promotion logic

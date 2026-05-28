@@ -23,6 +23,7 @@ struct SettingsView: View {
     @State private var ollamaPullProgress: String?
     @State private var ollamaPullActive: Bool = false
     @State private var ollamaPullTargetModel: String = ""
+    @State private var notionToken: String = ""
 
     var body: some View {
         Form {
@@ -525,6 +526,19 @@ struct SettingsView: View {
                     openWindow(id: "setup")
                 }
             }
+
+            Section("Notion") {
+                SecureField("Integration token (secret_…)", text: $notionToken)
+                Button("Save token") {
+                    KeychainService.save(account: NotionKeychain.account, value: notionToken)
+                }
+                if KeychainService.load(account: NotionKeychain.account)?.isEmpty == false {
+                    Label("Token stored in Keychain", systemImage: "checkmark.seal")
+                        .font(VF.captionFont).foregroundStyle(.secondary)
+                }
+                Text("Create an internal integration at notion.so/my-integrations, share your target page with it, paste the token here.")
+                    .font(VF.captionFont).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(16)
@@ -543,6 +557,7 @@ struct SettingsView: View {
             openAITTSModelDraft = state.openAITTSModel
             openAITTSVoiceDraft = state.openAITTSVoice
             localWhisperModelDraft = state.localWhisperModel
+            notionToken = KeychainService.load(account: NotionKeychain.account) ?? ""
         }
     }
 

@@ -166,6 +166,12 @@ enum BackendError: LocalizedError {
     }
 }
 
+/// Shared Keychain account key for the Notion integration token.
+/// Used by BackendAPIClient methods, SettingsView, and CockpitCoordinator.
+enum NotionKeychain {
+    static let account = "notion.integration.token"
+}
+
 enum BackendAPIClient {
 #if DEBUG
     nonisolated(unsafe) static var baseURL: URL = {
@@ -492,5 +498,31 @@ enum BackendAPIClient {
         )
 
         return try await performRequest(path: "v1/privacy/preview", payload: payload)
+    }
+
+    // MARK: - Notion Integration (Phase C)
+
+    static func notionSearch(query: String, token: String) async throws -> [NotionTarget] {
+        struct Request: Encodable { let notionToken: String; let query: String }
+        struct Response: Decodable { let results: [NotionTarget] }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/notion/search"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(Request(notionToken: token, query: query))
+        let (data, response) = try await session.data(for: request)
+        try checkHTTPStatus(response, data: data)
+        return try decoder.decode(Response.self, from: data).results
+    }
+
+    static func notionAppend(pageId: String, text: String, token: String) async throws -> Int {
+        struct Request: Encodable { let notionToken: String; let pageId: String; let text: String }
+        struct Response: Decodable { let appendedBlocks: Int }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/notion/append"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(Request(notionToken: token, pageId: pageId, text: text))
+        let (data, response) = try await session.data(for: request)
+        try checkHTTPStatus(response, data: data)
+        return try decoder.decode(Response.self, from: data).appendedBlocks
     }
 }
