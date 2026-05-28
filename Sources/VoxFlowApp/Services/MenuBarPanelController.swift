@@ -165,27 +165,26 @@ final class MenuBarPanelController {
     }
 
     private func installClickMonitors() {
-        // Close on click outside the panel
+        // Close on click outside the panel (in other apps)
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
-            // NSEvent monitors fire on the main thread; assert isolation
             MainActor.assumeIsolated {
                 self?.close()
             }
         }
 
-        // Close on click on status item while open
+        // Close on click anywhere else within the app
         localClickMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] event in
-            // NSEvent monitors fire on the main thread; assert isolation
             MainActor.assumeIsolated {
-                if let self,
-                   let window = event.window,
-                   window != self.panel,
-                   window == self.statusItem.button?.window {
-                    self.close()
+                if let self, let window = event.window, window != self.panel {
+                    // If they clicked the status item itself, let its own action toggle it.
+                    // Otherwise, they clicked another app window (like Settings), so close the panel.
+                    if window != self.statusItem.button?.window {
+                        self.close()
+                    }
                 }
             }
             return event
