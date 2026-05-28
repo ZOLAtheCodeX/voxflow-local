@@ -7,6 +7,6 @@ protocol AudioCapturing: AnyObject {
 }
 
 /// One-shot transcription of a captured clip. `WhisperKitSTTService` conforms as-is.
-protocol ChunkTranscribing: AnyObject {
+protocol ChunkTranscribing: AnyObject, Sendable {
     func transcribe(_ audio: CapturedAudio) async throws -> TranscribeResponse
 }
