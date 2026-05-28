@@ -12,6 +12,7 @@ struct CockpitWindowView: View {
     @ObservedObject var state: AppState
     @ObservedObject var sessionService: LongFormSessionService
     let cockpitCapture: CockpitCaptureCoordinator
+    @ObservedObject var dictionary: DictionaryStore
 
     @State private var showPalette: Bool = false
     @State private var sidePanelHidden: Bool = false
@@ -22,7 +23,7 @@ struct CockpitWindowView: View {
             mainPane
             if !sidePanelHidden {
                 Divider()
-                CockpitSidePanelView(state: state, sessionService: sessionService)
+                CockpitSidePanelView(state: state, sessionService: sessionService, dictionary: dictionary)
                     .frame(width: 240)
             }
         }
@@ -56,7 +57,9 @@ struct CockpitWindowView: View {
                 .padding(.vertical, VF.spacingMedium)
                 .background(.thinMaterial)
 
-            CockpitTranscriptView(sessionService: sessionService)
+            CockpitTranscriptView(sessionService: sessionService, onEditCommit: { before, after in
+                    dictionary.learnFromEdit(before: before, after: after)
+                })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             VStack(spacing: VF.spacingSmall) {

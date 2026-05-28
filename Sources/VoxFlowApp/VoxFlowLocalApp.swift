@@ -69,7 +69,7 @@ struct VoxFlowLocalApp: App {
         }
 
         Settings {
-            SettingsView(coordinator: coordinator, state: coordinator.state)
+            SettingsView(coordinator: coordinator, state: coordinator.state, dictionary: coordinator.cockpitDictionary)
                 .frame(width: 520, height: 420)
         }
 
@@ -89,7 +89,8 @@ struct VoxFlowLocalApp: App {
                 coordinator: coordinator.cockpit,
                 state: coordinator.state,
                 sessionService: coordinator.cockpitSessionService,
-                cockpitCapture: coordinator.cockpitCapture
+                cockpitCapture: coordinator.cockpitCapture,
+                dictionary: coordinator.cockpitDictionary
             )
             .frame(minWidth: 720, minHeight: 480)
         }
