@@ -36,7 +36,7 @@ enum AudioCaptureError: Error {
     case converterSetupFailed
 }
 
-final class AudioCaptureService {
+final class AudioCaptureService: AudioCapturing {
     static let maxBufferBytes = 10 * 1024 * 1024 // ~5 minutes at 16 kHz mono PCM16
     static let targetSampleRate: Double = 16_000
 

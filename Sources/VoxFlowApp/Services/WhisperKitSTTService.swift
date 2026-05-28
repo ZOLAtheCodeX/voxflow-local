@@ -3,7 +3,7 @@ import Foundation
 import os.log
 
 @MainActor
-final class WhisperKitSTTService {
+final class WhisperKitSTTService: ChunkTranscribing {
     private let log = Logger(subsystem: "local.voxflow.app", category: "WhisperKitSTT")
     private var pipe: WhisperKit?
     private(set) var isLoaded = false
