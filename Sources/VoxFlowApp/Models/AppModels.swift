@@ -770,6 +770,27 @@ struct DictionaryEntry: Codable, Identifiable, Equatable, Sendable {
     let learnedAt: Date
 }
 
+enum SnippetScope: String, Codable, CaseIterable, Sendable {
+    case global
+    case longFormOnly
+    case quickOnly
+    var label: String {
+        switch self {
+        case .global: return "Everywhere"
+        case .longFormOnly: return "Cockpit only"
+        case .quickOnly: return "Quick capture only"
+        }
+    }
+}
+
+struct VoiceSnippet: Codable, Identifiable, Equatable, Sendable {
+    var id: UUID = UUID()
+    let keyword: String      // stored normalized (lowercased, trimmed, single word)
+    let text: String         // expansion inserted when triggered
+    var scope: SnippetScope
+    let createdAt: Date
+}
+
 struct LongFormSession: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     let createdAt: Date

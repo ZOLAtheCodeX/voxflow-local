@@ -5,8 +5,13 @@ struct SettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
     @ObservedObject var dictionary: DictionaryStore
+    @StateObject private var snippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
     @State private var newWrong = ""
     @State private var newRight = ""
+    @State private var newSnippetKeyword = ""
+    @State private var newSnippetText = ""
+    @State private var newSnippetScope: SnippetScope = .global
+    @State private var editingSnippetId: UUID? = nil
     @State private var permissions = PermissionSnapshot(microphoneAuthorized: false, accessibilityAuthorized: false)
     @State private var permissionPollTimer: Timer?
     @State private var privateAPIBaseURLDraft = ""
@@ -352,6 +357,70 @@ struct SettingsView: View {
                         guard !newWrong.isEmpty, !newRight.isEmpty else { return }
                         dictionary.add(wrong: newWrong, right: newRight, context: "manual")
                         newWrong = ""; newRight = ""
+                    }
+                }
+            }
+
+            Section("Voice Snippets") {
+                if snippetStore.snippets.isEmpty {
+                    Text("No snippets yet. Add a keyword and the expansion VoxFlow inserts when you say it.")
+                        .font(VF.captionFont).foregroundStyle(.secondary)
+                }
+                ForEach(snippetStore.snippets) { snippet in
+                    HStack {
+                        Text(snippet.keyword).foregroundStyle(.secondary)
+                        Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                        Text(snippet.text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer()
+                        Text(snippet.scope.label)
+                            .font(VF.captionFont)
+                            .foregroundStyle(.tertiary)
+                        Button {
+                            newSnippetKeyword = snippet.keyword
+                            newSnippetText = snippet.text
+                            newSnippetScope = snippet.scope
+                            editingSnippetId = snippet.id
+                        } label: {
+                            Image(systemName: "pencil")
+                        }.buttonStyle(.borderless)
+                        Button(role: .destructive) {
+                            if editingSnippetId == snippet.id {
+                                editingSnippetId = nil
+                                newSnippetKeyword = ""
+                                newSnippetText = ""
+                                newSnippetScope = .global
+                            }
+                            snippetStore.remove(snippet.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }.buttonStyle(.borderless)
+                    }
+                }
+                HStack {
+                    TextField("keyword", text: $newSnippetKeyword)
+                    TextField("expansion", text: $newSnippetText)
+                    Picker("", selection: $newSnippetScope) {
+                        ForEach(SnippetScope.allCases, id: \.self) { scope in
+                            Text(scope.label).tag(scope)
+                        }
+                    }.labelsHidden()
+                    Button(editingSnippetId == nil ? "Add" : "Update") {
+                        guard !newSnippetKeyword.isEmpty, !newSnippetText.isEmpty else { return }
+                        let succeeded: Bool
+                        if let id = editingSnippetId {
+                            succeeded = snippetStore.update(id: id, keyword: newSnippetKeyword, text: newSnippetText, scope: newSnippetScope)
+                        } else {
+                            succeeded = snippetStore.add(keyword: newSnippetKeyword, text: newSnippetText, scope: newSnippetScope)
+                        }
+                        // Only clear the draft on success; on failure (e.g. multi-word keyword)
+                        // leave the input populated so the user can correct it.
+                        if succeeded {
+                            newSnippetKeyword = ""; newSnippetText = ""
+                            newSnippetScope = .global
+                            editingSnippetId = nil
+                        }
                     }
                 }
             }
