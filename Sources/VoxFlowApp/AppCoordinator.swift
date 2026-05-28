@@ -117,7 +117,8 @@ final class AppCoordinator: ObservableObject {
         state: state,
         sessionService: cockpitSessionService,
         actionService: cockpitActionService,
-        textInsertionCoordinator: textInsertion as? TextInsertionCoordinator
+        textInsertionCoordinator: textInsertion as? TextInsertionCoordinator,
+        snippetStore: cockpitSnippets
     )
     private(set) lazy var cockpitDictionary: DictionaryStore = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -125,6 +126,7 @@ final class AppCoordinator: ObservableObject {
         let base = appSupport.appendingPathComponent("VoxFlow", isDirectory: true)
         return DictionaryStore(fileURL: base.appendingPathComponent("dictionary.json"))
     }()
+    private(set) lazy var cockpitSnippets: SnippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
     private(set) lazy var cockpitCapture: CockpitCaptureCoordinator = CockpitCaptureCoordinator(
         capture: AudioCaptureService(),
         transcriber: whisperKitService,
@@ -648,6 +650,30 @@ final class AppCoordinator: ObservableObject {
 
         if commandLane {
             executeCommandLane(rawText: rawText)
+            return
+        }
+
+        // Personal voice snippets (quick-dictation surface). A snippet is verbatim
+        // local user text: insert the expansion into the frozen target and short-
+        // circuit before cleanup/polish/privacy-gate — it must NOT be polished or
+        // sent through the provider. `.snippets` is read live (on the main actor)
+        // so Settings edits take effect immediately; reserved/action-word
+        // precedence is guaranteed by resolveSnippet.
+        if let snippet = VoiceCommandRouter.resolveSnippet(
+            rawText, snippets: cockpitSnippets.snippets, context: .quickOnly) {
+            let appLabel = state.focusTarget.appName ?? "app"
+            // insertText sets the status line in both cases — success suffix on
+            // success, "Auto-insert failed — copied to clipboard" on failure (it
+            // also copies to clipboard). Either way the snippet path returns to
+            // .idle: no TranscriptCandidate is built, so .review would show an
+            // empty, unactionable card. Don't branch sessionState on the result.
+            _ = await textInsertion.insertText(
+                snippet.text,
+                statusSuffix: "Snippet '\(snippet.keyword)' inserted — \(appLabel)",
+                targetApp: capturedTargetApp
+            )
+            state.recordingDuration = 0
+            state.sessionState = .idle
             return
         }
 

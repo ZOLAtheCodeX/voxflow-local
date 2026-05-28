@@ -71,8 +71,8 @@ enum VoiceCommandRouter {
     ///
     /// Callers must pass a concrete surface (`.longFormOnly` or `.quickOnly`), never `.global`,
     /// as the `context` — passing `.global` would make `.longFormOnly`/`.quickOnly` snippets
-    /// unreachable. Note: wiring this into the live cockpit voice path is a deliberate
-    /// follow-up — Phase D ships the model, store, resolution, and Settings CRUD only.
+    /// unreachable. Called by the cockpit review loop (context `.longFormOnly`) and the
+    /// quick-dictation path (context `.quickOnly`).
     static func resolveSnippet(_ raw: String, snippets: [VoiceSnippet], context: SnippetScope) -> VoiceSnippet? {
         // Reserved/action words always win over snippets.
         guard parse(raw) == .none else { return nil }

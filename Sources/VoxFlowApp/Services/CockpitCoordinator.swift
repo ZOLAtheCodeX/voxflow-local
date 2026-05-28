@@ -17,6 +17,11 @@ final class CockpitCoordinator: ObservableObject {
     let sessionService: LongFormSessionService
     let actionService: SmartActionService
     private let textInsertionCoordinator: TextInsertionCoordinator?
+    /// Personal voice snippets. Optional so existing test constructions still
+    /// compile; live wiring injects ``AppCoordinator.cockpitSnippets``. Read
+    /// `.snippets` live at call time — never snapshot — so Settings edits are
+    /// immediately visible to the review voice loop.
+    private let snippetStore: SnippetStore?
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCoordinator")
 
     // MARK: - Notion target state (Phase C)
@@ -40,12 +45,14 @@ final class CockpitCoordinator: ObservableObject {
         state: AppState,
         sessionService: LongFormSessionService,
         actionService: SmartActionService,
-        textInsertionCoordinator: TextInsertionCoordinator? = nil
+        textInsertionCoordinator: TextInsertionCoordinator? = nil,
+        snippetStore: SnippetStore? = nil
     ) {
         self.state = state
         self.sessionService = sessionService
         self.actionService = actionService
         self.textInsertionCoordinator = textInsertionCoordinator
+        self.snippetStore = snippetStore
     }
 
     // MARK: - Window lifecycle
@@ -95,7 +102,25 @@ final class CockpitCoordinator: ObservableObject {
     func handleVoiceUtterance(_ raw: String) async throws {
         guard sessionService.state == .reviewing else { return }
         switch VoiceCommandRouter.parse(raw) {
-        case .none: return
+        case .none:
+            // Reserved/action words already lost (parse returned .none); try a
+            // personal snippet. `.snippets` is read live so Settings edits are
+            // immediately visible. Scope is the cockpit surface: .longFormOnly.
+            if let snippetStore,
+               let snippet = VoiceCommandRouter.resolveSnippet(
+                   raw, snippets: snippetStore.snippets, context: .longFormOnly),
+               let current = sessionService.currentSession?.transcript {
+                // Append the expansion (never replace). Mutate only via
+                // setTranscript — currentSession.transcript is @Published
+                // private(set). Match appendChunk's "\n\n" paragraph break, but
+                // don't double it: skip the separator when the transcript is
+                // empty/whitespace-only or already ends in "\n\n".
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                let separator = (trimmed.isEmpty || current.hasSuffix("\n\n")) ? "" : "\n\n"
+                sessionService.setTranscript(current + separator + snippet.text)
+                log.info("expanded snippet '\(snippet.keyword)' in review")
+            }
+            return
         case .action(let id):
             guard let transcript = sessionService.currentSession?.transcript else { return }
             _ = try await applyAction(id, to: transcript)

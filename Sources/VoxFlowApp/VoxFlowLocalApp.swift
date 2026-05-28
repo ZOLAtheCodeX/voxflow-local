@@ -72,7 +72,7 @@ struct VoxFlowLocalApp: App {
         }
 
         Settings {
-            SettingsView(coordinator: coordinator, state: coordinator.state, dictionary: coordinator.cockpitDictionary)
+            SettingsView(coordinator: coordinator, state: coordinator.state, dictionary: coordinator.cockpitDictionary, snippetStore: coordinator.cockpitSnippets)
                 .frame(width: 520, height: 420)
         }
 

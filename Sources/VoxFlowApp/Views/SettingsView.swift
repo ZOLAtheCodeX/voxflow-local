@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
     @ObservedObject var dictionary: DictionaryStore
-    @StateObject private var snippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
+    @ObservedObject var snippetStore: SnippetStore
     @State private var newWrong = ""
     @State private var newRight = ""
     @State private var newSnippetKeyword = ""

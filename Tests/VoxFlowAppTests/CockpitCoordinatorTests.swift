@@ -118,6 +118,85 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertEqual(state.chipInvocationCounts[.memo], 1)
     }
 
+    // MARK: - Snippet expansion in review
+
+    func test_handleVoiceUtterance_expands_snippet_during_review() async throws {
+        let snippetStore = makeSnippetStore(seed: [
+            VoiceSnippet(keyword: "signoff", text: "Best regards", scope: .global, createdAt: Date())
+        ])
+        let (_, coord, sessionService, _) = makeCoordinator(
+            backend: StubSmartActionBackend(), snippetStore: snippetStore)
+        sessionService.start()
+        sessionService.appendChunk("source text")
+        sessionService.stop()
+
+        try await coord.handleVoiceUtterance("signoff")
+
+        let transcript = try XCTUnwrap(sessionService.currentSession?.transcript)
+        XCTAssertTrue(transcript.contains("Best regards"))
+        // Appends, never replaces — the original content survives.
+        XCTAssertTrue(transcript.contains("source text"))
+    }
+
+    func test_handleVoiceUtterance_reserved_word_does_not_expand_snippet() async throws {
+        // A snippet keyword that collides with a reserved meta-word ("cancel")
+        // must never expand — reserved/action-word precedence wins. "cancel"
+        // resets the session, so the transcript must NOT contain the expansion.
+        let snippetStore = makeSnippetStore(seed: [
+            VoiceSnippet(keyword: "cancel", text: "SHOULD-NOT-APPEAR", scope: .global, createdAt: Date())
+        ])
+        let (_, coord, sessionService, _) = makeCoordinator(
+            backend: StubSmartActionBackend(), snippetStore: snippetStore)
+        sessionService.start()
+        sessionService.appendChunk("source text")
+        sessionService.stop()
+
+        try await coord.handleVoiceUtterance("cancel")
+
+        // "cancel" is reserved: it resets the session (currentSession == nil),
+        // and crucially the snippet expansion never appears anywhere.
+        XCTAssertNil(sessionService.currentSession)
+    }
+
+    func test_handleVoiceUtterance_expands_longFormOnly_snippet_in_cockpit() async throws {
+        // A .longFormOnly snippet must expand in the cockpit review loop —
+        // proves the call site passes context: .longFormOnly (not .quickOnly).
+        let snippetStore = makeSnippetStore(seed: [
+            VoiceSnippet(keyword: "agenda", text: "1. Intro", scope: .longFormOnly, createdAt: Date())
+        ])
+        let (_, coord, sessionService, _) = makeCoordinator(
+            backend: StubSmartActionBackend(), snippetStore: snippetStore)
+        sessionService.start()
+        sessionService.appendChunk("source text")
+        sessionService.stop()
+
+        try await coord.handleVoiceUtterance("agenda")
+
+        let transcript = try XCTUnwrap(sessionService.currentSession?.transcript)
+        XCTAssertTrue(transcript.contains("1. Intro"))
+        XCTAssertTrue(transcript.contains("source text"))
+    }
+
+    func test_handleVoiceUtterance_does_not_expand_quickOnly_snippet_in_cockpit() async throws {
+        // A .quickOnly snippet must NOT expand in the cockpit review loop —
+        // proves the cockpit context (.longFormOnly) gates out .quickOnly scope.
+        let snippetStore = makeSnippetStore(seed: [
+            VoiceSnippet(keyword: "agenda", text: "SHOULD-NOT-APPEAR", scope: .quickOnly, createdAt: Date())
+        ])
+        let (_, coord, sessionService, _) = makeCoordinator(
+            backend: StubSmartActionBackend(), snippetStore: snippetStore)
+        sessionService.start()
+        sessionService.appendChunk("source text")
+        sessionService.stop()
+        let before = try XCTUnwrap(sessionService.currentSession?.transcript)
+
+        try await coord.handleVoiceUtterance("agenda")
+
+        let after = try XCTUnwrap(sessionService.currentSession?.transcript)
+        XCTAssertEqual(after, before)
+        XCTAssertFalse(after.contains("SHOULD-NOT-APPEAR"))
+    }
+
     // MARK: - didEnterReviewState
 
     func test_didEnterReviewState_increments_capture_count() {
@@ -141,7 +220,10 @@ final class CockpitCoordinatorTests: XCTestCase {
         makeCoordinator(backend: EchoSmartActionBackend())
     }
 
-    private func makeCoordinator(backend: SmartActionBackend) -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
+    private func makeCoordinator(
+        backend: SmartActionBackend,
+        snippetStore: SnippetStore? = nil
+    ) -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
         let state = AppState()
         let sessionDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("voxflow-cockpit-test-\(UUID().uuidString)")
@@ -151,9 +233,22 @@ final class CockpitCoordinatorTests: XCTestCase {
             state: state,
             sessionService: sessionService,
             actionService: actionService,
-            textInsertionCoordinator: nil
+            textInsertionCoordinator: nil,
+            snippetStore: snippetStore
         )
         return (state, coord, sessionService, actionService)
+    }
+
+    /// Builds a SnippetStore over a throwaway temp file with seeding disabled,
+    /// then injects the supplied snippets so tests control the exact set.
+    private func makeSnippetStore(seed: [VoiceSnippet]) -> SnippetStore {
+        let fileURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("voxflow-snippets-test-\(UUID().uuidString).json")
+        let store = SnippetStore(fileURL: fileURL, seedOnFirstRun: false)
+        for snippet in seed {
+            store.add(keyword: snippet.keyword, text: snippet.text, scope: snippet.scope)
+        }
+        return store
     }
 }
 
