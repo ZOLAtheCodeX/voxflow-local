@@ -145,13 +145,6 @@ struct OllamaModelInfo: Codable, Identifiable, Hashable {
     let modifiedAt: String
 
     var id: String { name }
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case size
-        case digest
-        case modifiedAt = "modified_at"
-    }
 }
 
 struct OllamaModelsResponse: Codable {
@@ -160,14 +153,6 @@ struct OllamaModelsResponse: Codable {
     let currentModel: String
     let recommendedModel: String?
     let hostMemoryGb: Double
-
-    enum CodingKeys: String, CodingKey {
-        case available
-        case models
-        case currentModel = "current_model"
-        case recommendedModel = "recommended_model"
-        case hostMemoryGb = "host_memory_gb"
-    }
 }
 
 enum BackendError: LocalizedError {
