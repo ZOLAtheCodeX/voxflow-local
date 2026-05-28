@@ -25,6 +25,10 @@ struct VoxFlowLocalApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .voxflowOpenSetup)) { _ in
                     activateAndOpenWindow(id: "setup")
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .voxflowOpenCockpit)) { _ in
+                    coordinator.cockpit.open()
+                    activateAndOpenWindow(id: "cockpit")
+                }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -57,7 +61,6 @@ struct VoxFlowLocalApp: App {
                     coordinator.cockpit.open()
                     activateAndOpenWindow(id: "cockpit")
                 }
-                .keyboardShortcut("v", modifiers: [.option, .command])
 
                 Divider()
 

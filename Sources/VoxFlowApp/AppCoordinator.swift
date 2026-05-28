@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Combine
 import Foundation
 import os.log
@@ -7,6 +8,7 @@ import SwiftUI
 extension Notification.Name {
     static let voxflowOpenDashboard = Notification.Name("voxflowOpenDashboard")
     static let voxflowOpenSetup = Notification.Name("voxflowOpenSetup")
+    static let voxflowOpenCockpit = Notification.Name("voxflowOpenCockpit")
 }
 
 private final class CapturePipelineTraceBuilder {
@@ -78,6 +80,7 @@ final class AppCoordinator: ObservableObject {
     private let hotkeyService = GlobalHotkeyService()
     private let fnHoldHotkeyService = FnHoldHotkeyService()
     private let commandHotkeyService = GlobalHotkeyService()
+    private let cockpitHotkeyService = GlobalHotkeyService()
     private let cueSoundService = CaptureCueSoundService()
     private let permissionService = PermissionService()
     private let insertService = AccessibilityInsertService()
@@ -363,6 +366,16 @@ final class AppCoordinator: ObservableObject {
             }, onRelease: { [weak self] in
                 Task { @MainActor in await self?.finishCaptureAndTranscribe(commandLane: true) }
             })
+
+            try cockpitHotkeyService.register(
+                configuration: HotkeyConfiguration(keyCode: 9, modifiers: UInt32(optionKey) | UInt32(cmdKey)),
+                onPress: {
+                    Task { @MainActor in
+                        NotificationCenter.default.post(name: .voxflowOpenCockpit, object: nil)
+                    }
+                },
+                onRelease: {}
+            )
             hotkeysRegistered = true
             state.errorMessage = nil
             log.info("Hotkeys registered")
@@ -370,6 +383,7 @@ final class AppCoordinator: ObservableObject {
             hotkeyService.unregister()
             fnHoldHotkeyService.unregister()
             commandHotkeyService.unregister()
+            cockpitHotkeyService.unregister()
             hotkeysRegistered = false
             log.error("Failed to register hotkey: \(error.localizedDescription)")
             state.errorMessage = "Failed to register hotkey. Check accessibility permissions."
