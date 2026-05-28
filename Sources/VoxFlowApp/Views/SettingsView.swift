@@ -528,7 +528,7 @@ struct SettingsView: View {
             }
 
             Section("Notion") {
-                SecureField("Integration token (secret_…)", text: $notionToken)
+                SecureField("Personal access token", text: $notionToken)
                 Button("Save token") {
                     KeychainService.save(account: NotionKeychain.account, value: notionToken)
                 }
@@ -536,7 +536,7 @@ struct SettingsView: View {
                     Label("Token stored in Keychain", systemImage: "checkmark.seal")
                         .font(VF.captionFont).foregroundStyle(.secondary)
                 }
-                Text("Create an internal integration at notion.so/my-integrations, share your target page with it, paste the token here.")
+                Text("Create a Personal Access Token in Notion's Developer portal → Personal access tokens (grant the “Notion API” capability). No page-sharing needed — it uses your own access; expires after 1 year.")
                     .font(VF.captionFont).foregroundStyle(.secondary)
             }
         }
