@@ -11,6 +11,7 @@ struct CockpitWindowView: View {
     @ObservedObject var coordinator: CockpitCoordinator
     @ObservedObject var state: AppState
     @ObservedObject var sessionService: LongFormSessionService
+    let cockpitCapture: CockpitCaptureCoordinator
 
     @State private var showPalette: Bool = false
     @State private var sidePanelHidden: Bool = false
@@ -99,10 +100,10 @@ struct CockpitWindowView: View {
         if modifiers == .command {
             switch key {
             case "r":
-                sessionService.start(targetApp: state.focusTarget)
+                cockpitCapture.startRecording(targetApp: state.focusTarget)
                 return nil
             case ".":
-                sessionService.stop()
+                Task { await cockpitCapture.stopRecording() }
                 return nil
             case "z":
                 Task { await coordinator.undoLastAction() }

@@ -88,7 +88,8 @@ struct VoxFlowLocalApp: App {
             CockpitWindowView(
                 coordinator: coordinator.cockpit,
                 state: coordinator.state,
-                sessionService: coordinator.cockpitSessionService
+                sessionService: coordinator.cockpitSessionService,
+                cockpitCapture: coordinator.cockpitCapture
             )
             .frame(minWidth: 720, minHeight: 480)
         }

@@ -116,6 +116,11 @@ final class AppCoordinator: ObservableObject {
         actionService: cockpitActionService,
         textInsertionCoordinator: textInsertion as? TextInsertionCoordinator
     )
+    private(set) lazy var cockpitCapture: CockpitCaptureCoordinator = CockpitCaptureCoordinator(
+        capture: AudioCaptureService(),
+        transcriber: whisperKitService,
+        session: cockpitSessionService
+    )
 
     private var timer: Timer?
     private var captureTimeoutTimer: Timer?
