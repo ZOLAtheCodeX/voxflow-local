@@ -1,0 +1,29 @@
+# Karpathy Guidelines
+
+Always follow these core principles when writing code in this repository. These rules act as a strict overlay, particularly when working on risky features like Layer 2 (Ambient Capture).
+
+## 1. Think Before Coding
+- State your assumptions explicitly before modifying any logic.
+- If a requirement is ambiguous or has multiple interpretations, surface them rather than guessing.
+- If you are uncertain about privacy boundaries, concurrency, or architecture, STOP and ask for clarification.
+
+## 2. Simplicity First
+- Write the absolute minimum amount of code necessary to solve the problem.
+- Avoid speculative features, unnecessary abstractions, or "flexibility" that wasn't requested.
+- If a senior engineer would call the solution overcomplicated, simplify it.
+
+## 3. Surgical Changes
+- Modify ONLY the specific area required by the prompt.
+- Do NOT perform any "drive-by" refactoring. Do not "improve" adjacent code, comments, or formatting unless explicitly asked.
+- Match the existing coding style exactly, even if you would prefer a different approach.
+- Clean up only the mess created by your specific changes (e.g., unused imports you introduced).
+
+## 4. Goal-Driven Execution
+- Define verifiable success criteria before implementing the solution.
+- Focus on verifiable outcomes rather than vague instructions.
+
+## 5. Integration with Donna Method (AGENTS.md)
+When executing subagent-driven prompts:
+- **Product/Runtime Scout:** Apply Rule 2 (Simplicity) to aggressively reuse existing seams rather than reinventing orchestrators.
+- **Boundary Reviewer:** Apply Rule 3 (Surgical) to strictly enforce that no forbidden paths or adjacent scopes were touched.
+- **Implementer:** Apply Rule 1 (Think Before Coding) to halt execution and return an Open Questions list if the design is underspecified.
