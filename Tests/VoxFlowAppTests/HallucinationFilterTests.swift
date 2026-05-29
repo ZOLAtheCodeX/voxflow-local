@@ -23,8 +23,6 @@ final class HallucinationFilterTests: XCTestCase {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Thank you.", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Bye.", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("you", shortAudio: true))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Thank you.", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Bye.", shortAudio: false))
     }
 
     func testGreetingHallucinationsFiltered() {
@@ -40,8 +38,6 @@ final class HallucinationFilterTests: XCTestCase {
     func testRepeatedWordFiltered() {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("you you you", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("the the the the", shortAudio: true))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("you you you", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("yes yes", shortAudio: true))
     }
 
     func testValidDictationPasses() {
@@ -64,8 +60,8 @@ final class HallucinationFilterTests: XCTestCase {
                 HallucinationFilter.isLikelyHallucination(word, shortAudio: true),
                 "Single legit word '\(word)' was wrongly filtered (short audio)")
         }
-        // The repeat rule must still fire for an actual repeat (>= 2 occurrences).
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Banana Banana", shortAudio: false))
+        // F5 fix: Emphatic 2-word repeats now pass.
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Banana Banana", shortAudio: false))
     }
 
     func testCaseInsensitive() {
@@ -112,13 +108,29 @@ final class HallucinationFilterTests: XCTestCase {
     func testShortOnlyPunctuationVariantsFiltered() {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Thanks!", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Bye!", shortAudio: true))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Thanks!", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Thanks!", shortAudio: false))
+    }
+
+    func testShortOnlyPassedOnLongAudio() {
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Thank you.", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Bye.", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("you", shortAudio: false))
+    }
+
+    func testRepeatedWordPassedOnLongAudio() {
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("you you you", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("the the the the", shortAudio: false))
+    }
+
+    func testBracketNotePasses() {
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("[note] there was background noise", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("[keyboard clacking]", shortAudio: false))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("(typing)", shortAudio: true))
     }
 
     func testMultiWordPhrasesNotAffectedByNormalization() {
         XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hello world!", shortAudio: false))
         XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hey, can you help me?", shortAudio: true))
-        // "Hi there." -> "there" is in singleWordHallucinations now, so "hi there" is filtered.
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hi there.", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("I'm watching the kids", shortAudio: false))
     }
 }

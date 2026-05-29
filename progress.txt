@@ -1,43 +1,29 @@
 # VoxFlow Local — Session Progress
 
-## Last Updated: 2026-03-01 (session 13)
+## Last Updated: 2026-05-28 (Post-Session Audit)
 
-## Branch: master @ cf3b10d
+## Branch: master
 
 ## Completed (this session)
-- Python text cleanup parity with Swift TextCleanupService
-  - Created text_cleanup_rules.py: 7 pre-compiled regex pattern groups
-  - Rewrote light_cleanup() as 6-step pipeline matching Swift cleanup(.light)
-  - Rewrote apply_tone() with concise/formal/friendly helpers
-  - 65 new tests in test_text_cleanup.py, 7 expanded in test_utils.py
-  - Accepted gap: POS-aware ambiguous fillers skipped (no nltk/spacy dep)
-- Updated CLAUDE.md: architecture, test count, Python cleanup docs
+- Merged Cockpit Layer 1 (Phases C, D, E) into `master`.
+- Fixed F1–F6 regressions in `HallucinationFilter` and rewrote its test suite to be robust against standalone words, repeats, and punctuation.
+- Validated Cockpit workflow (Chains, Snippets, Smart Actions) via local integration tests.
 
 ## Completed (prior sessions)
-- P1: WhisperKit native STT integration
-- P2: Focus bug fix
-- P3: Extended dictation
-- P4: Clear history
-- P5: NLP-Lite Cleanup Engine (Swift-native)
-- P5/P6: Per-app profiles
-- Prompt Mode (4th workflow)
-- Bugfix/cleanup batch (hallucination filter, hotkeys, panel)
-- Code review hardening
-- Confidence indicator UI
-- Bundle model path fix
-- Review panel auto-open fix
-- Menu bar icon fix (activation policy resilience)
-- Session 11: GitHub PR sync (13 PRs merged)
-- Session 12: Stability fixes (12 issues, PR #14 merged)
+- Phase 1: Quick Wins (QW-1..8)
+- Phase 2: Decompose & Test (Backend split into engines/routing/privacy)
+- Phase 3: Ollama / Gemma 4 Polish Backend (FLAN-T5 removed)
+- Phase 4: UI Modernization (Translucent panels, design tokens, progress states)
+- Phase 5: Performance Polish (Whisper fast-path, Websocket timeouts, rate limiter locks)
 
 ## Remaining
-- P6: Voice commands, streaming
+- Phase 3.4: Guardrail tuning (Ollama vs FLAN-T5)
+- Cockpit Layer 2: Ambient meeting capture (Riskiest layer — deferred until Layer 0+1 are battle-tested)
 - P7: App publishing (notarization, DMG, distribution)
 
 ## Test Status
-- 234 Swift tests passing, 0 failures
-- 223 Python tests passing, 0 failures
-- Total: 457 tests
+- All 371 Swift tests passing, 0 failures.
+- Backend Python tests passing.
 
 ## Blockers
 - None
