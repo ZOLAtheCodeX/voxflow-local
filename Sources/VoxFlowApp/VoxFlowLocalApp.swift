@@ -72,7 +72,7 @@ struct VoxFlowLocalApp: App {
         }
 
         Settings {
-            SettingsView(coordinator: coordinator, state: coordinator.state, dictionary: coordinator.cockpitDictionary, snippetStore: coordinator.cockpitSnippets)
+            SettingsView(coordinator: coordinator, state: coordinator.state, dictionary: coordinator.cockpitDictionary, snippetStore: coordinator.cockpitSnippets, chainStore: coordinator.cockpitChains)
                 .frame(width: 520, height: 420)
         }
 
@@ -93,7 +93,9 @@ struct VoxFlowLocalApp: App {
                 state: coordinator.state,
                 sessionService: coordinator.cockpitSessionService,
                 cockpitCapture: coordinator.cockpitCapture,
-                dictionary: coordinator.cockpitDictionary
+                dictionary: coordinator.cockpitDictionary,
+                chainStore: coordinator.cockpitChains,
+                onChainTriggered: { chain in Task { await coordinator.runChain(chain) } }
             )
             .frame(minWidth: 720, minHeight: 480)
         }

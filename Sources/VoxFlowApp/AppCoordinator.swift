@@ -127,6 +127,26 @@ final class AppCoordinator: ObservableObject {
         return DictionaryStore(fileURL: base.appendingPathComponent("dictionary.json"))
     }()
     private(set) lazy var cockpitSnippets: SnippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
+    // Cockpit Layer 1 — Phase E workflow chains. Store mirrors cockpitSnippets;
+    // the executor reuses the existing smart-action + text-insertion seams and
+    // sources its frozen target from the cockpit session (the app the user was
+    // dictating into), not capturedTargetApp.
+    private(set) lazy var cockpitChains: ChainStore = ChainStore(fileURL: ChainStore.defaultFileURL)
+    // The executor does NOT participate in cockpit undo, so it gets its OWN
+    // SmartActionService instance. Sharing `cockpitActionService` would push a
+    // chain's `.action` step onto the cockpit's per-instance undo history while
+    // the output is inserted into the frozen target (never the cockpit
+    // transcript) — a subsequent cockpit ⌘Z would then pop that entry and
+    // overwrite the visible transcript with a value the user never saw applied.
+    private lazy var chainActionService: SmartActionService = SmartActionService(backend: BackendAPISmartActionAdapter())
+    private(set) lazy var chainExecutor: ChainExecutor = ChainExecutor(
+        actionService: chainActionService,
+        textInsertion: textInsertion,
+        currentTranscript: { [weak self] in self?.cockpitSessionService.currentSession?.transcript },
+        frozenTarget: { [weak self] in
+            self?.cockpitSessionService.currentSession?.targetApp?.processIdentifier
+                .flatMap { NSRunningApplication(processIdentifier: $0) }
+        })
     private(set) lazy var cockpitCapture: CockpitCaptureCoordinator = CockpitCaptureCoordinator(
         capture: AudioCaptureService(),
         transcriber: whisperKitService,
@@ -140,6 +160,7 @@ final class AppCoordinator: ObservableObject {
     private var hotkeysRegistered = false
     private var didFinishLaunching = false
     private var fnTriggeredCaptureInProgress = false
+    private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
     private var lastTranscriptionConfidence: Double = 0.0
     private var cancellables = Set<AnyCancellable>()
@@ -256,6 +277,26 @@ final class AppCoordinator: ObservableObject {
 
     func showMainWindow() {
         showMainWindowIfNeeded(force: true)
+    }
+
+    /// Run a workflow chain (Phase E). Invoked from the cockpit ⌘K palette by
+    /// name. Delegates to the executor and surfaces the outcome on the status
+    /// line so failures at `.capture`/`.action` (which never touch the insert
+    /// coordinator) aren't silent. A single-flight guard prevents two rapid
+    /// ⌘K dispatches from interleaving duplicate inserts into the target app
+    /// (MainActor serialization makes the flag race-free).
+    func runChain(_ chain: WorkflowChain) async {
+        guard !isRunningChain else { return }
+        isRunningChain = true
+        defer { isRunningChain = false }
+
+        let result = await chainExecutor.run(chain)
+        if result.error == nil {
+            state.statusLine = "Chain '\(chain.name)' complete"
+        } else {
+            let stepNumber = result.failedStepIndex.map { $0 + 1 } ?? 0
+            state.statusLine = "Chain '\(chain.name)' failed at step \(stepNumber)"
+        }
     }
 
     private func beginWarmupMonitoring() {
