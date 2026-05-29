@@ -2,7 +2,8 @@ import Foundation
 
 enum HallucinationFilter {
     private static let singleWordHallucinations: Set<String> = [
-        "hello", "hi", "hey", "bye", "goodbye", "you", "thanks", "yeah", "yes", "okay", "ok"
+        "hello", "hi", "hey", "bye", "goodbye", "you", "thanks", "yeah", "yes", "okay", "ok",
+        "everyone", "everybody", "guys", "there"
     ]
     
     private static let multiWordTriggers: Set<String> = [
@@ -34,8 +35,6 @@ enum HallucinationFilter {
             }
             // "thank you"
             if words == ["thank", "you"] { return true }
-            // "hello everyone", "hi guys", etc
-            if words[0] == "hello" || words[0] == "hi" { return true }
         }
         
         // 2. Check for repeats (e.g. "hello. hello, hello!")
