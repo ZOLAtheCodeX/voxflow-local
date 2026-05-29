@@ -50,6 +50,24 @@ final class HallucinationFilterTests: XCTestCase {
         XCTAssertFalse(HallucinationFilter.isLikelyHallucination("I need to update the project plan", shortAudio: false))
     }
 
+    /// Regression guard: a single legitimate word must NOT be discarded. The
+    /// repeat heuristic (`Set(words).count == 1`) is trivially true for one
+    /// word, so without a `count >= 2` guard every lone word a user dictates
+    /// ("Approved", a name, a number) vanished. Single-word dictation is a
+    /// first-class use case for a dictation tool.
+    func testLegitSingleWordPasses() {
+        for word in ["Banana", "Seattle", "Approved", "Cancelled", "Done", "Stop", "Friday"] {
+            XCTAssertFalse(
+                HallucinationFilter.isLikelyHallucination(word, shortAudio: false),
+                "Single legit word '\(word)' was wrongly filtered (long audio)")
+            XCTAssertFalse(
+                HallucinationFilter.isLikelyHallucination(word, shortAudio: true),
+                "Single legit word '\(word)' was wrongly filtered (short audio)")
+        }
+        // The repeat rule must still fire for an actual repeat (>= 2 occurrences).
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Banana Banana", shortAudio: false))
+    }
+
     func testCaseInsensitive() {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("THANK YOU FOR WATCHING.", shortAudio: false))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("subscribe to my channel.", shortAudio: false))

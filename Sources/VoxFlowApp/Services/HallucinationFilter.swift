@@ -38,8 +38,12 @@ enum HallucinationFilter {
         }
         
         // 2. Check for repeats (e.g. "hello. hello, hello!")
-        // Since we stripped punctuation, Set(words) is perfectly accurate
-        if Set(words).count == 1 {
+        // Since we stripped punctuation, Set(words) is perfectly accurate.
+        // A repeat needs at least TWO occurrences — `Set(words).count == 1` is
+        // trivially true for a single word, so without the count>=2 guard ANY
+        // lone legitimate word ("Banana", "Approved", a name) would be discarded
+        // as a hallucination. Single-word dictation is a first-class use case.
+        if words.count >= 2 && Set(words).count == 1 {
             return true
         }
         
