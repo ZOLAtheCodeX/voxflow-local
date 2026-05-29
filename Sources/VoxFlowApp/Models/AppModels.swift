@@ -791,6 +791,90 @@ struct VoiceSnippet: Codable, Identifiable, Equatable, Sendable {
     let createdAt: Date
 }
 
+// MARK: - Cockpit Layer 1 — Phase E (Workflow Chains)
+
+/// The capture style a chain step seeds from. Carried for fidelity even though
+/// the executor seeds from the already-captured transcript (no live mid-chain
+/// recording) — preserving the user's intended capture mode for future use.
+enum CaptureMode: String, Codable, CaseIterable, Sendable {
+    case quick
+    case longForm
+    var label: String {
+        switch self {
+        case .quick: "Quick"
+        case .longForm: "Long-form"
+        }
+    }
+}
+
+/// A single ordered step in a ``WorkflowChain``. Hand-rolled `Codable` so the
+/// on-disk JSON uses a flat `kind` discriminator with rawValue payloads — the
+/// repo's diffable JSON house style (matches how `AppliedAction`/`VoiceSnippet`
+/// stay readable). An unknown `kind` fails loud on decode rather than silently
+/// dropping the step.
+enum ChainStep: Codable, Equatable, Sendable {
+    case capture(mode: CaptureMode)
+    case action(actionId: SmartActionId)
+    case insert(targetHint: String?)
+
+    var summary: String {
+        switch self {
+        case .capture(let mode): "Capture (\(mode.label))"
+        case .action(let actionId): "Action: \(actionId.label)"
+        case .insert: "Insert"
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, mode, actionId, targetHint
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .capture(let mode):
+            try container.encode("capture", forKey: .kind)
+            try container.encode(mode, forKey: .mode)
+        case .action(let actionId):
+            try container.encode("action", forKey: .kind)
+            try container.encode(actionId, forKey: .actionId)
+        case .insert(let targetHint):
+            try container.encode("insert", forKey: .kind)
+            try container.encodeIfPresent(targetHint, forKey: .targetHint)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(String.self, forKey: .kind)
+        switch kind {
+        case "capture":
+            let mode = try container.decode(CaptureMode.self, forKey: .mode)
+            self = .capture(mode: mode)
+        case "action":
+            let actionId = try container.decode(SmartActionId.self, forKey: .actionId)
+            self = .action(actionId: actionId)
+        case "insert":
+            let targetHint = try container.decodeIfPresent(String.self, forKey: .targetHint)
+            self = .insert(targetHint: targetHint)
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind, in: container,
+                debugDescription: "Unknown ChainStep kind '\(kind)'")
+        }
+    }
+}
+
+/// A named, ordered sequence of steps the user can invoke by name from the
+/// cockpit ⌘K palette. Persisted by ``ChainStore``. `createdAt` is floored to
+/// whole seconds so it round-trips through the `.iso8601` JSON encoder.
+struct WorkflowChain: Codable, Identifiable, Equatable, Sendable {
+    var id: UUID = UUID()
+    let name: String
+    var steps: [ChainStep]
+    let createdAt: Date
+}
+
 struct LongFormSession: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     let createdAt: Date

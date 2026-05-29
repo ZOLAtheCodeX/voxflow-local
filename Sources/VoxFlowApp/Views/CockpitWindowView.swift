@@ -13,6 +13,12 @@ struct CockpitWindowView: View {
     @ObservedObject var sessionService: LongFormSessionService
     let cockpitCapture: CockpitCaptureCoordinator
     @ObservedObject var dictionary: DictionaryStore
+    /// Phase E — workflow chains surfaced in the ⌘K palette, plus the dispatch
+    /// closure that runs one. Observing the store (not a snapshot array) keeps
+    /// the palette reactive: chains added in Settings while the cockpit is open
+    /// refresh immediately, mirroring how `dictionary`/`snippetStore` are threaded.
+    @ObservedObject var chainStore: ChainStore
+    var onChainTriggered: ((WorkflowChain) -> Void)? = nil
 
     @State private var showPalette: Bool = false
     @State private var sidePanelHidden: Bool = false
@@ -30,9 +36,11 @@ struct CockpitWindowView: View {
         .frame(minWidth: 720, minHeight: 480)
         .background(.regularMaterial)
         .sheet(isPresented: $showPalette) {
-            ActionPaletteView { action in
-                triggerAction(action)
-            }
+            ActionPaletteView(
+                onActionTriggered: { action in triggerAction(action) },
+                chains: chainStore.chains,
+                onChainTriggered: onChainTriggered
+            )
         }
         .background(
             KeyEventBridge { event in
