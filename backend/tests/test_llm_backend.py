@@ -302,7 +302,11 @@ class TestRecommendOllamaModel:
     def test_recommends_e4b_for_high_ram(self) -> None:
         from engines.llm_backend import recommend_ollama_model
         assert recommend_ollama_model(32 * 1024**3) == "gemma4:e4b-mlx"
-        assert recommend_ollama_model(16 * 1024**3) == "gemma4:e4b-mlx"
+        assert recommend_ollama_model(24 * 1024**3) == "gemma4:e4b-mlx"
+        # R2 retune: a 16 GB machine running the 9 GB e4b plus the Whisper
+        # backend thrashes — measured live 2026-06-11: prompt eval degraded
+        # to ~5 tok/s, runner wedges, 28% of requests hit the 30 s timeout.
+        assert recommend_ollama_model(16 * 1024**3) == "gemma4:e2b-mlx"
 
     def test_recommends_e2b_for_mid_ram(self) -> None:
         from engines.llm_backend import recommend_ollama_model

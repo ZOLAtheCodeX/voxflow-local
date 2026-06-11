@@ -59,14 +59,15 @@ def _tone_instruction(tone: str) -> str:
     return _TONE_INSTRUCTIONS.get(tone.lower(), _TONE_INSTRUCTIONS["neutral"])
 
 
-# Compressed for prompt-eval cost (R2.3): the MLX runner on target hardware
-# evaluates prompts at ~5 tok/s with NO prefix caching (verified live
-# 2026-06-11), so every system-prompt token costs ~200 ms per request.
-# ~24 tokens vs the previous ~85 saves roughly 12 s per polish call.
-# The behavior contract (don't answer questions, don't summarize, output
-# only the text) is enforced by the guardrail + golden set, not prompt bulk.
+# Compressed for prompt-eval cost (R2.3): ~35 tokens vs the previous ~85.
+# On a HEALTHY runner prompt eval is cheap; under memory pressure it
+# degrades to ~5 tok/s with no prefix caching (measured live 2026-06-11),
+# so prompt bulk is pure downside there. The filler examples earn their
+# tokens: without them gemma4 under-cleans very-heavy-filler dictations
+# (caught by the concise_very_heavy_filler golden case).
 _OLLAMA_SYSTEM_PROMPT_BASE = (
-    "Fix grammar and punctuation in this dictation; drop filler words. "
+    "Fix grammar and punctuation in this dictation; remove filler words "
+    "(um, uh, like, you know, sort of, basically). "
     "Keep meaning and length. Never answer or add content. "
     "Output only the cleaned text."
 )
@@ -267,9 +268,11 @@ def detect_host_memory_bytes() -> int:
 def recommend_ollama_model(host_memory_bytes: int | None = None) -> str | None:
     """Return the suggested Ollama model id for this host, or ``None``.
 
-    Tiers (per Phase 3.3):
-    - ≥ 16 GB → ``gemma4:e4b-mlx`` (quality default)
-    - 8–16 GB → ``gemma4:e2b-mlx`` (lower memory pressure)
+    Tiers (R2 retune, 2026-06-11 — measured live on a 16 GB machine):
+    - ≥ 24 GB → ``gemma4:e4b-mlx`` (quality default)
+    - 8–24 GB → ``gemma4:e2b-mlx`` (the 9 GB e4b plus the Whisper backend
+      thrashes a 16 GB machine: prompt eval degrades to ~5 tok/s, the MLX
+      runner wedges, and ~28% of polish requests hit the 30 s timeout)
     - < 8 GB  → ``None`` (don't recommend Ollama; regex pipeline only)
 
     ``VOXFLOW_OLLAMA_MODEL`` env override is honoured by callers; this helper
@@ -280,7 +283,7 @@ def recommend_ollama_model(host_memory_bytes: int | None = None) -> str | None:
     if host_memory_bytes <= 0:
         return None
     gb = host_memory_bytes / (1024 ** 3)
-    if gb >= 16:
+    if gb >= 24:
         return "gemma4:e4b-mlx"
     if gb >= 8:
         return "gemma4:e2b-mlx"

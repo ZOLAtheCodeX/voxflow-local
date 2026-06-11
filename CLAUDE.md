@@ -67,10 +67,10 @@ swift build && swift run VoxFlowLocal      # frontend (requires backend running)
 ```bash
 # Install Ollama: https://ollama.com/download
 ollama serve &
-ollama pull gemma4:e4b-mlx        # ≥16 GB RAM (recommended) — or gemma4:e2b-mlx for 8–16 GB
+ollama pull gemma4:e2b-mlx        # 8–24 GB RAM (recommended) — gemma4:e4b-mlx only for ≥24 GB
 ```
 
-`gemma4:e4b-mlx` holds ~8.3 GB resident in unified memory (verify via `curl localhost:11434/api/ps` → `size_vram`). Ollama unloads the model after `OLLAMA_KEEP_ALIVE` (default `5m`); `export OLLAMA_KEEP_ALIVE=24h` before `ollama serve` to pin it and avoid cold-load latency across idle gaps.
+R2 retune (2026-06-11, measured live): the 9 GB `gemma4:e4b-mlx` plus the Whisper backend thrashes a 16 GB machine (prompt eval ~5 tok/s, MLX runner wedges, ~28% of polish requests hit the 30 s timeout). Tier accordingly: `e2b-mlx` for 8–24 GB, `e4b-mlx` for ≥24 GB (`recommend_ollama_model` encodes this). The backend pins the model resident via per-request `keep_alive: "24h"` on the NATIVE `/api/chat` endpoint — the OpenAI-compat endpoint silently drops `keep_alive`, so never switch `OllamaBackend` back to it. `OLLAMA_KEEP_ALIVE` env tweaking is no longer needed. If the runner wedges (requests timing out warm), `ollama stop <model>` restores it.
 
 If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanup())`. Same fallback fires when Ollama is reachable but the configured model isn't pulled — `/v1/ready` returns `ollama_available: true` either way (it probes the API socket only, not model presence).
 
@@ -117,7 +117,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - PII redaction: credit cards Luhn-validated before `[ACCOUNT_NUMBER]` redaction (Phase 5.2).
 - Whisper short-audio fast path: clips < 20 s skip the chunking + stride padding via per-call `chunk_length_s=0` (Phase 5.1).
 - WebSocket `/v1/events` enforces a 60 s idle timeout with clean close frame (Phase 5.4).
-- Polish engine wraps the selected `TextLLMBackend` (only Ollama post-3.5); guardrail + regex fallback live one layer up in `PolishEngine`.
+- Polish engine wraps the selected `TextLLMBackend` (only Ollama post-3.5); guardrail + regex fallback live one layer up in `PolishEngine`. Guardrail is word-level with tone-aware floors (R2.2); `PolishEngine.polish` returns `(text, guardrail_triggered, degraded_reason)` and `CleanupResponse` carries `degraded_reason` (backend_unavailable / echo / guardrail_*).
 - Logging: `logging.getLogger("voxflow")`; never bare `print()`.
 
 ## Testing
