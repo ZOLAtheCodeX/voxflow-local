@@ -25,7 +25,9 @@ final class CockpitCaptureCoordinator {
         session: LongFormSessionService,
         dictionary: DictionaryStore? = nil,
         flushIntervalNs: UInt64 = 5_000_000_000,
-        minChunkBytes: Int = 8_000
+        // 0.3 s at 16 kHz mono PCM16 — aligned with the quick-dictation
+        // minimum (TranscriptGate.minAudioSeconds); was 8_000 (0.25 s).
+        minChunkBytes: Int = 9_600
     ) {
         self.capture = capture
         self.transcriber = transcriber
@@ -88,7 +90,18 @@ final class CockpitCaptureCoordinator {
         do {
             let response = try await transcriber.transcribe(audio)
             let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return }
+            // Same ingress gate as quick dictation — this path previously
+            // bypassed the confidence rules entirely, so every 5 s flush of
+            // ambient noise was a ghost-text opportunity (audit cause #5).
+            let durationSeconds = Double(audio.pcm.count) / (audio.sampleRate * 2.0)
+            if case .rejected(let reason) = TranscriptGate.evaluate(
+                text: text,
+                confidence: response.confidenceEstimate,
+                audioDurationSeconds: durationSeconds
+            ) {
+                if reason != "empty" { log.info("TranscriptGate rejected cockpit chunk (\(reason))") }
+                return
+            }
             let corrected = dictionary?.apply(to: text) ?? text
             session.appendChunk(corrected)
         } catch {

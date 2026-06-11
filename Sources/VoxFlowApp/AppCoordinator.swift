@@ -165,7 +165,6 @@ final class AppCoordinator: ObservableObject {
     private var lastTranscriptionConfidence: Double = 0.0
     private var cancellables = Set<AnyCancellable>()
     private static let maxCaptureDuration: TimeInterval = 60
-    private static let minCaptureSamples: Int = 4800 // 0.3s at 16kHz mono PCM16 = 4800 samples = 9600 bytes
     private var warmupTask: Task<Void, Never>?
     private var selectToneStyleTask: Task<Void, Never>?
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
@@ -609,8 +608,8 @@ final class AppCoordinator: ObservableObject {
 
     private func stopAndValidateAudio() throws -> CapturedAudio? {
         let capturedAudio = try audioCapture.stopCapture()
-        // Guard: discard very short captures (< 0.3s) that cause Whisper hallucination
-        let minBytes = Int(capturedAudio.sampleRate * 0.3) * MemoryLayout<Int16>.size
+        // Guard: discard very short captures that cause Whisper hallucination
+        let minBytes = Int(capturedAudio.sampleRate * TranscriptGate.minAudioSeconds) * MemoryLayout<Int16>.size
 
         if capturedAudio.pcm.count < minBytes {
             log.info("Audio too short (\(capturedAudio.pcm.count) bytes, need \(minBytes)) — discarding")
