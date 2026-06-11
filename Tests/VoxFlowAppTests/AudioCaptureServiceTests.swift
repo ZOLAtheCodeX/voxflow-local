@@ -43,4 +43,33 @@ final class AudioCaptureServiceTests: XCTestCase {
             }
         }
     }
+
+    /// R1.7 (audit S2): an input-device change mid-capture (AirPods
+    /// connect/disconnect) silently stops AVAudioEngine. The service must
+    /// tear down cleanly and surface a typed error instead of returning
+    /// stale audio / leaving the engine inconsistent.
+    func testDeviceChangeDuringCaptureSurfacesTypedError() {
+        let service = AudioCaptureService()
+        do {
+            try service.startCapture()
+            // Live engine available: simulate the configuration change.
+            service.handleConfigurationChange()
+            XCTAssertThrowsError(try service.stopCapture()) { error in
+                XCTAssertEqual(error as? AudioCaptureError, .deviceChanged)
+            }
+            // Service is recoverable: a fresh start works (or fails with a
+            // known environment error, never a stuck state).
+            do {
+                try service.startCapture()
+                _ = try? service.stopCapture()
+            } catch { /* environment-dependent — acceptable */ }
+        } catch {
+            // Headless environment: no live engine. The handler must be a
+            // harmless no-op when not capturing.
+            service.handleConfigurationChange()
+            XCTAssertThrowsError(try service.stopCapture()) { error in
+                XCTAssertEqual(error as? AudioCaptureError, .captureNotRunning)
+            }
+        }
+    }
 }

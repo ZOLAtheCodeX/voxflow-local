@@ -163,6 +163,9 @@ final class AppCoordinator: ObservableObject {
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
     private var lastTranscriptionConfidence: Double = 0.0
+    /// In-flight transcription pipeline, cancellable from cancelActiveCapture
+    /// while the session is .transcribing.
+    private var transcriptionTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     private static let maxCaptureDuration: TimeInterval = 60
     private var warmupTask: Task<Void, Never>?
@@ -546,6 +549,20 @@ final class AppCoordinator: ObservableObject {
             commandLane: commandLane
         )
 
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runTranscriptionPipeline(sessionID: sessionID, commandLane: commandLane, trace: trace)
+        }
+        transcriptionTask = task
+        await task.value
+        if transcriptionTask == task { transcriptionTask = nil }
+    }
+
+    private func runTranscriptionPipeline(
+        sessionID: String,
+        commandLane: Bool,
+        trace: CapturePipelineTraceBuilder
+    ) async {
         do {
             let captureFinalizeStarted = ContinuousClock.now
             guard let capturedAudio = try stopAndValidateAudio() else {
@@ -562,6 +579,7 @@ final class AppCoordinator: ObservableObject {
 
             let transcriptionStarted = ContinuousClock.now
             let transcription = try await transcribeAudio(capturedAudio, sessionID: sessionID)
+            try Task.checkCancellation()
             let transcriptionDetail: String
             if state.sttBackend == .whisperKit {
                 transcriptionDetail = "reported=\(transcription.processingTimeMs)ms"
@@ -749,6 +767,17 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func handleCaptureError(_ error: Error) {
+        if error is CancellationError {
+            log.info("Transcription pipeline canceled by user")
+            return
+        }
+        if let captureError = error as? AudioCaptureError, captureError == .deviceChanged {
+            log.warning("Capture invalidated by audio device change")
+            state.setIdle()
+            state.recordingDuration = 0
+            state.statusLine = "Audio device changed — try again"
+            return
+        }
         log.error("Transcription failed: \(error.localizedDescription)")
         state.sessionState = .error
         state.errorMessage = "Transcription failed: \(error.localizedDescription)"
@@ -771,6 +800,18 @@ final class AppCoordinator: ObservableObject {
         timer?.invalidate()
         captureTimeoutTimer?.invalidate()
         captureTimeoutTimer = nil
+
+        if state.sessionState == .transcribing {
+            transcriptionTask?.cancel()
+            transcriptionTask = nil
+            state.isCommandLaneActive = false
+            fnTriggeredCaptureInProgress = false
+            state.setIdle()
+            capturedTargetApp = nil
+            state.recordingDuration = 0
+            state.statusLine = "Transcription canceled"
+            return
+        }
 
         if state.sessionState == .recording {
             _ = try? audioCapture.stopCapture()

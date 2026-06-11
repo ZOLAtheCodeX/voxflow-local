@@ -103,4 +103,17 @@ final class AppCoordinatorSmokeTests: XCTestCase {
         XCTAssertEqual(state.recordingDuration, 0)
         XCTAssertEqual(state.statusLine, "Hold hotkey to talk")
     }
+
+    /// R1.6: Escape during a slow transcription must return to idle, not
+    /// leave the spinner up forever. cancelActiveCapture previously had no
+    /// .transcribing branch at all.
+    @MainActor
+    func testCancelDuringTranscribingReturnsToIdle() {
+        let coordinator = AppCoordinator.shared
+        coordinator.state.sessionState = .transcribing
+        coordinator.state.recordingDuration = 2.5
+        coordinator.cancelActiveCapture()
+        XCTAssertEqual(coordinator.state.sessionState, .idle)
+        XCTAssertEqual(coordinator.state.recordingDuration, 0)
+    }
 }

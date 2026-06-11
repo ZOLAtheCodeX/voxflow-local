@@ -34,6 +34,7 @@ enum AudioCaptureError: Error {
     case noInputNode
     case captureNotRunning
     case converterSetupFailed
+    case deviceChanged
 }
 
 final class AudioCaptureService: AudioCapturing {
@@ -50,12 +51,47 @@ final class AudioCaptureService: AudioCapturing {
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     private var isCapturing = false
+    private var deviceChangedDuringCapture = false
+    private var configurationObserver: NSObjectProtocol?
+
+    init() {
+        // AVAudioEngine stops itself silently when the input device changes
+        // (AirPods connect/disconnect). Observe the engine's configuration
+        // change so mid-capture device swaps tear down cleanly instead of
+        // returning stale audio and leaving the engine inconsistent (S2).
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleConfigurationChange()
+        }
+    }
+
+    deinit {
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+        }
+    }
+
+    /// Tear down a capture invalidated by an input-device change. The next
+    /// stopCapture() throws `.deviceChanged` exactly once so the caller can
+    /// reset its state machine; startCapture() clears the flag.
+    func handleConfigurationChange() {
+        guard isCapturing else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        isCapturing = false
+        deviceChangedDuringCapture = true
+        logger.warning("Audio device configuration changed mid-capture — capture invalidated")
+    }
 
     var bufferLimitReached: Bool {
         state.withLock { $0.bufferLimitReached }
     }
 
     func startCapture() throws {
+        deviceChangedDuringCapture = false
         state.withLock {
             $0.pcmBuffer.removeAll(keepingCapacity: true)
             $0.bufferLimitReached = false
@@ -157,6 +193,10 @@ final class AudioCaptureService: AudioCapturing {
     }
 
     func stopCapture() throws -> CapturedAudio {
+        if deviceChangedDuringCapture {
+            deviceChangedDuringCapture = false
+            throw AudioCaptureError.deviceChanged
+        }
         guard isCapturing else { throw AudioCaptureError.captureNotRunning }
 
         engine.inputNode.removeTap(onBus: 0)

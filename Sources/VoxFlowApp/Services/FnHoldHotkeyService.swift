@@ -21,8 +21,16 @@ final class FnHoldHotkeyService {
         self.onPress = onPress
         self.onRelease = onRelease
 
+        // Global-monitor callbacks can arrive off the main thread; all state
+        // (isFnAlonePressed / hasTriggeredPress) is otherwise touched on main
+        // (local monitor + the scheduled DispatchWorkItem). Hop to main so
+        // every mutation is serialized — audit S6 data race.
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
+            if Thread.isMainThread {
+                self?.handleFlagsChanged(event)
+            } else {
+                DispatchQueue.main.async { self?.handleFlagsChanged(event) }
+            }
         }
 
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
