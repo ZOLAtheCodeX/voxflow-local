@@ -97,6 +97,34 @@ class WhisperEngine:
         self._warmed_up = False
         self._load_pipeline()
 
+    # Parity with Swift CapturedAudio.isSilent (AudioCaptureService.swift):
+    # normalized RMS below this is dead air / digital silence.
+    SILENCE_RMS_THRESHOLD = 0.003
+
+    @staticmethod
+    def _rms_energy(pcm: bytes) -> float:
+        """Normalized RMS (0.0-1.0) of a PCM16 buffer.
+
+        Computed from the raw bytes (not the numpy array) so the energy gate
+        stays deterministic under test mocks that stub out numpy — same
+        rationale as the duration computation below. Uses stdlib audioop
+        (C-speed, present through 3.12) with a strided pure-Python fallback.
+        """
+        sample_count = len(pcm) // 2
+        if sample_count == 0:
+            return 0.0
+        try:
+            import audioop
+
+            return audioop.rms(pcm, 2) / 32768.0
+        except ImportError:
+            import struct
+
+            samples = struct.unpack(f"<{sample_count}h", pcm)
+            stride = max(1, sample_count // 65536)
+            strided = samples[::stride]
+            return (sum(s * s for s in strided) / len(strided)) ** 0.5 / 32768.0
+
     @staticmethod
     def _estimate_confidence(output: dict, text: str, audio: "np.ndarray", sample_rate: int) -> float:
         """Derive confidence from pipeline output instead of hardcoding 0.9.
@@ -150,6 +178,23 @@ class WhisperEngine:
             logger.error("Whisper transcribe received odd-length PCM buffer (%d bytes)", len(pcm))
             return STTExecutionResult(
                 text="[transcription unavailable: invalid audio format]",
+                confidence=0.0,
+                stage_timings_ms=stage_timings_ms,
+                model_loaded_before_request=model_loaded_before_request,
+                model_loaded_after_request=self.model_loaded,
+                cold_start=False,
+            )
+
+        # Energy gate: no-speech audio must never reach the model. Whisper
+        # invents text from silence — empirically, a 3.0s silence clip yields
+        # "you" with coverage-confidence 0.687, past every downstream filter.
+        # Runs before model load: silence costs ~0ms instead of ~1.4s. (R1.2)
+        rms = self._rms_energy(pcm)
+        if rms < self.SILENCE_RMS_THRESHOLD:
+            logger.info("Energy gate: silent audio (RMS %.4f) — skipping inference", rms)
+            stage_timings_ms["energy_gate_rms"] = 0
+            return STTExecutionResult(
+                text="",
                 confidence=0.0,
                 stage_timings_ms=stage_timings_ms,
                 model_loaded_before_request=model_loaded_before_request,

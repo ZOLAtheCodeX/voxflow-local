@@ -14,9 +14,9 @@
           "joining"
         ],
         "min_similarity": 0.85,
-        "min_token_recall": 0.80,
-        "length_ratio_min": 0.80,
-        "length_ratio_max": 1.20,
+        "min_token_recall": 0.8,
+        "length_ratio_min": 0.8,
+        "length_ratio_max": 1.2,
         "forbidden_patterns": [
           "^\\[transcription unavailable"
         ]
@@ -40,9 +40,9 @@
           "help"
         ],
         "min_similarity": 0.85,
-        "min_token_recall": 0.80,
-        "length_ratio_min": 0.80,
-        "length_ratio_max": 1.20,
+        "min_token_recall": 0.8,
+        "length_ratio_min": 0.8,
+        "length_ratio_max": 1.2,
         "forbidden_patterns": [
           "^\\[transcription unavailable"
         ]
@@ -67,9 +67,47 @@
           "much"
         ],
         "min_similarity": 0.88,
-        "min_token_recall": 1.00,
-        "length_ratio_min": 0.80,
-        "length_ratio_max": 1.20,
+        "min_token_recall": 1.0,
+        "length_ratio_min": 0.8,
+        "length_ratio_max": 1.2,
+        "forbidden_patterns": [
+          "^\\[transcription unavailable"
+        ]
+      },
+      "expected_by_backend": {
+        "openai": {
+          "allow_placeholder": true
+        }
+      }
+    },
+    {
+      "id": "silence_3s",
+      "file": "backend/tests/fixtures/golden_clips/silence_3s.wav",
+      "language_hint": "en",
+      "comment": "Anti-hallucination guard: pure digital silence must produce an empty transcript (R1.2)",
+      "expected": {
+        "reference_text": "",
+        "min_words": 0,
+        "max_words": 0,
+        "forbidden_patterns": [
+          "^\\[transcription unavailable"
+        ]
+      },
+      "expected_by_backend": {
+        "openai": {
+          "allow_placeholder": true
+        }
+      }
+    },
+    {
+      "id": "ambient_noise_4s",
+      "file": "backend/tests/fixtures/golden_clips/ambient_noise_4s.wav",
+      "language_hint": "en",
+      "comment": "Anti-hallucination guard: 0.008-RMS room noise above the client silence gate must produce an empty transcript (R1.2)",
+      "expected": {
+        "reference_text": "",
+        "min_words": 0,
+        "max_words": 0,
         "forbidden_patterns": [
           "^\\[transcription unavailable"
         ]
@@ -108,8 +146,8 @@
         ],
         "min_similarity": 0.55,
         "min_token_recall": 0.45,
-        "length_ratio_min": 0.60,
-        "length_ratio_max": 1.80
+        "length_ratio_min": 0.6,
+        "length_ratio_max": 1.8
       }
     },
     {
@@ -124,9 +162,9 @@
           "30"
         ],
         "min_similarity": 0.65,
-        "min_token_recall": 0.50,
+        "min_token_recall": 0.5,
         "length_ratio_min": 0.65,
-        "length_ratio_max": 1.40
+        "length_ratio_max": 1.4
       },
       "polish": {
         "must_include_all": [
@@ -134,9 +172,9 @@
           "42"
         ],
         "min_similarity": 0.55,
-        "min_token_recall": 0.40,
+        "min_token_recall": 0.4,
         "length_ratio_min": 0.55,
-        "length_ratio_max": 1.80
+        "length_ratio_max": 1.8
       }
     }
   ]

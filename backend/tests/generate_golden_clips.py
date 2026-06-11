@@ -27,6 +27,16 @@ CLIPS: list[tuple[str, str]] = [
 # produces clear, natural speech that Whisper transcribes reliably.
 TTS_VOICE = "Samantha"
 
+# Synthetic no-speech clips: (filename, duration_seconds, peak_amplitude).
+# Amplitude 0 is dead silence; 450 is ~0.008 RMS uniform noise (a quiet room
+# with fan/HVAC — above the 0.003 client-side silence gate, so it reaches
+# Whisper). Deterministic via a fixed seed so the committed fixtures are
+# reproducible. Expected pipeline output for all of these: empty transcript.
+SYNTHETIC_CLIPS: list[tuple[str, float, int]] = [
+    ("silence_3s.wav", 3.0, 0),
+    ("ambient_noise_4s.wav", 4.0, 450),
+]
+
 
 def _valid_wav(path: Path) -> bool:
     if not path.exists():
@@ -60,6 +70,27 @@ def _write_tts_wav(path: Path, phrase: str) -> None:
         shutil.move(str(temp_path), str(path))
 
 
+def _write_synthetic_wav(path: Path, duration_s: float, peak_amplitude: int) -> None:
+    """Write a deterministic mono PCM16 clip of silence or low-level noise."""
+    import random
+    import struct
+
+    frame_count = int(SAMPLE_RATE * duration_s)
+    rng = random.Random(20260611)
+    if peak_amplitude <= 0:
+        frames = b"\x00\x00" * frame_count
+    else:
+        frames = struct.pack(
+            f"<{frame_count}h",
+            *(rng.randint(-peak_amplitude, peak_amplitude) for _ in range(frame_count)),
+        )
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(SAMPLE_RATE)
+        handle.writeframes(frames)
+
+
 def generate(force: bool) -> None:
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
     print("Generating TTS regression clips")
@@ -72,6 +103,14 @@ def generate(force: bool) -> None:
 
         print(f"generate {destination.name}: {phrase!r}")
         _write_tts_wav(destination, phrase)
+
+    for filename, duration_s, amplitude in SYNTHETIC_CLIPS:
+        destination = FIXTURE_DIR / filename
+        if not force and _valid_wav(destination):
+            print(f"skip {destination.name} (exists)")
+            continue
+        print(f"generate {destination.name}: synthetic {duration_s}s amplitude={amplitude}")
+        _write_synthetic_wav(destination, duration_s, amplitude)
 
 
 def main() -> int:

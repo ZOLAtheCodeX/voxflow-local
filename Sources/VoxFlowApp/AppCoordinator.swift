@@ -660,24 +660,16 @@ final class AppCoordinator: ObservableObject {
         #endif
 
         let audioDurationSec = Double(capturedAudio.pcm.count) / (capturedAudio.sampleRate * Double(MemoryLayout<Int16>.size))
-        let isShortAudio = audioDurationSec < 3.0
 
-        if rawText.isEmpty || rawText.hasPrefix("[transcription") || HallucinationFilter.isLikelyHallucination(rawText, shortAudio: isShortAudio) {
-            log.info("Empty, placeholder, or filtered hallucination transcription — discarding")
-            state.sessionState = .idle
-            state.statusLine = "No speech detected — try again"
-            state.recordingDuration = 0
-            return
-        }
-
-        // Discard low-confidence short text — likely silence/noise hallucinations.
-        // Single-word results are checked at any duration (Whisper often hallucinates
-        // a lone "hello" on long silent/noisy clips). Two-word results only on short audio.
-        let wordCount = rawText.split(whereSeparator: \.isWhitespace).count
-        let isSuspect = (wordCount == 1 && transcription.confidenceEstimate < 0.15)
-            || (isShortAudio && wordCount <= 2 && transcription.confidenceEstimate < 0.08)
-        if isSuspect {
-            log.info("Low confidence (\(String(format: "%.2f", transcription.confidenceEstimate))) \(wordCount)-word text (duration=\(String(format: "%.1f", audioDurationSec))s) — discarding as likely hallucination")
+        // Single ingress gate: empty/placeholder, hallucination filter, and the
+        // low-confidence rules live in TranscriptGate so every transcript path
+        // (quick dictation, cockpit chunks, command lane) applies them identically.
+        if case .rejected(let reason) = TranscriptGate.evaluate(
+            text: rawText,
+            confidence: transcription.confidenceEstimate,
+            audioDurationSeconds: audioDurationSec
+        ) {
+            log.info("TranscriptGate rejected transcript (\(reason), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s) — discarding")
             state.sessionState = .idle
             state.statusLine = "No speech detected — try again"
             state.recordingDuration = 0

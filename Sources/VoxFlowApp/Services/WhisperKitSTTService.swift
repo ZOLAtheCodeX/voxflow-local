@@ -45,11 +45,21 @@ final class WhisperKitSTTService: ChunkTranscribing {
         let conversionLatencyMs = conversionStarted.elapsedMilliseconds()
 
         let inferenceStarted = ContinuousClock.now
+        // Anti-hallucination thresholds made explicit (they match WhisperKit's
+        // current defaults by design — pinned here so an upstream default
+        // change can't silently weaken the gate). noSpeechThreshold marks a
+        // segment silent when noSpeechProb exceeds it AND avgLogprob falls
+        // below logProbThreshold; segment noSpeechProb also feeds
+        // TranscriptionConfidence regardless of this gate.
         let results: [TranscriptionResult] = try await pipe.transcribe(
             audioArray: floatSamples,
             decodeOptions: DecodingOptions(
                 language: "en",
-                wordTimestamps: true
+                temperatureFallbackCount: 5,
+                wordTimestamps: true,
+                compressionRatioThreshold: 2.4,
+                logProbThreshold: -1.0,
+                noSpeechThreshold: 0.6
             )
         )
         let inferenceLatencyMs = inferenceStarted.elapsedMilliseconds()
