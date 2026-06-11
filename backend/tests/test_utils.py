@@ -342,7 +342,9 @@ class TestIsWhisperHallucination:
         assert is_whisper_hallucination("hey.") is True
 
     def test_short_real_word(self):
-        assert is_whisper_hallucination("okay") is False
+        # "okay" moved to short-only filtering (parity with Swift); a word
+        # outside the filler set must still pass on short audio.
+        assert is_whisper_hallucination("approved") is False
 
     def test_real_sentence_with_thank_you(self):
         assert is_whisper_hallucination("Thank you for helping me with this project") is False
@@ -376,7 +378,9 @@ class TestIsWhisperHallucination:
     def test_multi_word_phrases_not_affected(self):
         assert is_whisper_hallucination("Hello world!") is False
         assert is_whisper_hallucination("Hey, can you help me?") is False
-        assert is_whisper_hallucination("Hi there.") is False
+        # "Hi there." is a greeting pair (greeting + target word) — filtered at
+        # any duration, parity with Swift. Pinned in the parity fixture.
+        assert is_whisper_hallucination("Hi there.") is True
 
 
 # ── WhisperEngine._estimate_confidence ───────────────────────────────
@@ -473,58 +477,34 @@ class TestSplitSentences:
 # ── TestHallucinationParity ──────────────────────────────────────────
 
 class TestHallucinationParity:
-    def test_hallucination_filter_parity(self):
-        import re
+    """Behavioral parity with Sources/VoxFlowApp/Services/HallucinationFilter.swift.
+
+    Both implementations consume Tests/Fixtures/hallucination_parity.json and
+    must produce `expected` for every case. This replaces the old regex-on-source
+    test, which silently broke when the Swift filter was rewritten (variable
+    names changed) and enforced nothing.
+    """
+
+    @staticmethod
+    def _fixture_cases():
+        import json
         from pathlib import Path
-        from server import _WHISPER_HALLUCINATION_ALWAYS, _WHISPER_HALLUCINATION_SHORT_ONLY
 
-        # Locate the Swift hallucination filter file
         project_root = Path(__file__).resolve().parent.parent.parent
-        swift_filter_path = project_root / "Sources" / "VoxFlowApp" / "Services" / "HallucinationFilter.swift"
-        
-        assert swift_filter_path.exists(), f"Swift filter file not found at {swift_filter_path}"
-        
-        content = swift_filter_path.read_text(encoding="utf-8")
-        
-        # Extract the elements inside Set([ ... ]) for alwaysFiltered
-        always_match = re.search(
-            r"alwaysFiltered:\s*Set<String>\s*=\s*Set\(\[\s*(.*?)\s*\]\)",
-            content,
-            re.DOTALL
-        )
-        assert always_match is not None, "Could not find alwaysFiltered in Swift file"
-        
-        # Extract the elements inside Set([ ... ]) for shortOnlyFiltered
-        short_only_match = re.search(
-            r"shortOnlyFiltered:\s*Set<String>\s*=\s*Set\(\[\s*(.*?)\s*\]\)",
-            content,
-            re.DOTALL
-        )
-        assert short_only_match is not None, "Could not find shortOnlyFiltered in Swift file"
+        fixture = project_root / "Tests" / "Fixtures" / "hallucination_parity.json"
+        assert fixture.exists(), f"Parity fixture not found at {fixture}"
+        data = json.loads(fixture.read_text(encoding="utf-8"))
+        cases = data["cases"]
+        assert len(cases) >= 40, "Fixture unexpectedly small — wrong file?"
+        return cases
 
-        def parse_swift_set(raw_block: str) -> set[str]:
-            # find all string literals "..." in the block
-            literals = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', raw_block)
-            parsed = set()
-            for s in literals:
-                # decode Swift unicode escapes like \u{266A}
-                decoded = re.sub(r'\\u\{([0-9a-fA-F]+)\}', lambda m: chr(int(m.group(1), 16)), s)
-                # also handle standard escapes like \" or \\ if any
-                decoded = decoded.replace('\\"', '"').replace('\\\\', '\\')
-                parsed.add(decoded.lower())
-            return parsed
-
-        swift_always = parse_swift_set(always_match.group(1))
-        swift_short_only = parse_swift_set(short_only_match.group(1))
-
-        # We assert that the lists match exactly
-        assert swift_always == _WHISPER_HALLUCINATION_ALWAYS, (
-            f"Always-filtered drift detected!\n"
-            f"Swift always-filtered: {sorted(swift_always)}\n"
-            f"Python always-filtered: {sorted(_WHISPER_HALLUCINATION_ALWAYS)}"
-        )
-        assert swift_short_only == _WHISPER_HALLUCINATION_SHORT_ONLY, (
-            f"Short-only filtered drift detected!\n"
-            f"Swift short-only: {sorted(swift_short_only)}\n"
-            f"Python short-only: {sorted(_WHISPER_HALLUCINATION_SHORT_ONLY)}"
-        )
+    def test_fixture_cases_hold(self):
+        failures = []
+        for case in self._fixture_cases():
+            got = is_whisper_hallucination(case["text"], short_audio=case["short_audio"])
+            if got is not case["expected"]:
+                failures.append(
+                    f"{case['text']!r} (short_audio={case['short_audio']}): "
+                    f"expected {case['expected']}, got {got} — {case.get('note', '')}"
+                )
+        assert not failures, "Parity contract violations:\n" + "\n".join(failures)

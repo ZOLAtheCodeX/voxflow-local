@@ -133,4 +133,38 @@ final class HallucinationFilterTests: XCTestCase {
         XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hey, can you help me?", shortAudio: true))
         XCTAssertFalse(HallucinationFilter.isLikelyHallucination("I'm watching the kids", shortAudio: false))
     }
+
+    // MARK: - Behavioral parity fixture (shared contract with backend filter)
+
+    /// Both this filter and backend/app/nlp/hallucination.py must satisfy every
+    /// case in Tests/Fixtures/hallucination_parity.json. Replaces the old
+    /// regex-on-source parity test that silently broke on the token rewrite.
+    func testParityFixtureCasesHold() throws {
+        struct ParityCase: Decodable {
+            let text: String
+            let short_audio: Bool
+            let expected: Bool
+            let note: String?
+        }
+        struct ParityFixture: Decodable {
+            let cases: [ParityCase]
+        }
+
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // Tests/VoxFlowAppTests
+            .deletingLastPathComponent()  // Tests
+            .appendingPathComponent("Fixtures/hallucination_parity.json")
+        let data = try Data(contentsOf: fixtureURL)
+        let fixture = try JSONDecoder().decode(ParityFixture.self, from: data)
+        XCTAssertGreaterThanOrEqual(fixture.cases.count, 40, "Fixture unexpectedly small — wrong file?")
+
+        var failures: [String] = []
+        for c in fixture.cases {
+            let got = HallucinationFilter.isLikelyHallucination(c.text, shortAudio: c.short_audio)
+            if got != c.expected {
+                failures.append("'\(c.text)' (short=\(c.short_audio)): expected \(c.expected), got \(got) — \(c.note ?? "")")
+            }
+        }
+        XCTAssertTrue(failures.isEmpty, "Parity contract violations:\n" + failures.joined(separator: "\n"))
+    }
 }

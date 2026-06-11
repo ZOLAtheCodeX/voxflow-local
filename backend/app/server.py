@@ -65,8 +65,6 @@ from engines import (  # noqa: F401
 )
 
 from nlp import (  # noqa: F401
-    _WHISPER_HALLUCINATION_ALWAYS,
-    _WHISPER_HALLUCINATION_SHORT_ONLY,
     apply_tone,
     build_meeting_summary,
     coerce_speaker_segments,

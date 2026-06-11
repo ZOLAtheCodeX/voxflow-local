@@ -56,16 +56,20 @@ enum HallucinationFilter {
         }
         
         // 3. Check for YouTube-style hallucinations (thank you for watching, subscribe)
-        // F3: Tighten exact matches instead of substring contains to avoid over-filtering "I'm watching the kids"
+        // F3: Tighten exact matches instead of substring contains to avoid over-filtering "I'm watching the kids".
+        // Thank-you family requires a watching/listening co-occurrence so real
+        // gratitude ("Thank you for the coffee") passes; bare "thank you so
+        // much" is short-audio-only. Contract: Tests/Fixtures/hallucination_parity.json.
         if words.count <= 8 {
-            if words.starts(with: ["thank", "you", "so", "much"]) { return true }
-            if words.starts(with: ["thank", "you", "for"]) { return true }
-            if words.starts(with: ["thanks", "for"]) { return true }
+            if (words[0] == "thank" || words[0] == "thanks"),
+               words.contains("watching") || words.contains("listening") { return true }
+            if shortAudio && words == ["thank", "you", "so", "much"] { return true }
             if words.starts(with: ["subscribe", "to", "my", "channel"]) { return true }
             if words.starts(with: ["subscribe", "to", "the", "channel"]) { return true }
             if words.starts(with: ["subscribe", "for", "more"]) { return true }
             if words.starts(with: ["please", "subscribe"]) { return true }
             if words.starts(with: ["like", "and", "subscribe"]) { return true }
+            if words.starts(with: ["please", "like", "and", "subscribe"]) { return true }
             if words == ["i", "will", "see", "you", "in", "the", "next", "one"] { return true }
             if words == ["i", "ll", "see", "you", "in", "the", "next", "one"] { return true }
             if words == ["see", "you", "next", "time"] { return true }
