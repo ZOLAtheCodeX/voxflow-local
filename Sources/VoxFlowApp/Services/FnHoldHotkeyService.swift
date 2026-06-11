@@ -1,7 +1,13 @@
 import AppKit
 import Foundation
 
-final class FnHoldHotkeyService {
+/// Thread-safety invariant: all mutable state (isFnAlonePressed,
+/// hasTriggeredPress, pendingPressWorkItem) is touched only on the main
+/// thread — the local monitor and the activation-delay work item already run
+/// there, and the global-monitor callback hops to main below (audit S6).
+/// @unchecked Sendable documents that confinement for the @Sendable
+/// global-monitor closure; it is not free-threaded.
+final class FnHoldHotkeyService: @unchecked Sendable {
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var onPress: (() -> Void)?
@@ -26,10 +32,13 @@ final class FnHoldHotkeyService {
         // (local monitor + the scheduled DispatchWorkItem). Hop to main so
         // every mutation is serialized — audit S6 data race.
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            // Extract the Sendable flags before hopping — NSEvent itself
+            // must not cross threads.
+            let flags = event.modifierFlags
             if Thread.isMainThread {
-                self?.handleFlagsChanged(event)
+                self?.handleFlags(flags)
             } else {
-                DispatchQueue.main.async { self?.handleFlagsChanged(event) }
+                DispatchQueue.main.async { self?.handleFlags(flags) }
             }
         }
 
@@ -63,7 +72,11 @@ final class FnHoldHotkeyService {
     }
 
     func handleFlagsChanged(_ event: NSEvent) {
-        let fnAloneNow = Self.isFnAlone(event.modifierFlags)
+        handleFlags(event.modifierFlags)
+    }
+
+    private func handleFlags(_ flags: NSEvent.ModifierFlags) {
+        let fnAloneNow = Self.isFnAlone(flags)
         guard fnAloneNow != isFnAlonePressed else { return }
 
         isFnAlonePressed = fnAloneNow
