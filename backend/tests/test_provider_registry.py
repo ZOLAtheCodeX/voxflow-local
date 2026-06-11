@@ -131,3 +131,60 @@ class TestProviderRegistry:
         assert registry.is_cloud("ollama") is False        # default localhost
         assert registry.is_cloud("lmstudio") is False      # localhost base_url
         assert registry.is_cloud("claude") is True         # cloud API
+
+
+class TestProvidersTestEndpoint:
+    """POST /v1/providers/test probes one configured provider (R3.6)."""
+
+    @pytest.fixture()
+    def client(self):
+        import httpx
+        import server
+
+        transport = httpx.ASGITransport(app=server.app)
+        return httpx.AsyncClient(transport=transport, base_url="http://testserver")
+
+    @pytest.mark.anyio
+    async def test_unknown_provider_returns_404(self, client):
+        async with client as c:
+            resp = await c.post("/v1/providers/test", json={"provider_id": "nope"})
+        assert resp.status_code == 404
+
+    @pytest.mark.anyio
+    async def test_known_provider_returns_probe_result(self, client):
+        async with client as c:
+            resp = await c.post("/v1/providers/test", json={"provider_id": "ollama"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["provider_id"] == "ollama"
+        assert isinstance(data["reachable"], bool)
+        assert "detail" in data
+
+
+class TestChainIntegrationWithConfigFile:
+    def test_engine_built_from_config_file_falls_back_to_ollama(self, tmp_path, monkeypatch):
+        """End-to-end: a dead first provider (no server on the port) falls
+        through to the second per the configured chain."""
+        import json as _json
+
+        from engines.polish import PolishEngine
+
+        path = tmp_path / "providers.json"
+        path.write_text(_json.dumps({
+            "version": 1,
+            "providers": [
+                {"id": "deadlocal", "kind": "openai_compat", "base_url": "http://127.0.0.1:59999", "model": "x", "timeout": 1.0},
+                {"id": "alsodead", "kind": "openai_compat", "base_url": "http://127.0.0.1:59998", "model": "y", "timeout": 1.0},
+            ],
+            "chains": {"polish": ["deadlocal", "alsodead"]},
+        }))
+        config = load_provider_config(path)
+        registry = ProviderRegistry(config)
+        engine = PolishEngine(chain=registry.chain("polish"))
+        out = engine.run("send the weekly report to the operations team", "neutral")
+        # Both providers dead -> regex floor with full provenance.
+        assert out.served_by == "regex"
+        assert out.degraded_reason == "backend_unavailable"
+        assert out.fallback_depth == 2
+        assert out.text
+

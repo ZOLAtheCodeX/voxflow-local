@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 # Import singletons, status variables and helper logic from context
 from context import (
+    provider_registry,
     MAX_AUDIO_BASE64_CHARS,
     MAX_AUDIO_PAYLOAD_BYTES,
     state,
@@ -54,6 +55,8 @@ from routing import (
 )
 
 from schemas import (
+    ProviderTestRequest,
+    ProviderTestResponse,
     CleanupRequest,
     CleanupResponse,
     MeetingRequest,
@@ -112,6 +115,49 @@ def health() -> dict[str, str]:
 @router.get("/v1/ready", response_model=ReadyResponse)
 def ready() -> ReadyResponse:
     return readiness_snapshot()
+
+
+@router.post("/v1/providers/test", response_model=ProviderTestResponse)
+def providers_test(payload: ProviderTestRequest) -> ProviderTestResponse:
+    """Probe one configured provider for the Settings test-connection button (R3.6)."""
+    try:
+        spec = provider_registry.spec(payload.provider_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown provider id: {payload.provider_id}")
+
+    backend = provider_registry.backend(spec.id)
+    if spec.kind == "ollama":
+        from engines.llm_backend import list_ollama_models, probe_ollama_available
+
+        reachable = probe_ollama_available(force=True)
+        if not reachable:
+            return ProviderTestResponse(provider_id=spec.id, reachable=False, detail="Ollama server unreachable")
+        model = spec.model or getattr(backend, "model", "")
+        try:
+            installed = {m.get("name", "") for m in list_ollama_models(timeout=2.0)}
+            if model and model not in installed:
+                return ProviderTestResponse(
+                    provider_id=spec.id, reachable=True,
+                    detail=f"Server reachable but model '{model}' is not pulled — run: ollama pull {model}",
+                )
+        except Exception:
+            pass
+        return ProviderTestResponse(provider_id=spec.id, reachable=True, detail=f"Reachable; model '{model}' available")
+
+    if spec.kind in ("openai_compat", "openai"):
+        reachable = bool(getattr(backend, "is_available", lambda: False)())
+        detail = "Reachable" if reachable else "Server unreachable or rejected the request"
+        return ProviderTestResponse(provider_id=spec.id, reachable=reachable, detail=detail)
+
+    if spec.kind == "anthropic":
+        if not spec.api_key:
+            return ProviderTestResponse(
+                provider_id=spec.id, reachable=False,
+                detail="No API key configured (set it in Settings; stored in the Keychain)",
+            )
+        return ProviderTestResponse(provider_id=spec.id, reachable=True, detail="API key on file (verified at first request)")
+
+    return ProviderTestResponse(provider_id=spec.id, reachable=False, detail=f"Unknown kind {spec.kind}")
 
 
 @router.post("/v1/transcribe", response_model=TranscribeResponse)

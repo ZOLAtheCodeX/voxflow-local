@@ -230,6 +230,16 @@ class OllamaPullRequest(BaseModel):
     model: str = Field(min_length=1, max_length=128)
 
 
+class ProviderTestRequest(BaseModel):
+    provider_id: str = Field(min_length=1)
+
+
+class ProviderTestResponse(BaseModel):
+    provider_id: str
+    reachable: bool
+    detail: str
+
+
 class ProviderStatus(BaseModel):
     id: str
     kind: str
