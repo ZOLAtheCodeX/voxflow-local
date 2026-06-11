@@ -101,6 +101,11 @@ final class AccessibilityInsertService {
 
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else { return false }
+        // Snapshot the pasteboard generation after OUR write. If the user
+        // copies something during the paste window below, changeCount moves
+        // past this value and we must NOT clobber their new clipboard with
+        // the stale save (audit S4).
+        let ourChangeCount = pasteboard.changeCount
 
         // Re-activate the target app — focus may have shifted during transcription.
         // Uses Task.sleep to yield the main thread during the wait.
@@ -123,7 +128,7 @@ final class AccessibilityInsertService {
             // Even if cancelled, we fall through to restore
         }
 
-        if let previous = previousContents {
+        if let previous = previousContents, pasteboard.changeCount == ourChangeCount {
             pasteboard.clearContents()
             pasteboard.setString(previous, forType: .string)
         }

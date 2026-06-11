@@ -726,9 +726,9 @@ struct SettingsView: View {
             refreshPermissions()
             privateAPIBaseURLDraft = state.privateAPIBaseURL
             privateAPIModelDraft = state.privateAPIModel
-            privateAPIKeyDraft = state.privateAPIKey
+            privateAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainPrivateAPIKeyAccount) ?? ""
             openAIBaseURLDraft = state.openAIBaseURL
-            openAIAPIKeyDraft = state.openAIAPIKey
+            openAIAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainOpenAIAPIKeyAccount) ?? ""
             openAISTTModelDraft = state.openAISTTModel
             openAITTSModelDraft = state.openAITTSModel
             openAITTSVoiceDraft = state.openAITTSVoice

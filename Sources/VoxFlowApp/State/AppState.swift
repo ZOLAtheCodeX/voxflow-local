@@ -36,9 +36,11 @@ final class AppState: ObservableObject {
     @Published var providerMode: ProviderMode = .localOnly
     @Published var privateAPIBaseURL: String = ""
     @Published var privateAPIModel: String = ""
-    @Published var privateAPIKey: String = ""
+    /// Non-secret indicator for UI config warnings. The key itself lives in
+    /// the Keychain only — holding it in @Published state kept a plaintext
+    /// copy in memory and broadcast it via Combine (audit S10).
+    @Published var privateAPIKeyConfigured: Bool = false
     @Published var openAIBaseURL: String = "https://api.openai.com"
-    @Published var openAIAPIKey: String = ""
     @Published var openAISTTModel: String = "whisper-1"
     @Published var openAITTSModel: String = "gpt-4o-mini-tts"
     @Published var openAITTSVoice: String = "alloy"

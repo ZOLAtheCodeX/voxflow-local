@@ -407,6 +407,10 @@ struct TranscriptCandidate: Identifiable {
     var selectedMode: CleanupMode
     var confidence: Double = 0.0
     var timestamp: Date = Date()
+    /// Frozen capture target (the app the user was dictating into), so a
+    /// later re-insert from history can resolve the original destination
+    /// instead of whatever is frontmost at click time (audit S7).
+    var targetProcessIdentifier: Int32? = nil
 
     func text(for mode: CleanupMode) -> String {
         switch mode {

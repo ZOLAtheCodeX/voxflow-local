@@ -3,10 +3,15 @@ import XCTest
 
 private final class FakeCapture: AudioCapturing {
     var startCount = 0
+    var stopCount = 0
+    var failNextStart = false
     var nextAudio: CapturedAudio
     init(nextAudio: CapturedAudio) { self.nextAudio = nextAudio }
-    func startCapture() throws { startCount += 1 }
-    func stopCapture() throws -> CapturedAudio { nextAudio }
+    func startCapture() throws {
+        startCount += 1
+        if failNextStart { failNextStart = false; throw AudioCaptureError.captureNotRunning }
+    }
+    func stopCapture() throws -> CapturedAudio { stopCount += 1; return nextAudio }
 }
 
 private final class FakeTranscriber: ChunkTranscribing, @unchecked Sendable {
@@ -83,5 +88,26 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         await coord.flushNow()
         XCTAssertEqual(session.currentSession?.transcript, "the WHEREFORE clause")
         await coord.stopRecording()
+    }
+
+    /// Audit S12: when the mid-chunk capture restart fails, the engine must
+    /// be cleaned up with a best-effort stop before the session ends, so the
+    /// next cockpit recording starts from a known-stopped engine.
+    @MainActor
+    func test_flushNow_restart_failure_stops_capture_before_ending_session() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber()
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory)
+        let sut = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+
+        sut.startRecording(targetApp: nil)
+        capture.failNextStart = true
+        await sut.flushNow(force: true)
+
+        // stop #1: the flush's stop -> restart fails -> stop #2: cleanup.
+        XCTAssertEqual(capture.stopCount, 2)
+        if case .recording = session.state {
+            XCTFail("session must not stay in .recording after a restart failure")
+        }
     }
 }

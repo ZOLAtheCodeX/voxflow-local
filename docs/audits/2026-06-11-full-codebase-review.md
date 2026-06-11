@@ -50,13 +50,13 @@ Critical findings verified by the lead by reading the cited code; high findings 
 | --- | --- | --- | --- |
 | S1 | Critical | `AppCoordinator.swift:779-803` | `cancelActiveCapture()` has no `.transcribing` branch (verified: branches exist only for recording/privacy/review/error). Escape during a slow transcription does nothing; user perceives a hang. |
 | S2 | Critical | `AudioCaptureService.swift` | No `AVAudioEngineConfigurationChange` handling. AirPods connect/disconnect mid-capture silently stops the engine; subsequent captures fail from inconsistent engine state. |
-| S3 | Critical | `endpoints.py:150-154` (x5 endpoints) | `if sem.locked(): 503` then `async with sem:` is a TOCTOU; the concurrency cap can be exceeded. Low blast radius for a single user, but it is the kind of latent bug that bites under cockpit chunking + quick dictation overlap. |
+| S3 | ~~Critical~~ FALSE POSITIVE | `endpoints.py:150-154` (x5 endpoints) | CORRECTED during R1: `asyncio.Semaphore.acquire`'s fast path decrements synchronously without suspending, so nothing can interleave between the `locked()` check and the acquire — the cap holds. Pinned by `TestMLSemaphoreAtomicity` (R1.9); no code change. |
 | S4 | High | `AccessibilityInsertService.swift:96-131` | Paste fallback saves/restores the clipboard around a 300 ms window; a user copy in that window is destroyed. |
-| S5 | High | `SettingsCoordinator.swift:327-350` | Every settings mutator triggers a backend restart; typing an API key restarts the backend per keystroke (config delta per character). |
+| S5 | ~~High~~ FALSE POSITIVE | `SettingsCoordinator.swift:327-350` | CORRECTED during R1: SettingsView edits local @State drafts and applies via explicit buttons; no onChange path exists, so restarts fire once per Apply click, which is correct. No code change. |
 | S6 | High | `FnHoldHotkeyService.swift:57-73` | Global event-monitor callback mutates `isFnAlonePressed`/`hasTriggeredPress` from a background thread while a main-queue work item reads them. Data race on the primary hotkey path. |
 | S7 | High | `AppCoordinator.swift:1163-1171` | `insertRecentDictation` passes `targetApp: nil`, so re-insert resolves the frontmost app at click time (the VoxFlow panel itself). |
 | S8 | High | `WhisperKitSTTService.swift:60-65` | Confidence from first segment only (also ghost-hello cause #4). |
-| S9 | High | `DictationWorkflowCoordinator.swift:59-66` | `autoInsertRaw` path never resets `recordingDuration`; stale timer shown. |
+| S9 | ~~High~~ Revised | `DictationWorkflowCoordinator.swift:59-66` | CORRECTED during R1: the wired path does zero the timer (`processWithPrivacyGate` resets after the workflow returns), so the literal claim was false — but zeroing was scattered per-path and fragile. Fixed by centralizing at the idle-transition sink in AppCoordinator (R1.9). |
 | S10 | Medium | `SettingsCoordinator.swift:102` + AppState | API keys held in `@Published` AppState strings (Combine-broadcast, memory-dump exposure). Keychain rule honored at rest, violated in flight. |
 | S11 | Medium | `server.py:186` vs `context.py:202` | Duplicate `_LAST_CLEANUP_TIME` globals; the `context.py` one is dead. Contributor confusion hazard. |
 | S12 | Medium | `CockpitCaptureCoordinator.swift:76-85` | Chunk-restart failure path does not stop the capture engine; next session starts from unknown engine state. |

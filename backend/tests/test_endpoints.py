@@ -405,3 +405,36 @@ class TestOpenAISTTFilterParity:
         assert data["text"] == ""
         assert data["confidence_estimate"] == 0.0
 
+
+class TestMLSemaphoreAtomicity:
+    """Audit S3 verdict: FALSE POSITIVE, pinned here. The endpoints' pattern
+    `if sem.locked(): 503` followed by `async with sem:` cannot oversubscribe:
+    asyncio.Semaphore.acquire's fast path decrements synchronously without
+    suspending, so no other coroutine can run between the check and the
+    acquire. This test exercises the pattern under heavy interleaving and
+    asserts the cap holds."""
+
+    @pytest.mark.anyio
+    async def test_locked_check_plus_acquire_never_oversubscribes(self):
+        import asyncio
+
+        sem = asyncio.Semaphore(2)
+        current = 0
+        max_concurrent = 0
+        rejected = 0
+
+        async def worker():
+            nonlocal current, max_concurrent, rejected
+            if sem.locked():
+                rejected += 1
+                return
+            async with sem:
+                current += 1
+                max_concurrent = max(max_concurrent, current)
+                await asyncio.sleep(0.005)
+                current -= 1
+
+        await asyncio.gather(*(worker() for _ in range(40)))
+        assert max_concurrent <= 2, f"concurrency cap violated: {max_concurrent}"
+        assert rejected > 0, "test should produce contention"
+

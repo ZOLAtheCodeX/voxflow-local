@@ -199,7 +199,9 @@ async def run_blocking(func, *args, **kwargs):
 _rate_limit_timestamps: dict[str, list[float]] = defaultdict(list)
 _RATE_LIMIT_WINDOW = 60.0
 _RATE_LIMIT_MAX_REQUESTS = 120
-_LAST_CLEANUP_TIME = 0.0
+# NOTE: the cleanup timestamp lives in server.py (module-global there, written
+# by rate_limit_middleware under _RATE_LIMIT_LOCK). A duplicate here was dead
+# and confused contributors/tests (audit S11).
 _CLEANUP_INTERVAL = 300.0  # 5 minutes
 _RATE_LIMIT_LOCK = Lock()
 

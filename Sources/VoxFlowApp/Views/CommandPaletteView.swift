@@ -186,7 +186,7 @@ struct CommandPaletteView: View {
             }
             .pickerStyle(.segmented)
 
-            if state.providerMode == .privateAPI && (state.privateAPIBaseURL.isEmpty || state.privateAPIModel.isEmpty || state.privateAPIKey.isEmpty) {
+            if state.providerMode == .privateAPI && (state.privateAPIBaseURL.isEmpty || state.privateAPIModel.isEmpty || !state.privateAPIKeyConfigured) {
                 Text("Private API mode needs Base URL, Model, and API key in Settings.")
                     .font(VF.captionFont.weight(.semibold))
                     .foregroundStyle(.orange)

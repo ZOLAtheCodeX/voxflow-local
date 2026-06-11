@@ -50,7 +50,7 @@ final class SettingsCoordinatorTests: XCTestCase {
         sut.updatePrivateAPIConfig(baseURL: "https://api.example.com", model: "gpt-4", apiKey: "sk-test-123")
         XCTAssertEqual(state.privateAPIBaseURL, "https://api.example.com")
         XCTAssertEqual(state.privateAPIModel, "gpt-4")
-        XCTAssertEqual(state.privateAPIKey, "sk-test-123")
+        XCTAssertTrue(state.privateAPIKeyConfigured)
 
         let loaded = KeychainService.load(account: SettingsCoordinator.keychainPrivateAPIKeyAccount)
         XCTAssertEqual(loaded, "sk-test-123")

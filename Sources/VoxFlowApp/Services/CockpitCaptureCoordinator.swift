@@ -82,6 +82,10 @@ final class CockpitCaptureCoordinator {
             log.error("capture restart failed: \(error.localizedDescription)")
             loopTask?.cancel()
             loopTask = nil
+            // Best-effort engine cleanup so the next cockpit recording starts
+            // from a known-stopped engine (audit S12). startCapture may have
+            // failed mid-setup; a redundant stop throws harmlessly.
+            _ = try? capture.stopCapture()
             session.stop()
             return
         }

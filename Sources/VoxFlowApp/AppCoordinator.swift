@@ -188,6 +188,7 @@ final class AppCoordinator: ObservableObject {
                 if newState == .idle {
                     self?.capturedTargetApp = nil
                     self?.lastTranscriptionConfidence = 0.0
+                    self?.state.recordingDuration = 0
                     self?.focusMonitor.unfreeze()
                 }
             }
@@ -1194,9 +1195,15 @@ final class AppCoordinator: ObservableObject {
 
     func insertRecentDictation(_ candidate: TranscriptCandidate) {
         let text = candidate.text(for: candidate.selectedMode)
-        let appLabel = state.focusTarget.appName ?? "app"
+        // Resolve the ORIGINAL capture target stored on the candidate —
+        // resolving frontmost at click time targets VoxFlow's own panel
+        // (audit S7). If the app has quit, fall back to the focus snapshot
+        // path inside insertText.
+        let originalTarget = candidate.targetProcessIdentifier
+            .flatMap { NSRunningApplication(processIdentifier: $0) }
+        let appLabel = originalTarget?.localizedName ?? state.focusTarget.appName ?? "app"
         Task {
-            if await textInsertion.insertText(text, statusSuffix: "Re-inserted — \(appLabel)") {
+            if await textInsertion.insertText(text, statusSuffix: "Re-inserted — \(appLabel)", targetApp: originalTarget) {
                 state.sessionState = .idle
             }
         }

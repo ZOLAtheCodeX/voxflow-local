@@ -216,4 +216,29 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         XCTAssertTrue(recordedStages.contains("cleanup_light_api"))
         XCTAssertTrue(recordedStages.contains("cleanup_polish_api"))
     }
+
+    /// Audit S7: the transcript candidate must carry the frozen capture
+    /// target so a later re-insert from history can resolve the ORIGINAL
+    /// destination instead of whatever app is frontmost at click time
+    /// (which is VoxFlow's own panel).
+    @MainActor func testCandidateCarriesFrozenTargetProcessIdentifier() async throws {
+        let (sut, state, _, _) = makeSUT()
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-target",
+            rawText: "carry the target",
+            providerMode: .localOnly,
+            consentToken: nil,
+            allowRaw: true,
+            toneStyle: .neutral,
+            insertBehavior: .alwaysReview,
+            sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9,
+            targetApp: NSRunningApplication.current
+        )
+        try await sut.processDictation(request) { _, _, _ in }
+        XCTAssertEqual(
+            state.transcriptCandidate?.targetProcessIdentifier,
+            NSRunningApplication.current.processIdentifier
+        )
+    }
 }

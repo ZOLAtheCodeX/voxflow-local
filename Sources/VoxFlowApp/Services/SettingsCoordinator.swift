@@ -99,9 +99,8 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.localWhisperModel = defaults.string(forKey: whisperModelKey) ?? "openai/whisper-small"
         state.privateAPIBaseURL = defaults.string(forKey: privateAPIBaseURLKey) ?? ""
         state.privateAPIModel = defaults.string(forKey: privateAPIModelKey) ?? "gpt-4o-mini"
-        state.privateAPIKey = KeychainService.load(account: Self.keychainPrivateAPIKeyAccount) ?? ""
+        state.privateAPIKeyConfigured = !(KeychainService.load(account: Self.keychainPrivateAPIKeyAccount) ?? "").isEmpty
         state.openAIBaseURL = defaults.string(forKey: openAIBaseURLKey) ?? "https://api.openai.com"
-        state.openAIAPIKey = KeychainService.load(account: Self.keychainOpenAIAPIKeyAccount) ?? ""
         state.openAISTTModel = defaults.string(forKey: openAISTTModelKey) ?? "whisper-1"
         state.openAITTSModel = defaults.string(forKey: openAITTSModelKey) ?? "gpt-4o-mini-tts"
         state.openAITTSVoice = defaults.string(forKey: openAITTSVoiceKey) ?? "alloy"
@@ -185,7 +184,7 @@ final class SettingsCoordinator: SettingsCoordinating {
 
         state.privateAPIBaseURL = trimmedBaseURL
         state.privateAPIModel = trimmedModel
-        state.privateAPIKey = trimmedKey
+        state.privateAPIKeyConfigured = !trimmedKey.isEmpty
 
         UserDefaults.standard.set(trimmedBaseURL, forKey: privateAPIBaseURLKey)
         UserDefaults.standard.set(trimmedModel, forKey: privateAPIModelKey)
@@ -208,13 +207,12 @@ final class SettingsCoordinator: SettingsCoordinating {
         let trimmedTTSVoice = ttsVoice.trimmingCharacters(in: .whitespacesAndNewlines)
 
         state.openAIBaseURL = trimmedBaseURL.isEmpty ? "https://api.openai.com" : trimmedBaseURL
-        state.openAIAPIKey = trimmedAPIKey
         state.openAISTTModel = trimmedSTTModel.isEmpty ? "whisper-1" : trimmedSTTModel
         state.openAITTSModel = trimmedTTSModel.isEmpty ? "gpt-4o-mini-tts" : trimmedTTSModel
         state.openAITTSVoice = trimmedTTSVoice.isEmpty ? "alloy" : trimmedTTSVoice
 
         UserDefaults.standard.set(state.openAIBaseURL, forKey: openAIBaseURLKey)
-        KeychainService.save(account: Self.keychainOpenAIAPIKeyAccount, value: state.openAIAPIKey)
+        KeychainService.save(account: Self.keychainOpenAIAPIKeyAccount, value: trimmedAPIKey)
         UserDefaults.standard.set(state.openAISTTModel, forKey: openAISTTModelKey)
         UserDefaults.standard.set(state.openAITTSModel, forKey: openAITTSModelKey)
         UserDefaults.standard.set(state.openAITTSVoice, forKey: openAITTSVoiceKey)
@@ -362,9 +360,11 @@ final class SettingsCoordinator: SettingsCoordinating {
             translateBackend: profile.backendKind,
             privateAPIBaseURL: state.privateAPIBaseURL,
             privateAPIModel: state.privateAPIModel,
-            privateAPIKey: state.privateAPIKey,
+            // Secrets read from the Keychain at build time — never held in
+            // AppState (audit S10).
+            privateAPIKey: KeychainService.load(account: Self.keychainPrivateAPIKeyAccount) ?? "",
             openAIBaseURL: state.openAIBaseURL,
-            openAIAPIKey: state.openAIAPIKey,
+            openAIAPIKey: KeychainService.load(account: Self.keychainOpenAIAPIKeyAccount) ?? "",
             openAISTTModel: state.openAISTTModel,
             openAITTSModel: state.openAITTSModel,
             openAITTSVoice: state.openAITTSVoice

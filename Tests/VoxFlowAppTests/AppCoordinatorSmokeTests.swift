@@ -116,4 +116,17 @@ final class AppCoordinatorSmokeTests: XCTestCase {
         XCTAssertEqual(coordinator.state.sessionState, .idle)
         XCTAssertEqual(coordinator.state.recordingDuration, 0)
     }
+
+    /// Audit S9 (revised): zeroing recordingDuration was scattered across
+    /// per-path resets (privacy gate, gate rejections, cancel). The idle
+    /// transition sink is the single chokepoint — any path that returns the
+    /// session to idle must leave the timer at zero.
+    @MainActor
+    func testIdleTransitionZeroesRecordingDuration() {
+        let coordinator = AppCoordinator.shared
+        coordinator.state.sessionState = .transcribing
+        coordinator.state.recordingDuration = 4.2
+        coordinator.state.sessionState = .idle
+        XCTAssertEqual(coordinator.state.recordingDuration, 0)
+    }
 }

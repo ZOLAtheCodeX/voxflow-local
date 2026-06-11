@@ -50,7 +50,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 polishText: request.rawText,
                 selectedMode: .raw,
                 confidence: request.lastTranscriptionConfidence,
-                timestamp: Date()
+                timestamp: Date(),
+                targetProcessIdentifier: request.targetApp?.processIdentifier
             )
             state.transcriptCandidate = candidate
             pushToSessionMemory(candidate)
@@ -81,7 +82,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 polishText: polishText,
                 selectedMode: .raw,
                 confidence: request.lastTranscriptionConfidence,
-                timestamp: Date()
+                timestamp: Date(),
+                targetProcessIdentifier: request.targetApp?.processIdentifier
             )
             state.transcriptCandidate = candidate
             state.selectedMode = .raw
@@ -123,7 +125,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             polishText: polishText,
             selectedMode: defaultMode,
             confidence: request.lastTranscriptionConfidence,
-            timestamp: Date()
+            timestamp: Date(),
+            targetProcessIdentifier: request.targetApp?.processIdentifier
         )
         state.transcriptCandidate = candidate
         state.selectedMode = defaultMode
