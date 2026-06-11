@@ -363,3 +363,45 @@ class TestConcurrencySemaphore:
             assert 200 in status_codes
             assert status_codes.count(503) == 1
             assert status_codes.count(200) == 2
+
+
+class TestOpenAISTTFilterParity:
+    """The hallucination filter and confidence handling must apply on the
+    OpenAI STT backend too — previously exempted ('OpenAI API does its own
+    filtering', which it does not for noise hallucinations) with a hardcoded
+    0.88 confidence that defeated every downstream gate (audit cause #7)."""
+
+    @pytest.mark.anyio
+    async def test_openai_backend_hallucination_filtered(self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch):
+        import base64
+        import struct
+
+        from api import endpoints as ep
+        from engines.results import STTExecutionResult
+
+        def fake_transcribe(pcm, sample_rate, language_hint):
+            return STTExecutionResult(
+                text="Hello.",
+                confidence=0.88,
+                stage_timings_ms={},
+                model_loaded_before_request=True,
+                model_loaded_after_request=True,
+                cold_start=False,
+            )
+
+        monkeypatch.setattr(ep, "current_stt_backend", lambda: "openai")
+        monkeypatch.setattr(ep.provider_router, "transcribe", fake_transcribe)
+
+        loud = struct.pack("<" + "h" * 16000, *([8000, -8000] * 8000))
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-openai-filter",
+            "audio_pcm16le": base64.b64encode(loud).decode(),
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["text"] == ""
+        assert data["confidence_estimate"] == 0.0
+

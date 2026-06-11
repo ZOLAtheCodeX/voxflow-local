@@ -156,22 +156,22 @@ async def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     stage_timings_ms.update(result.stage_timings_ms)
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    # Two-tier hallucination filter (Whisper-only — OpenAI API does its own filtering):
-    # - Known YouTube/podcast phrases: filtered at ANY duration (never real dictation)
-    # - Single words, repeated words: filtered only on short audio (< 3s)
+    # Two-tier hallucination filter — applied on EVERY STT backend. The OpenAI
+    # exemption was audit ghost cause #7: cloud Whisper hallucinates on noise
+    # just like local Whisper, and the old hardcoded 0.88 confidence defeated
+    # the client-side gate.
     stt_backend = current_stt_backend()
     text = result.text
     confidence = result.confidence
-    if stt_backend != "openai":
-        audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
-        is_short = audio_duration_s < 3.0
-        if is_whisper_hallucination(text, short_audio=is_short):
-            logger.info(
-                "Filtered Whisper hallucination (%.1fs, short=%s, backend=%s)",
-                audio_duration_s, is_short, stt_backend,
-            )
-            text = ""
-            confidence = 0.0
+    audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
+    is_short = audio_duration_s < 3.0
+    if is_whisper_hallucination(text, short_audio=is_short):
+        logger.info(
+            "Filtered Whisper hallucination (%.1fs, short=%s, backend=%s)",
+            audio_duration_s, is_short, stt_backend,
+        )
+        text = ""
+        confidence = 0.0
 
     return TranscribeResponse(
         text=text,

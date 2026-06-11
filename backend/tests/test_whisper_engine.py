@@ -190,3 +190,21 @@ def test_rms_energy_silence_and_speech():
     assert WhisperEngine._rms_energy(bytes(32000)) == 0.0
     assert WhisperEngine._rms_energy(_loud_pcm(16000)) > 0.2
     assert WhisperEngine._rms_energy(b"") == 0.0
+
+
+def test_openai_confidence_heuristic_replaces_hardcoded_value():
+    """OpenAI returns no confidence signal; derive one from words-per-second
+    plausibility instead of hardcoding 0.88 (which defeated the client gate)."""
+    from server import OpenAIAudioClient
+
+    # Plausible dictation: 10 words over 4s
+    conf = OpenAIAudioClient._estimate_confidence("one two three four five six seven eight nine ten", 4 * 16000 * 2, 16000)
+    assert conf >= 0.8
+
+    # Lone word from 5s of audio — the ghost signature
+    conf = OpenAIAudioClient._estimate_confidence("hello", 5 * 16000 * 2, 16000)
+    assert conf <= 0.1
+
+    # Empty text
+    assert OpenAIAudioClient._estimate_confidence("", 16000, 16000) == 0.0
+

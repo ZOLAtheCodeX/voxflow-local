@@ -348,6 +348,24 @@ class OpenAIAudioClient:
 
         return b"".join(chunks), boundary
 
+    @staticmethod
+    def _estimate_confidence(text: str, pcm_byte_count: int, sample_rate: int) -> float:
+        """Words-per-second plausibility in lieu of a provider confidence signal.
+
+        The OpenAI transcription API returns no usable confidence; the old
+        hardcoded 0.88 sailed past every client-side gate. Mirrors the
+        word-rate fallback branch of WhisperEngine._estimate_confidence.
+        """
+        if not text:
+            return 0.0
+        duration_s = (pcm_byte_count // 2) / max(sample_rate, 1)
+        word_count = len(text.split())
+        coverage = min(1.0, word_count / max(duration_s * 2.5, 1.0))
+        confidence = min(0.95, max(0.05, coverage))
+        if word_count <= 2 and duration_s > 2.0 and coverage < 0.3:
+            confidence = min(confidence, 0.1)
+        return round(confidence, 3)
+
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> STTExecutionResult:
         if not self.configured:
             return STTExecutionResult(
@@ -396,7 +414,7 @@ class OpenAIAudioClient:
             text = normalize_whitespace(str(parsed.get("text", "")))
             return STTExecutionResult(
                 text=text,
-                confidence=0.88 if text else 0.0,
+                confidence=self._estimate_confidence(text, len(pcm), sample_rate),
                 stage_timings_ms=stage_timings_ms,
                 model_loaded_before_request=True,
                 model_loaded_after_request=True,
