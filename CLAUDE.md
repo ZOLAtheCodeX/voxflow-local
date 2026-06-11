@@ -83,7 +83,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | `VOXFLOW_STT_BACKEND` | `whisper` / `whisperKit` / `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model id | `openai/whisper-small` |
 | `VOXFLOW_OLLAMA_URL` | Ollama base URL | `http://localhost:11434` |
-| `VOXFLOW_OLLAMA_MODEL` | Polish model id | `gemma4:e4b-mlx` (RAM-tiered fallback to `e2b-mlx`) |
+| `VOXFLOW_OLLAMA_MODEL` | Polish model id override | auto: RAM-tier recommendation if pulled, else any pulled gemma4 (`resolve_default_ollama_model`) |
 | `VOXFLOW_POLISH_BACKEND` | Polish selector (only `ollama` recognised post-3.5) | `ollama` |
 | `VOXFLOW_SIGN_IDENTITY` | Code-signing identity override | auto-detected Apple Development cert |
 | `VOXFLOW_OFFLINE` | Disable HF downloads | `1` |

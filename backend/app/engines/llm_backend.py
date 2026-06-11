@@ -230,7 +230,42 @@ def select_backend() -> TextLLMBackend:
             "post-3.5 — using ollama.",
             choice,
         )
-    return OllamaBackend()
+    try:
+        installed = [m.get("name", "") for m in list_ollama_models(timeout=1.5)]
+    except Exception:
+        installed = []
+    model = resolve_default_ollama_model(
+        env_override=os.environ.get("VOXFLOW_OLLAMA_MODEL"),
+        installed_models=installed,
+        host_memory_bytes=detect_host_memory_bytes(),
+    )
+    logger.info("Polish backend: ollama, model=%s", model)
+    return OllamaBackend(model=model)
+
+
+def resolve_default_ollama_model(
+    *,
+    env_override: str | None,
+    installed_models: list[str],
+    host_memory_bytes: int,
+) -> str:
+    """Pick the default polish model (R2 follow-up).
+
+    Order: explicit env override > the RAM-tier recommendation IF that model
+    is actually pulled > any pulled gemma4 model (never select a missing
+    model — that 404s into the silent regex fallback, the documented
+    ``ollama_available`` blind spot) > the tier recommendation as a static
+    default (drives the Settings pull nudge).
+    """
+    if env_override and env_override.strip():
+        return env_override.strip()
+    recommended = recommend_ollama_model(host_memory_bytes) or "gemma4:e2b-mlx"
+    if recommended in installed_models:
+        return recommended
+    for name in installed_models:
+        if name.startswith("gemma4:"):
+            return name
+    return recommended
 
 
 # ── Host memory + recommended model ─────────────────────────────────────

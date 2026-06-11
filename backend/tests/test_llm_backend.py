@@ -441,3 +441,80 @@ class TestProtocolConformance:
         assert hasattr(backend, "polish")
         assert callable(backend.polish)
         assert backend.name == "ollama"
+
+
+class TestDefaultModelResolution:
+    """R2 follow-up: the default polish model honors the RAM tier when the
+    recommended model is actually pulled — and never selects a model that
+    is not installed (a missing model means silent regex fallback, the
+    documented ollama_available blind spot)."""
+
+    def test_env_override_wins(self):
+        from engines.llm_backend import resolve_default_ollama_model
+        assert resolve_default_ollama_model(
+            env_override="custom:tag",
+            installed_models=["gemma4:e4b-mlx"],
+            host_memory_bytes=16 * 1024**3,
+        ) == "custom:tag"
+
+    def test_recommended_tier_used_when_installed(self):
+        from engines.llm_backend import resolve_default_ollama_model
+        assert resolve_default_ollama_model(
+            env_override=None,
+            installed_models=["gemma4:e4b-mlx", "gemma4:e2b-mlx"],
+            host_memory_bytes=16 * 1024**3,
+        ) == "gemma4:e2b-mlx"
+
+    def test_falls_back_to_installed_gemma_when_recommendation_missing(self):
+        from engines.llm_backend import resolve_default_ollama_model
+        # 16 GB recommends e2b, but only e4b is pulled — use what exists
+        # rather than silently 404ing into the regex fallback.
+        assert resolve_default_ollama_model(
+            env_override=None,
+            installed_models=["gemma4:e4b-mlx"],
+            host_memory_bytes=16 * 1024**3,
+        ) == "gemma4:e4b-mlx"
+
+    def test_static_default_when_nothing_known(self):
+        from engines.llm_backend import resolve_default_ollama_model
+        assert resolve_default_ollama_model(
+            env_override=None,
+            installed_models=[],
+            host_memory_bytes=16 * 1024**3,
+        ) == "gemma4:e2b-mlx"
+
+
+class TestSpokenPunctuationPrePass:
+    def test_polish_path_converts_spoken_punctuation_before_backend(self):
+        """Spoken punctuation is converted deterministically by regex before
+        the LLM sees the text — small models read 'the new policy period' as
+        a noun phrase (caught live on gemma4:e2b-mlx). Light/raw modes
+        already convert; polish must not regress that."""
+        backend = _FakeBackend(response="Hello team, we will discuss the new policy. Thanks, Jamie.")
+        engine = PolishEngine(backend=backend)
+        engine.polish("hello team comma we will discuss the new policy period thanks comma jamie", "neutral")
+        sent_text = backend.calls[0][0]
+        assert "comma" not in sent_text
+        assert "period" not in sent_text
+        assert "," in sent_text
+
+    def test_smart_action_path_does_not_convert(self):
+        """Cockpit smart actions receive transcripts verbatim — converting
+        'period' inside a memo transform could corrupt legitimate content."""
+        backend = _FakeSystemPromptBackend(response="# Memo")
+        engine = PolishEngine(backend=backend)
+        engine.polish("the policy period ends in march", "neutral", system_prompt="Restructure as memo.")
+        assert backend.received_text == "the policy period ends in march"
+
+
+class _FakeSystemPromptBackend:
+    name = "fake-sys"
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.received_text: str | None = None
+
+    def polish(self, text: str, tone: str, system_prompt: str | None = None) -> str:
+        self.received_text = text
+        return self.response
+

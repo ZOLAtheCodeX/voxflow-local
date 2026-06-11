@@ -27,7 +27,28 @@
 - **The MLX runner degrades under sustained load and can wedge** after abandoned (client-timed-out) requests; an `ollama stop <model>` cycle restores 0.6 s warm requests. The p95=30 s rows are requests that hit the client timeout during degraded phases; their work is wasted and polish silently falls back.
 - **Conclusion adopted in code:** a 16 GB machine should not run the 9 GB e4b alongside the Whisper backend. `recommend_ollama_model` tiers retuned: e4b at >= 24 GB, e2b for 8-24 GB.
 
+## e2b vs e4b on the 16 GB machine (measured after the pull landed)
+
+| Metric | gemma4:e4b-mlx | gemma4:e2b-mlx |
+|---|---|---|
+| Cold load + first request | ~30,000 ms (hit client timeout) | 6,440 ms |
+| Steady p50 | 4,656-4,851 ms | **386 ms** |
+| Steady p95 | 30,060 ms (timeout-bound) | 6,127 ms |
+| Guardrail trips | 0/24 | 0/24 |
+| Live golden suite | 51/51 (full run ~400 s) | **51/51 (full run 92 s)** |
+
+The tier retune is confirmed: e2b is 12x faster at p50 on this hardware with
+identical golden-set quality. The one quality gap found (e2b read spoken
+punctuation "the new policy period" as a noun phrase) was closed
+model-independently: the polish path now applies `replace_spoken_punctuation`
+deterministically before the LLM, consistent with light/raw modes.
+
+`resolve_default_ollama_model` now picks the default at backend startup:
+env override > the RAM-tier recommendation if pulled > any pulled gemma4
+model (never a missing model — that 404s into silent regex fallback) > the
+tier recommendation as a static default. On this machine that resolves to
+`gemma4:e2b-mlx` automatically.
+
 ## Pending follow-up
 
-- `gemma4:e2b-mlx` comparison on this machine (download in progress at the time of writing). Expectation from the tier logic: similar quality class, much better headroom, no thrash. Record its table here when measured.
 - R3.4 (provenance) will surface `degraded_reason` in the UI so silent fallback becomes visible.

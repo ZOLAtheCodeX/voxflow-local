@@ -17,7 +17,7 @@ import re
 from difflib import SequenceMatcher
 from threading import Lock
 
-from nlp import apply_tone, light_cleanup
+from nlp import apply_tone, light_cleanup, replace_spoken_punctuation
 
 from .llm_backend import TextLLMBackend, probe_ollama_available, select_backend
 
@@ -86,6 +86,15 @@ class PolishEngine:
         """
         if not text.strip():
             return "", False, None
+
+        # Polish path only: convert spoken punctuation deterministically
+        # BEFORE the LLM — small models read "the new policy period" as a
+        # noun phrase (caught live on gemma4:e2b-mlx). Light/raw modes
+        # already convert via light_cleanup; this keeps polish consistent.
+        # The smart-action path receives transcripts verbatim: converting
+        # "period" inside a memo transform could corrupt real content.
+        if system_prompt is None:
+            text = replace_spoken_punctuation(text)
 
         try:
             if system_prompt is not None:
