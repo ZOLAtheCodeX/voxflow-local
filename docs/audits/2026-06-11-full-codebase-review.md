@@ -24,7 +24,7 @@ Open-source readiness is close: the blocking gap is the missing LICENSE; the res
 Ranked, with confidence levels. The bug is real and has multiple independent contributors; fixing any one of them reduces frequency but only the layered fix eliminates it.
 
 | # | Cause | Evidence | Confidence |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | **Parity test dead since Swift rewrite.** Regexes in `backend/tests/test_utils.py:490-503` match old variable names (`alwaysFiltered`); Swift now uses `alwaysFilteredSingleWords` (`HallucinationFilter.swift:4`). Test fails on master; filter drift is unenforced. | Executed: test fails | Verified |
 | 2 | **Multi-word hallucinations pass both filters.** "Hello world", "hello how are you" pass Swift (`HallucinationFilter.swift:40-60`, only 1-2 word and template checks) and Python (`nlp/hallucination.py`, exact-phrase sets). Whisper on noise frequently emits multi-word greetings. | Read both filters; behavior table built | High |
 | 3 | **No model-level no-speech gating.** `WhisperKitSTTService.swift:50-54` sets only `language` and `wordTimestamps` in `DecodingOptions`; `noSpeechThreshold`, `logProbThreshold`, `compressionRatioThreshold`, temperature fallback all unset. Backend HF pipeline (`engines/whisper.py:203-206`) likewise passes no `no_speech_threshold`. Whisper will transcribe something from silence/noise. | Read both configs | High |
@@ -47,7 +47,7 @@ Ranked, with confidence levels. The bug is real and has multiple independent con
 Critical findings verified by the lead by reading the cited code; high findings spot-checked or consistent across two agents.
 
 | # | Sev | Location | Bug |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | S1 | Critical | `AppCoordinator.swift:779-803` | `cancelActiveCapture()` has no `.transcribing` branch (verified: branches exist only for recording/privacy/review/error). Escape during a slow transcription does nothing; user perceives a hang. |
 | S2 | Critical | `AudioCaptureService.swift` | No `AVAudioEngineConfigurationChange` handling. AirPods connect/disconnect mid-capture silently stops the engine; subsequent captures fail from inconsistent engine state. |
 | S3 | Critical | `endpoints.py:150-154` (x5 endpoints) | `if sem.locked(): 503` then `async with sem:` is a TOCTOU; the concurrency cap can be exceeded. Low blast radius for a single user, but it is the kind of latent bug that bites under cockpit chunking + quick dictation overlap. |
@@ -102,7 +102,7 @@ Feature matrix: everything claimed in the README is fully wired except:
 OSS launch gaps, by priority:
 
 | Priority | Item |
-|---|---|
+| --- | --- |
 | Blocking | No LICENSE (default all-rights-reserved) |
 | High | No CI (.github/workflows: swift test + pytest), no CONTRIBUTING.md, no SECURITY.md, no CHANGELOG.md |
 | High | Tracked dev artifacts: `progress.md`, `progress.txt`, `python_tests*.log`, `swift_tests*.log`, `.cursorrules`; decide fate of `CLAUDE.md`/`AGENTS.md` for the public repo |
