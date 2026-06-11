@@ -119,7 +119,7 @@ class SmartActionEngine:
                 )
 
         system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(action_description=description)
-        output, guardrail = self._polish_backend.polish(
+        output, guardrail, _reason = self._polish_backend.polish(
             text=transcript,
             system_prompt=system_prompt,
             tone="neutral",

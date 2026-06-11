@@ -65,8 +65,16 @@ class PolishEngine:
         text: str,
         tone: str,
         system_prompt: str | None = None,
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, str | None]:
         """Polish ``text`` through the configured backend.
+
+        Returns ``(output, guardrail_triggered, degraded_reason)``.
+        ``degraded_reason`` distinguishes WHY output is not clean LLM text:
+        ``backend_unavailable`` (declined/error -> regex fallback),
+        ``guardrail_similarity`` / ``guardrail_length`` / ``guardrail_empty``
+        (candidate rejected -> regex fallback), ``echo`` (backend returned
+        the input unchanged -> regex fallback), or ``None`` (clean output).
+        Previously all of these collapsed into one boolean (audit BYOM gap #2).
 
         When ``system_prompt`` is supplied (e.g. from SmartActionEngine for
         memo / MECE / steel-man / Pyramid transformations), the guardrail
@@ -77,7 +85,7 @@ class PolishEngine:
         so a backend failure still gives the caller usable text.
         """
         if not text.strip():
-            return "", False
+            return "", False, None
 
         try:
             if system_prompt is not None:
@@ -89,21 +97,22 @@ class PolishEngine:
             candidate = ""
 
         if not candidate:
-            return apply_tone(light_cleanup(text), tone), False
+            return apply_tone(light_cleanup(text), tone), False, "backend_unavailable"
 
         # Smart-action path: trust the LLM output. Unchanged-echo is filtered
         # one layer up (SmartActionService undo stack + CockpitCoordinator
         # session history), so we don't need to detect it here.
         if system_prompt is not None:
-            return candidate, False
+            return candidate, False, None
 
-        if self._guardrail_triggered(text, candidate):
-            return apply_tone(light_cleanup(text), tone), True
+        reason = self._guardrail_triggered(text, candidate, tone)
+        if reason:
+            return apply_tone(light_cleanup(text), tone), True, reason
 
         if self._is_echo(text, candidate):
-            return apply_tone(light_cleanup(text), tone), False
+            return apply_tone(light_cleanup(text), tone), False, "echo"
 
-        return candidate, False
+        return candidate, False, None
 
     @staticmethod
     def _is_echo(original: str, candidate: str) -> bool:
@@ -113,20 +122,46 @@ class PolishEngine:
         return _normalize(original) == _normalize(candidate)
 
     @staticmethod
-    def _guardrail_triggered(original: str, candidate: str) -> bool:
+    def _tokens(s: str) -> list[str]:
+        return re.findall(r"[a-z0-9']+", s.lower())
+
+    @staticmethod
+    def _guardrail_triggered(original: str, candidate: str, tone: str = "neutral") -> str | None:
+        """Reject degenerate LLM output. Returns a reason string or None.
+
+        R2.2 retune, validated against the golden set:
+        - WORD-level SequenceMatcher (threshold 0.3). The old character-level
+          0.55 punished legitimate restructuring ("I think we should" ->
+          "We should") and fired on ~29% of correct outputs.
+        - Length floor 0.3 for >10-word inputs (0.4 for 6-10; the old 0.6
+          floor made correct filler-removal mathematically impossible for
+          filler-heavy dictations — the golden set's own filler case could
+          never pass).
+        - The concise tone is exempted down to 0.15: shortening is its job.
+        Truthy return keeps PrivateAPIClient's boolean use working.
+        """
         if not candidate.strip():
-            return True
+            return "guardrail_empty"
 
-        similarity = SequenceMatcher(None, original.lower(), candidate.lower()).ratio()
-        if similarity < 0.55:
-            return True
+        concise = tone.lower() == "concise"
+        original_words = PolishEngine._tokens(original)
+        candidate_words = PolishEngine._tokens(candidate)
+        similarity = SequenceMatcher(None, original_words, candidate_words).ratio()
+        # Concise output legitimately shares fewer tokens with the input —
+        # both floors relax together or the exemption is meaningless.
+        if similarity < (0.15 if concise else 0.3):
+            return "guardrail_similarity"
 
-        original_length = max(1, len(original.split()))
-        candidate_length = len(candidate.split())
-        length_ratio = candidate_length / original_length
+        original_length = max(1, len(original_words))
+        length_ratio = len(candidate_words) / original_length
 
         if original_length <= 5:
-            return False
+            return None
 
         max_ratio = 2.5 if original_length <= 10 else 1.8
-        return length_ratio < 0.6 or length_ratio > max_ratio
+        min_ratio = 0.3 if original_length > 10 else 0.4
+        if concise:
+            min_ratio = 0.15
+        if length_ratio < min_ratio or length_ratio > max_ratio:
+            return "guardrail_length"
+        return None

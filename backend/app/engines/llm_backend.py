@@ -48,10 +48,10 @@ class TextLLMBackend(Protocol):
 
 
 _TONE_INSTRUCTIONS = {
-    "concise": "Remove unnecessary words. Be direct and brief.",
-    "formal": "Use professional language. Avoid contractions and slang.",
-    "friendly": "Use warm, approachable language.",
-    "neutral": "Use clear, natural language.",
+    "concise": "Be direct and brief.",
+    "formal": "Formal register, no contractions.",
+    "friendly": "Warm tone.",
+    "neutral": "",
 }
 
 
@@ -59,26 +59,27 @@ def _tone_instruction(tone: str) -> str:
     return _TONE_INSTRUCTIONS.get(tone.lower(), _TONE_INSTRUCTIONS["neutral"])
 
 
+# Compressed for prompt-eval cost (R2.3): the MLX runner on target hardware
+# evaluates prompts at ~5 tok/s with NO prefix caching (verified live
+# 2026-06-11), so every system-prompt token costs ~200 ms per request.
+# ~24 tokens vs the previous ~85 saves roughly 12 s per polish call.
+# The behavior contract (don't answer questions, don't summarize, output
+# only the text) is enforced by the guardrail + golden set, not prompt bulk.
 _OLLAMA_SYSTEM_PROMPT_BASE = (
-    "You clean up dictated speech. Return only the cleaned text, "
-    "no explanation, no preamble.\n"
-    "Rules:\n"
-    "- Fix grammar, punctuation, and casing.\n"
-    "- Remove filler words (um, uh, like, you know).\n"
-    "- Keep the meaning, content, and approximate length unchanged.\n"
-    "- Do not add new information, do not summarize, do not answer "
-    "questions present in the text.\n"
-    "- Output a single block of polished text, nothing else."
+    "Fix grammar and punctuation in this dictation; drop filler words. "
+    "Keep meaning and length. Never answer or add content. "
+    "Output only the cleaned text."
 )
 
 
 class OllamaBackend:
     """Polishes via a local Ollama server using stdlib urllib (no new deps).
 
-    POSTs to ``http://localhost:11434/v1/chat/completions`` (Ollama's
-    OpenAI-compatible endpoint). Connection errors / timeouts / malformed
-    responses all collapse to an empty string — PolishEngine then falls back
-    to ``apply_tone(light_cleanup(text))``. Unavailability never surfaces as 500.
+    POSTs to ``http://localhost:11434/api/chat`` (Ollama's NATIVE endpoint —
+    the OpenAI-compat endpoint silently drops ``keep_alive``, verified live
+    2026-06-11). Connection errors / timeouts / malformed responses all
+    collapse to an empty string — PolishEngine then falls back to
+    ``apply_tone(light_cleanup(text))``. Unavailability never surfaces as 500.
     """
 
     name = "ollama"
@@ -112,7 +113,10 @@ class OllamaBackend:
         # Tone is fixed to "neutral" by that caller, so the tone-instruction
         # append is a no-op in that case.
         if system_prompt is None:
-            system_prompt = f"{_OLLAMA_SYSTEM_PROMPT_BASE} {_tone_instruction(tone)}"
+            instruction = _tone_instruction(tone)
+            system_prompt = (
+                f"{_OLLAMA_SYSTEM_PROMPT_BASE} {instruction}" if instruction else _OLLAMA_SYSTEM_PROMPT_BASE
+            )
         payload = {
             "model": self.model,
             "messages": [
@@ -120,11 +124,22 @@ class OllamaBackend:
                 {"role": "user", "content": text},
             ],
             "stream": False,
-            "temperature": 0.2,
+            # Pin the model in unified memory across idle gaps — Ollama's
+            # default unload caused multi-second cold-load p95 spikes and
+            # 30 s client timeouts between dictations (R2.1). NOTE: only the
+            # native /api/chat endpoint honors keep_alive; the OpenAI-compat
+            # endpoint silently drops it (verified live 2026-06-11).
+            "keep_alive": "24h",
+            "options": {
+                "temperature": 0.2,
+                # Raise the ~128-token default that truncated long-paragraph
+                # polish (truncation then tripped the guardrail) (R2.1).
+                "num_predict": 512,
+            },
         }
         data = json.dumps(payload).encode("utf-8")
         req = urlrequest.Request(
-            f"{self.base_url}/v1/chat/completions",
+            f"{self.base_url}/api/chat",
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -142,7 +157,7 @@ class OllamaBackend:
 
         try:
             parsed = json.loads(body.decode("utf-8"))
-            content = parsed["choices"][0]["message"]["content"]
+            content = parsed["message"]["content"]
         except (KeyError, IndexError, ValueError, TypeError) as exc:
             logger.error("Ollama polish response malformed: %s", exc)
             return ""

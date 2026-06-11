@@ -86,7 +86,7 @@ def test_golden_pipeline_runs_without_crashing(case: dict) -> None:
     backend.set_next(case["name"])
 
     engine = PolishEngine(backend=backend)
-    output, _triggered = engine.polish(input_text, tone)
+    output, _triggered, _reason = engine.polish(input_text, tone)
 
     # The pipeline always returns something usable, never raises.
     assert isinstance(output, str)
@@ -107,7 +107,7 @@ def test_live_ollama_guardrail_trigger_rate() -> None:
     engine = PolishEngine(backend=backend)
     triggered_count = 0
     for case in GOLDEN_CASES:
-        _, triggered = engine.polish(case["input"], case["tone"])
+        _, triggered, _ = engine.polish(case["input"], case["tone"])
         if triggered:
             triggered_count += 1
     rate = triggered_count / len(GOLDEN_CASES)
@@ -130,7 +130,7 @@ def test_live_ollama_preserves_expected_substrings(case: dict) -> None:
     if not backend.is_available():
         pytest.skip("Ollama is not reachable at the configured URL")
     engine = PolishEngine(backend=backend)
-    output, _ = engine.polish(case["input"], case["tone"])
+    output, _, _ = engine.polish(case["input"], case["tone"])
 
     for substring in case.get("expected_substrings", []):
         assert substring.lower() in output.lower(), (

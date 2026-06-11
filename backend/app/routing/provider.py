@@ -211,7 +211,7 @@ class ProviderRouter:
             redacted_text=record.redacted_text,
         )
 
-    def cleanup(self, payload: CleanupRequest) -> tuple[str, bool, ResolvedProviderInput]:
+    def cleanup(self, payload: CleanupRequest) -> tuple[str, bool, str | None, ResolvedProviderInput]:
         mode = payload.mode.lower()
         tone = payload.tone_style.lower()
         resolved = self.resolve_effective_text(
@@ -225,15 +225,15 @@ class ProviderRouter:
 
         if resolved.provider_mode == "private_api":
             output, triggered = self._private_api_client.cleanup(mode, tone, resolved.effective_text)
-            return output, triggered, resolved
+            return output, bool(triggered), "guardrail" if triggered else None, resolved
 
         if mode == "raw":
-            return normalize_whitespace(resolved.effective_text), False, resolved
+            return normalize_whitespace(resolved.effective_text), False, None, resolved
         if mode == "light":
-            return apply_tone(light_cleanup(resolved.effective_text), tone), False, resolved
+            return apply_tone(light_cleanup(resolved.effective_text), tone), False, None, resolved
         if mode == "polish":
-            output, triggered = self._polish_engine.polish(resolved.effective_text, tone)
-            return output, triggered, resolved
+            output, triggered, reason = self._polish_engine.polish(resolved.effective_text, tone)
+            return output, triggered, reason, resolved
         raise HTTPException(status_code=400, detail=f"Unsupported cleanup mode: {payload.mode}")
 
     def translate(self, payload: TranslateRequest) -> tuple[str, str, ResolvedProviderInput]:

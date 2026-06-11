@@ -42,8 +42,11 @@ class _FakeBackend:
 
 
 def _ollama_response(content: str) -> bytes:
+    # Native /api/chat response shape (the OpenAI-compat endpoint silently
+    # drops keep_alive — verified live 2026-06-11 — so the backend uses the
+    # native endpoint).
     return json.dumps(
-        {"choices": [{"message": {"role": "assistant", "content": content}}]}
+        {"message": {"role": "assistant", "content": content}, "done": True}
     ).encode("utf-8")
 
 
@@ -84,6 +87,27 @@ class TestOllamaBackendSuccess:
         assert roles == ["system", "user"]
         assert "cleaned text" in body["messages"][0]["content"].lower()
         assert body["messages"][1]["content"] == "uh send the report by friday"
+
+    def test_payload_pins_model_residency_and_token_budget(self) -> None:
+        """R2.1: keep_alive pins the model in memory across idle gaps (the
+        5-minute Ollama default caused multi-second cold-load p95 spikes);
+        max_tokens raises the ~128-token compat default that truncated
+        long-paragraph polish (truncation then tripped the guardrail)."""
+        backend = OllamaBackend(model="gemma4:e4b-mlx")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_ollama_response("ok")),
+        ) as urlopen_mock:
+            backend.polish("some dictated text to polish", "neutral")
+
+        sent_request = urlopen_mock.call_args.args[0]
+        assert sent_request.full_url.endswith("/api/chat"), (
+            "must use the native endpoint — the OpenAI-compat endpoint drops keep_alive"
+        )
+        body = json.loads(sent_request.data.decode("utf-8"))
+        assert body["keep_alive"] == "24h"
+        assert body["options"]["num_predict"] == 512
+        assert body["options"]["temperature"] == 0.2
 
     def test_strips_whitespace_from_response(self) -> None:
         backend = OllamaBackend()
@@ -168,23 +192,28 @@ class TestPolishEngineWithFakeBackend:
     """PolishEngine guardrail + fallback behaviour, independent of any model."""
 
     def test_passes_clean_candidate_through(self) -> None:
+        # Input has a real defect (typo) so the candidate is a substantive
+        # polish, not a case/punctuation-only echo.
         backend = _FakeBackend(response="This is a clean polished sentence.")
         engine = PolishEngine(backend=backend)
-        output, triggered = engine.polish("this is a clean polished sentence", "neutral")
+        output, triggered, reason = engine.polish("this is a clean polishd sentence", "neutral")
         assert output == "This is a clean polished sentence."
         assert triggered is False
-        assert backend.calls == [("this is a clean polished sentence", "neutral")]
+        assert reason is None
+        assert backend.calls == [("this is a clean polishd sentence", "neutral")]
 
     def test_empty_backend_response_falls_back_silently(self) -> None:
         backend = _FakeBackend(response="")
         engine = PolishEngine(backend=backend)
         original = "send the report to the team"
-        output, triggered = engine.polish(original, "neutral")
+        output, triggered, reason = engine.polish(original, "neutral")
         # Fell back to apply_tone(light_cleanup()) — non-empty, similar.
         assert output
         assert original.split()[0].lower() in output.lower()
-        # Empty backend response is treated as "declined", not a guardrail trip.
+        # Empty backend response is treated as "declined", not a guardrail trip —
+        # but the degraded_reason now distinguishes it (R2.2).
         assert triggered is False
+        assert reason == "backend_unavailable"
 
     def test_guardrail_triggers_on_runaway_length(self) -> None:
         # 11-word original; runaway candidate (>1.8x).
@@ -192,8 +221,9 @@ class TestPolishEngineWithFakeBackend:
         backend = _FakeBackend(response=runaway)
         engine = PolishEngine(backend=backend)
         original = "send the deck to the marketing team by end of day today"
-        output, triggered = engine.polish(original, "neutral")
+        output, triggered, reason = engine.polish(original, "neutral")
         assert triggered is True
+        assert reason in ("guardrail_length", "guardrail_similarity")
         # Output is the regex fallback, not the runaway candidate.
         assert runaway not in output
 
@@ -202,8 +232,9 @@ class TestPolishEngineWithFakeBackend:
         # the guardrail (echo is a "did nothing", not a "did something bad").
         backend = _FakeBackend(response="Hello world")
         engine = PolishEngine(backend=backend)
-        output, triggered = engine.polish("hello world", "neutral")
+        output, triggered, reason = engine.polish("hello world", "neutral")
         assert triggered is False
+        assert reason == "echo"
         # Fallback path runs light_cleanup which adds a period.
         assert output.strip().lower().startswith("hello world")
 
@@ -215,16 +246,17 @@ class TestPolishEngineWithFakeBackend:
                 raise RuntimeError("network exploded")
 
         engine = PolishEngine(backend=_ExplodingBackend())
-        output, triggered = engine.polish("hello world", "neutral")
+        output, triggered, reason = engine.polish("hello world", "neutral")
         # Fallback ran; output is non-empty.
         assert output
         assert triggered is False
+        assert reason == "backend_unavailable"
 
     def test_empty_input_returns_empty_without_calling_backend(self) -> None:
         backend = _FakeBackend(response="should-not-be-used")
         engine = PolishEngine(backend=backend)
-        assert engine.polish("", "neutral") == ("", False)
-        assert engine.polish("   ", "neutral") == ("", False)
+        assert engine.polish("", "neutral") == ("", False, None)
+        assert engine.polish("   ", "neutral") == ("", False, None)
         assert backend.calls == []
 
 

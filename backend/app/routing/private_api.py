@@ -147,7 +147,7 @@ class PrivateAPIClient:
                 f"Text:\n{text}"
             )
             candidate = self._chat_completion(system_prompt, user_prompt, max_tokens=280)
-            if PolishEngine._guardrail_triggered(text, candidate):
+            if PolishEngine._guardrail_triggered(text, candidate, tone):
                 return apply_tone(light_cleanup(text), tone), True
             return candidate, False
 

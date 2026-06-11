@@ -16,6 +16,7 @@ def test_memo_action_returns_polished_text():
     mock_backend.polish.return_value = (
         "# Issue\nGDPR access rights\n# Analysis\n...\n# Recommendation\n...",
         False,
+        None,
     )
     engine = SmartActionEngine(polish_backend=mock_backend)
 
@@ -36,6 +37,7 @@ def test_mece_action_invokes_backend_with_mece_prompt():
     mock_backend.polish.return_value = (
         "- People\n  - alice\n- Process\n  - approval",
         False,
+        None,
     )
     engine = SmartActionEngine(polish_backend=mock_backend)
 
@@ -52,6 +54,7 @@ def test_items_action_invokes_backend_with_action_items_prompt():
     mock_backend.polish.return_value = (
         "- [ ] Draft policy by Friday (Alice)\n- [ ] Review with legal (Bob)",
         False,
+        None,
     )
     engine = SmartActionEngine(polish_backend=mock_backend)
 
@@ -78,7 +81,7 @@ def test_unknown_action_returns_passthrough_with_error():
 def test_guardrail_passthrough_when_triggered():
     """When the polish backend signals guardrail, the engine reports it."""
     mock_backend = MagicMock()
-    mock_backend.polish.return_value = ("fallback regex output", True)
+    mock_backend.polish.return_value = ("fallback regex output", True, "guardrail_length")
     engine = SmartActionEngine(polish_backend=mock_backend)
 
     result = engine.apply(action_id="memo", transcript="raw")
@@ -90,7 +93,7 @@ def test_guardrail_passthrough_when_triggered():
 
 def test_steel_action_uses_steelman_prompt():
     mock_backend = MagicMock()
-    mock_backend.polish.return_value = ("counter-argument", False)
+    mock_backend.polish.return_value = ("counter-argument", False, None)
     engine = SmartActionEngine(polish_backend=mock_backend)
 
     engine.apply(action_id="steel", transcript="some position")
@@ -101,7 +104,7 @@ def test_steel_action_uses_steelman_prompt():
 
 def test_pyramid_action_uses_pyramid_prompt():
     mock_backend = MagicMock()
-    mock_backend.polish.return_value = ("conclusion. supporting points.", False)
+    mock_backend.polish.return_value = ("conclusion. supporting points.", False, None)
     engine = SmartActionEngine(polish_backend=mock_backend)
 
     engine.apply(action_id="pyramid", transcript="some content")
@@ -120,7 +123,7 @@ def test_smart_action_endpoint_memo(monkeypatch):
     class _StubBackend:
         def polish(self, text, tone, system_prompt=None):
             assert system_prompt and "Issue" in system_prompt
-            return ("# Issue\n...\n# Recommendation\n...", False)
+            return ("# Issue\n...\n# Recommendation\n...", False, None)
 
     # Swap the global polish backend on the live engine so the route uses
     # the stub instead of the FLAN-T5/Ollama path during the test.
@@ -158,7 +161,7 @@ def test_smart_action_endpoint_unknown_returns_passthrough(monkeypatch):
 
 def test_disclaimer_action_uses_disclaimer_prompt():
     mock_backend = MagicMock()
-    mock_backend.polish.return_value = ("text with disclaimer", False)
+    mock_backend.polish.return_value = ("text with disclaimer", False, None)
     engine = SmartActionEngine(polish_backend=mock_backend)
 
     engine.apply(action_id="disclaimer", transcript="legal information")
@@ -193,7 +196,7 @@ def test_apply_calls_polish_when_backend_does_not_expose_availability():
     # spec=["polish"] means only the polish attribute exists; is_available
     # would raise AttributeError. SmartActionEngine handles this gracefully.
     mock_backend = MagicMock(spec=["polish"])
-    mock_backend.polish.return_value = ("polished", False)
+    mock_backend.polish.return_value = ("polished", False, None)
     engine = SmartActionEngine(polish_backend=mock_backend)
 
     result = engine.apply(action_id="memo", transcript="any text")

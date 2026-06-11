@@ -44,6 +44,9 @@ class CleanupResponse(BaseModel):
     output_text: str
     mode_applied: str
     guardrail_triggered: bool
+    # Why output is not clean LLM text: backend_unavailable / echo /
+    # guardrail_similarity / guardrail_length / guardrail_empty. None = clean.
+    degraded_reason: str | None = None
 
 
 class TranslateRequest(BaseModel):

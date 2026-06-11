@@ -340,7 +340,7 @@ class TestConcurrencySemaphore:
                 effective_text="text",
                 redacted=False,
             )
-            return "cleaned_text", False, resolved
+            return "cleaned_text", False, None, resolved
 
         with patch.object(server.provider_router, "cleanup", side_effect=mock_cleanup):
             tasks = [

@@ -212,7 +212,7 @@ async def cleanup(payload: CleanupRequest) -> CleanupResponse:
         raise HTTPException(status_code=503, detail="Server busy: maximum concurrent model evaluations reached")
 
     async with sem:
-        output, triggered, resolved = await run_blocking(provider_router.cleanup, payload)
+        output, triggered, degraded_reason, resolved = await run_blocking(provider_router.cleanup, payload)
 
     provider_mode = resolved.provider_mode
     effective_text = resolved.effective_text
@@ -224,7 +224,12 @@ async def cleanup(payload: CleanupRequest) -> CleanupResponse:
         payload_length=len(effective_text),
         redacted=resolved.redacted,
     )
-    return CleanupResponse(output_text=output, mode_applied=payload.mode.lower(), guardrail_triggered=triggered)
+    return CleanupResponse(
+        output_text=output,
+        mode_applied=payload.mode.lower(),
+        guardrail_triggered=triggered,
+        degraded_reason=degraded_reason,
+    )
 
 
 @router.post("/v1/translate", response_model=TranslateResponse)
