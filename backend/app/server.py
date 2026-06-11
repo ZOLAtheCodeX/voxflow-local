@@ -39,6 +39,7 @@ from context import (  # noqa: F401
     initialize_runtime_state,
     openai_audio_client,
     polish_engine,
+    smart_action_polish_engine,
     private_api_client,
     prompt_framing_engine,
     provider_router,

@@ -335,12 +335,13 @@ class TestConcurrencySemaphore:
         def mock_cleanup(*args, **kwargs):
             time.sleep(0.5)
             from routing import ResolvedProviderInput
+            from routing.provider import CleanupResult
             resolved = ResolvedProviderInput(
                 provider_mode="localOnly",
                 effective_text="text",
                 redacted=False,
             )
-            return "cleaned_text", False, None, resolved
+            return CleanupResult("cleaned_text", False, None, served_by="rules", model_id=None, fallback_depth=0), resolved
 
         with patch.object(server.provider_router, "cleanup", side_effect=mock_cleanup):
             tasks = [
@@ -437,4 +438,89 @@ class TestMLSemaphoreAtomicity:
         await asyncio.gather(*(worker() for _ in range(40)))
         assert max_concurrent <= 2, f"concurrency cap violated: {max_concurrent}"
         assert rejected > 0, "test should produce contention"
+
+
+class TestProvenanceFields:
+    """R3.4: every LLM response identifies which provider served it."""
+
+    @pytest.mark.anyio
+    async def test_cleanup_response_carries_provenance(self, client: httpx.AsyncClient):
+        resp = await client.post("/v1/cleanup", json={
+            "session_id": "prov-1",
+            "mode": "light",
+            "input_text": "um hello world this is a test",
+            "tone_style": "neutral",
+            "provider_mode": "localOnly",
+            "consent_token": None,
+            "allow_raw": False,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        # Light mode is the deterministic rules pipeline.
+        assert data["served_by"] == "rules"
+        assert data["fallback_depth"] == 0
+        assert "model_id" in data
+
+    @pytest.mark.anyio
+    async def test_ready_exposes_polish_chain_and_provider_status(self, client: httpx.AsyncClient):
+        resp = await client.get("/v1/ready")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["polish_chain"], list)
+        assert len(data["polish_chain"]) >= 1
+        assert isinstance(data["polish_providers"], list)
+        first = data["polish_providers"][0]
+        for key in ("id", "kind", "reachable", "model", "model_pulled"):
+            assert key in first
+
+
+class TestSTTFallbackChain:
+    """R3.5: a dead local Whisper falls back to the configured cloud STT and
+    reports it — stt_fallback_active was a dead always-False signal."""
+
+    @pytest.mark.anyio
+    async def test_whisper_placeholder_falls_back_to_openai_when_configured(self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch):
+        import struct
+        import base64
+
+        from api import endpoints as ep
+        from engines.results import STTExecutionResult
+
+        def broken_whisper(pcm, sample_rate, language_hint):
+            return STTExecutionResult(
+                text="[transcription unavailable: local Whisper model failed to load]",
+                confidence=0.0,
+                stage_timings_ms={},
+                model_loaded_before_request=False,
+                model_loaded_after_request=False,
+                cold_start=False,
+            )
+
+        def cloud_ok(pcm, sample_rate, language_hint):
+            return STTExecutionResult(
+                text="cloud transcription result for the fallback path",
+                confidence=0.8,
+                stage_timings_ms={},
+                model_loaded_before_request=True,
+                model_loaded_after_request=True,
+                cold_start=False,
+            )
+
+        router = ep.provider_router
+        monkeypatch.setenv("VOXFLOW_STT_BACKEND", "whisper")
+        monkeypatch.setattr(router._whisper_engine, "transcribe", broken_whisper)
+        monkeypatch.setattr(router._openai_audio_client, "transcribe", cloud_ok)
+        monkeypatch.setattr(type(router._openai_audio_client), "configured", property(lambda self: True), raising=False)
+
+        loud = struct.pack("<" + "h" * 16000, *([8000, -8000] * 8000))
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "stt-fallback",
+            "audio_pcm16le": base64.b64encode(loud).decode(),
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        assert resp.status_code == 200
+        assert "cloud transcription" in resp.json()["text"]
+        assert router.stt_fallback_active() is True
 

@@ -174,3 +174,108 @@ class TestPolishEngineSmartActionBypass:
         output, guardrail, _reason = engine.polish(text=self._ORIGINAL, tone="neutral")
         assert guardrail is True
         assert "kayaking" not in output
+
+
+# ── Chain execution (R3.3/R3.4) ──────────────────────────────────────
+
+class _ChainBackend:
+    """Scripted backend for chain tests; records what it was asked."""
+
+    def __init__(self, name: str, response: str) -> None:
+        self.name = name
+        self.response = response
+        self.received: list[str] = []
+
+    def polish(self, text, tone, system_prompt=None, model=None, timeout=None):
+        self.received.append(text)
+        return self.response
+
+
+def _spec(provider_id: str, *, cloud: bool = False, model: str | None = None):
+    from engines.provider_registry import ProviderSpec
+
+    return ProviderSpec(
+        id=provider_id,
+        kind="anthropic" if cloud else "ollama",
+        base_url=None if cloud else "http://localhost:11434",
+        model=model,
+    )
+
+
+class TestPolishEngineChains:
+    def test_first_available_provider_serves_with_provenance(self):
+        first = _ChainBackend("openai_compat", "This is the polished sentence we expected to receive.")
+        second = _ChainBackend("ollama", "should not be reached")
+        engine = PolishEngine(chain=[
+            (_spec("lmstudio", model="qwen3:8b"), first),
+            (_spec("ollama"), second),
+        ])
+        out = engine.run("uh this is the polished sentence we expected to receive", "neutral")
+        assert out.text == "This is the polished sentence we expected to receive."
+        assert out.served_by == "lmstudio"
+        assert out.model_id == "qwen3:8b"
+        assert out.fallback_depth == 0
+        assert out.degraded_reason is None
+        assert second.received == []
+
+    def test_unavailable_provider_falls_to_next_in_chain(self):
+        dead = _ChainBackend("anthropic", "")
+        alive = _ChainBackend("ollama", "The meeting moved to Thursday afternoon for everyone.")
+        engine = PolishEngine(chain=[
+            (_spec("claude", cloud=True), dead),
+            (_spec("ollama"), alive),
+        ])
+        out = engine.run("uh the meeting moved to thursday afternoon for everyone", "neutral")
+        assert out.served_by == "ollama"
+        assert out.fallback_depth == 1
+        assert out.degraded_reason is None
+
+    def test_exhausted_chain_hits_regex_floor(self):
+        engine = PolishEngine(chain=[
+            (_spec("a"), _ChainBackend("ollama", "")),
+            (_spec("b"), _ChainBackend("ollama", "")),
+        ])
+        out = engine.run("send the report to the team", "neutral")
+        assert out.text  # regex floor always produces usable text
+        assert out.served_by == "regex"
+        assert out.degraded_reason == "backend_unavailable"
+        assert out.fallback_depth == 2
+
+    def test_cloud_provider_receives_redacted_text(self):
+        """R3.3 privacy posture: payloads leaving localhost pass through
+        redact_sensitive_text unconditionally."""
+        cloud = _ChainBackend("anthropic", "Call me back regarding the account, thanks a lot.")
+        engine = PolishEngine(chain=[(_spec("claude", cloud=True), cloud)])
+        engine.run("call me back at 555-867-5309 about the account thanks a lot", "neutral")
+        assert len(cloud.received) == 1
+        assert "555-867-5309" not in cloud.received[0]
+
+    def test_local_provider_receives_raw_text(self):
+        local = _ChainBackend("ollama", "Call me back at 555-867-5309 about the account, thanks.")
+        engine = PolishEngine(chain=[(_spec("ollama"), local)])
+        engine.run("call me back at 555-867-5309 about the account thanks", "neutral")
+        assert "555-867-5309" in local.received[0]
+
+    def test_guardrail_trip_goes_to_regex_floor_not_next_provider(self):
+        """Chains handle AVAILABILITY; the guardrail handles QUALITY. A
+        rejected candidate falls to the regex floor — retrying a different
+        model on a quality failure would double latency unpredictably."""
+        bad = _ChainBackend("ollama", "completely unrelated text about kayaking and the weather today")
+        never = _ChainBackend("ollama", "should not be reached")
+        engine = PolishEngine(chain=[
+            (_spec("a"), bad),
+            (_spec("b"), never),
+        ])
+        out = engine.run("send the quarterly report to the finance team by friday morning", "neutral")
+        assert out.served_by == "regex"
+        assert out.guardrail_triggered is True
+        assert out.degraded_reason == "guardrail_similarity"
+        assert never.received == []
+
+    def test_single_backend_compat_construction_still_works(self):
+        backend = _ChainBackend("ollama", "Hello there, this is a polished test sentence.")
+        engine = PolishEngine(backend=backend)
+        out = engine.run("uh hello there this is a polished test sentence", "neutral")
+        assert out.served_by == "ollama"
+        assert out.fallback_depth == 0
+

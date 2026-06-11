@@ -26,6 +26,10 @@ class SmartActionResult:
     output: str
     guardrail_triggered: bool
     error: Optional[str] = None
+    # Provenance (R3.4)
+    served_by: Optional[str] = None
+    model_id: Optional[str] = None
+    degraded_reason: Optional[str] = None
 
 
 _ACTION_DESCRIPTIONS: dict[str, str] = {
@@ -119,7 +123,26 @@ class SmartActionEngine:
                 )
 
         system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(action_description=description)
-        output, guardrail, _reason = self._polish_backend.polish(
+        # Chain engines expose run() with provenance (R3.4); legacy/stub
+        # backends only expose polish() — fall back to the 3-tuple.
+        run = getattr(self._polish_backend, "run", None)
+        if callable(run):
+            try:
+                from engines.polish import PolishOutcome
+
+                outcome = run(transcript, "neutral", system_prompt=system_prompt)
+                if isinstance(outcome, PolishOutcome):
+                    return SmartActionResult(
+                        action_id=action_id,
+                        output=outcome.text,
+                        guardrail_triggered=outcome.guardrail_triggered,
+                        served_by=outcome.served_by,
+                        model_id=outcome.model_id,
+                        degraded_reason=outcome.degraded_reason,
+                    )
+            except TypeError:
+                pass
+        output, guardrail, reason = self._polish_backend.polish(
             text=transcript,
             system_prompt=system_prompt,
             tone="neutral",
@@ -128,4 +151,5 @@ class SmartActionEngine:
             action_id=action_id,
             output=output,
             guardrail_triggered=guardrail,
+            degraded_reason=reason,
         )

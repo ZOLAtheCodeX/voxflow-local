@@ -57,6 +57,18 @@ class ResolvedProviderInput:
     redacted: bool
 
 
+@dataclass
+class CleanupResult:
+    """Cleanup output plus provenance (R3.4)."""
+
+    text: str
+    guardrail_triggered: bool
+    degraded_reason: str | None
+    served_by: str
+    model_id: str | None
+    fallback_depth: int
+
+
 class ProviderRouter:
     def __init__(
         self,
@@ -76,6 +88,7 @@ class ProviderRouter:
         self._private_api_client = private_api_client
         self._consent_store = consent_store
         self._prompt_framing_engine = prompt_framing_engine
+        self._stt_fallback_used = False
 
     @staticmethod
     def _bool_from_env(name: str) -> bool:
@@ -133,12 +146,24 @@ class ProviderRouter:
         return self._whisper_engine.active_model_id
 
     def stt_fallback_active(self) -> bool:
-        return False
+        return self._stt_fallback_used
 
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> STTExecutionResult:
         backend = self.current_stt_backend()
         if backend == "whisper":
-            return self._whisper_engine.transcribe(pcm, sample_rate, language_hint)
+            result = self._whisper_engine.transcribe(pcm, sample_rate, language_hint)
+            # R3.5: a dead local engine falls back to the configured cloud STT
+            # instead of returning a placeholder. The flag feeds /v1/ready so
+            # degradation is visible, never silent.
+            if (
+                result.text.startswith("[transcription unavailable")
+                and self._openai_audio_client.configured
+            ):
+                logger.warning("Local Whisper unavailable — falling back to OpenAI STT")
+                self._stt_fallback_used = True
+                return self._openai_audio_client.transcribe(pcm, sample_rate, language_hint)
+            self._stt_fallback_used = False
+            return result
         if backend == "whisperkit":
             return STTExecutionResult(
                 text="[transcription unavailable: WhisperKit runs in the app process]",
@@ -211,7 +236,7 @@ class ProviderRouter:
             redacted_text=record.redacted_text,
         )
 
-    def cleanup(self, payload: CleanupRequest) -> tuple[str, bool, str | None, ResolvedProviderInput]:
+    def cleanup(self, payload: CleanupRequest) -> tuple[CleanupResult, ResolvedProviderInput]:
         mode = payload.mode.lower()
         tone = payload.tone_style.lower()
         resolved = self.resolve_effective_text(
@@ -225,15 +250,32 @@ class ProviderRouter:
 
         if resolved.provider_mode == "private_api":
             output, triggered = self._private_api_client.cleanup(mode, tone, resolved.effective_text)
-            return output, bool(triggered), "guardrail" if triggered else None, resolved
+            return CleanupResult(
+                text=output,
+                guardrail_triggered=bool(triggered),
+                degraded_reason="guardrail" if triggered else None,
+                served_by="private_api",
+                model_id=getattr(self._private_api_client, "model", None),
+                fallback_depth=0,
+            ), resolved
 
         if mode == "raw":
-            return normalize_whitespace(resolved.effective_text), False, None, resolved
+            return CleanupResult(
+                normalize_whitespace(resolved.effective_text), False, None,
+                served_by="rules", model_id=None, fallback_depth=0,
+            ), resolved
         if mode == "light":
-            return apply_tone(light_cleanup(resolved.effective_text), tone), False, None, resolved
+            return CleanupResult(
+                apply_tone(light_cleanup(resolved.effective_text), tone), False, None,
+                served_by="rules", model_id=None, fallback_depth=0,
+            ), resolved
         if mode == "polish":
-            output, triggered, reason = self._polish_engine.polish(resolved.effective_text, tone)
-            return output, triggered, reason, resolved
+            outcome = self._polish_engine.run(resolved.effective_text, tone)
+            return CleanupResult(
+                outcome.text, outcome.guardrail_triggered, outcome.degraded_reason,
+                served_by=outcome.served_by, model_id=outcome.model_id,
+                fallback_depth=outcome.fallback_depth,
+            ), resolved
         raise HTTPException(status_code=400, detail=f"Unsupported cleanup mode: {payload.mode}")
 
     def translate(self, payload: TranslateRequest) -> tuple[str, str, ResolvedProviderInput]:

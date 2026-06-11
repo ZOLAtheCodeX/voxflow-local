@@ -232,7 +232,8 @@ def test_smart_action_endpoint_returns_unavailable_when_polish_engine_offline(mo
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
     import server
 
-    monkeypatch.setattr(server.polish_engine, "is_available", lambda: False)
+    # Smart actions run on their own per-task chain engine (R3.3).
+    monkeypatch.setattr(server.smart_action_polish_engine, "is_available", lambda: False)
 
     client = TestClient(server.app)
     resp = client.post("/v1/smart_action", json={
@@ -244,3 +245,30 @@ def test_smart_action_endpoint_returns_unavailable_when_polish_engine_offline(mo
     assert body["output"] == "draft memo content"
     assert body["error"] == "ollama_unavailable"
     assert body["guardrail_triggered"] is False
+
+
+def test_smart_action_result_carries_provenance_from_chain_engine():
+    """R3.4: when the polish engine exposes run() (chain engine), smart
+    actions surface which provider served the transformation."""
+    import sys
+    from pathlib import Path as _P
+
+    sys.path.insert(0, str(_P(__file__).resolve().parent.parent / "app"))
+    from engines.polish import PolishOutcome
+
+    class _ChainEngine:
+        def is_available(self):
+            return True
+
+        def run(self, text, tone, system_prompt=None):
+            return PolishOutcome(
+                "# Memo output", False, None,
+                served_by="claude", model_id="claude-haiku-4-5-20251001", fallback_depth=0,
+            )
+
+    engine = SmartActionEngine(polish_backend=_ChainEngine())
+    result = engine.apply(action_id="memo", transcript="raw transcript")
+    assert result.output == "# Memo output"
+    assert result.served_by == "claude"
+    assert result.model_id == "claude-haiku-4-5-20251001"
+

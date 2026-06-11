@@ -47,6 +47,11 @@ class CleanupResponse(BaseModel):
     # Why output is not clean LLM text: backend_unavailable / echo /
     # guardrail_similarity / guardrail_length / guardrail_empty. None = clean.
     degraded_reason: str | None = None
+    # Provenance (R3.4): which provider served this. "rules" = deterministic
+    # regex pipeline (raw/light modes), "regex" = the polish fallback floor.
+    served_by: str | None = None
+    model_id: str | None = None
+    fallback_depth: int | None = None
 
 
 class TranslateRequest(BaseModel):
@@ -153,6 +158,10 @@ class SmartActionResponse(BaseModel):
     output: str
     guardrail_triggered: bool
     error: str | None = None
+    # Provenance (R3.4)
+    served_by: str | None = None
+    model_id: str | None = None
+    degraded_reason: str | None = None
 
 
 class NotionSearchRequest(BaseModel):
@@ -221,6 +230,14 @@ class OllamaPullRequest(BaseModel):
     model: str = Field(min_length=1, max_length=128)
 
 
+class ProviderStatus(BaseModel):
+    id: str
+    kind: str
+    model: str | None = None
+    reachable: bool | None = None  # None = not cheaply probeable (cloud w/o key check)
+    model_pulled: bool | None = None  # Ollama only: closes the ready-but-missing-model blind spot
+
+
 class ReadyResponse(BaseModel):
     service_status: str
     ready_for_dictation: bool
@@ -238,4 +255,10 @@ class ReadyResponse(BaseModel):
     private_api_policy_version: str
     private_api_policy_ready: bool
     ollama_available: bool = False
+    # BYOM (R3.4)
+    polish_chain: list[str] = Field(default_factory=list)
+    smart_action_chain: list[str] = Field(default_factory=list)
+    active_polish_provider: str = ""
+    active_polish_model: str = ""
+    polish_providers: list[ProviderStatus] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)

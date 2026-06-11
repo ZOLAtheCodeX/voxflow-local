@@ -14,20 +14,54 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from threading import Lock
 
 from nlp import apply_tone, light_cleanup, replace_spoken_punctuation
+from privacy import redact_sensitive_text
 
 from .llm_backend import TextLLMBackend, probe_ollama_available, select_backend
+from .provider_registry import ProviderSpec
 
 logger = logging.getLogger("voxflow")
 
 
+@dataclass(frozen=True)
+class PolishOutcome:
+    """Full result of a chain run, with provenance (R3.4).
+
+    ``served_by`` is the provider id that produced the text ("regex" for the
+    rules floor); ``fallback_depth`` is how many chain entries were skipped
+    or rejected before this one served (len(chain) when the floor served).
+    """
+
+    text: str
+    guardrail_triggered: bool
+    degraded_reason: str | None
+    served_by: str
+    model_id: str | None
+    fallback_depth: int
+
+
 class PolishEngine:
-    def __init__(self, backend: TextLLMBackend | None = None) -> None:
-        self._backend: TextLLMBackend = backend or select_backend()
+    def __init__(
+        self,
+        backend: TextLLMBackend | None = None,
+        *,
+        chain: list[tuple[ProviderSpec | None, TextLLMBackend]] | None = None,
+    ) -> None:
+        if chain is not None:
+            self._chain = chain
+        else:
+            resolved = backend or select_backend()
+            self._chain = [(None, resolved)]
         self._lock = Lock()
+
+    @property
+    def _backend(self) -> TextLLMBackend:
+        """First backend in the chain — compat for probes and legacy tests."""
+        return self._chain[0][1]
 
     @property
     def backend_name(self) -> str:
@@ -66,62 +100,101 @@ class PolishEngine:
         tone: str,
         system_prompt: str | None = None,
     ) -> tuple[str, bool, str | None]:
-        """Polish ``text`` through the configured backend.
+        """Compat wrapper over :meth:`run` returning the R2 3-tuple."""
+        out = self.run(text, tone, system_prompt=system_prompt)
+        return out.text, out.guardrail_triggered, out.degraded_reason
 
-        Returns ``(output, guardrail_triggered, degraded_reason)``.
-        ``degraded_reason`` distinguishes WHY output is not clean LLM text:
-        ``backend_unavailable`` (declined/error -> regex fallback),
-        ``guardrail_similarity`` / ``guardrail_length`` / ``guardrail_empty``
-        (candidate rejected -> regex fallback), ``echo`` (backend returned
-        the input unchanged -> regex fallback), or ``None`` (clean output).
-        Previously all of these collapsed into one boolean (audit BYOM gap #2).
+    def run(
+        self,
+        text: str,
+        tone: str,
+        system_prompt: str | None = None,
+    ) -> PolishOutcome:
+        """Run the provider chain and return text plus provenance (R3.3/R3.4).
 
-        When ``system_prompt`` is supplied (e.g. from SmartActionEngine for
-        memo / MECE / steel-man / Pyramid transformations), the guardrail
-        + echo checks are skipped — those rules are designed for polish
-        ("output should look like input but cleaner") and would reject
-        legitimate structural transformations whose whole point is to
-        diverge from the input. The empty-output fallback still applies
-        so a backend failure still gives the caller usable text.
+        Chain semantics: providers handle AVAILABILITY (empty/error output
+        falls to the next provider); the guardrail handles QUALITY (a
+        rejected candidate falls straight to the regex floor — retrying a
+        different model on a quality failure would double latency). The
+        regex floor is appended unconditionally and never fails.
+
+        Privacy posture (R3.3): payloads bound for a cloud provider pass
+        through ``redact_sensitive_text`` first; local providers receive the
+        raw text. The regex floor always works on the original local text.
+
+        When ``system_prompt`` is supplied (SmartActionEngine), guardrail +
+        echo checks are skipped — those rules are designed for polish and
+        would reject legitimate structural transformations.
         """
         if not text.strip():
-            return "", False, None
+            return PolishOutcome("", False, None, served_by="none", model_id=None, fallback_depth=0)
 
         # Polish path only: convert spoken punctuation deterministically
         # BEFORE the LLM — small models read "the new policy period" as a
-        # noun phrase (caught live on gemma4:e2b-mlx). Light/raw modes
-        # already convert via light_cleanup; this keeps polish consistent.
-        # The smart-action path receives transcripts verbatim: converting
-        # "period" inside a memo transform could corrupt real content.
+        # noun phrase (caught live on gemma4:e2b-mlx). The smart-action path
+        # receives transcripts verbatim: converting "period" inside a memo
+        # transform could corrupt real content.
         if system_prompt is None:
             text = replace_spoken_punctuation(text)
 
-        try:
-            if system_prompt is not None:
-                candidate = self._backend.polish(text, tone, system_prompt=system_prompt)
+        redacted_text: str | None = None
+        for depth, (spec, backend) in enumerate(self._chain):
+            is_cloud = bool(spec and spec.is_cloud)
+            if is_cloud:
+                if redacted_text is None:
+                    redacted_text = redact_sensitive_text(text)
+                send_text = redacted_text
             else:
-                candidate = self._backend.polish(text, tone)
-        except Exception as exc:
-            logger.error("Polish backend %s raised: %s", self.backend_name, exc)
-            candidate = ""
+                send_text = text
 
-        if not candidate:
-            return apply_tone(light_cleanup(text), tone), False, "backend_unavailable"
+            try:
+                candidate = backend.polish(
+                    send_text,
+                    tone,
+                    system_prompt=system_prompt,
+                    model=spec.model if spec else None,
+                    timeout=spec.timeout if spec else None,
+                )
+            except TypeError:
+                # Legacy backend without the per-request override params.
+                try:
+                    if system_prompt is not None:
+                        candidate = backend.polish(send_text, tone, system_prompt=system_prompt)
+                    else:
+                        candidate = backend.polish(send_text, tone)
+                except Exception as exc:
+                    logger.error("Polish backend %s raised: %s", getattr(backend, "name", "?"), exc)
+                    candidate = ""
+            except Exception as exc:
+                logger.error("Polish backend %s raised: %s", getattr(backend, "name", "?"), exc)
+                candidate = ""
 
-        # Smart-action path: trust the LLM output. Unchanged-echo is filtered
-        # one layer up (SmartActionService undo stack + CockpitCoordinator
-        # session history), so we don't need to detect it here.
-        if system_prompt is not None:
-            return candidate, False, None
+            if not candidate:
+                continue  # availability failure -> next provider
 
-        reason = self._guardrail_triggered(text, candidate, tone)
-        if reason:
-            return apply_tone(light_cleanup(text), tone), True, reason
+            served_by = spec.id if spec else getattr(backend, "name", "backend")
+            model_id = (spec.model if spec else None) or getattr(backend, "model", None)
 
-        if self._is_echo(text, candidate):
-            return apply_tone(light_cleanup(text), tone), False, "echo"
+            if system_prompt is not None:
+                return PolishOutcome(candidate, False, None, served_by=served_by, model_id=model_id, fallback_depth=depth)
 
-        return candidate, False, None
+            reason = self._guardrail_triggered(send_text, candidate, tone)
+            if reason:
+                return PolishOutcome(
+                    apply_tone(light_cleanup(text), tone), True, reason,
+                    served_by="regex", model_id=None, fallback_depth=depth,
+                )
+            if self._is_echo(send_text, candidate):
+                return PolishOutcome(
+                    apply_tone(light_cleanup(text), tone), False, "echo",
+                    served_by="regex", model_id=None, fallback_depth=depth,
+                )
+            return PolishOutcome(candidate, False, None, served_by=served_by, model_id=model_id, fallback_depth=depth)
+
+        return PolishOutcome(
+            apply_tone(light_cleanup(text), tone), False, "backend_unavailable",
+            served_by="regex", model_id=None, fallback_depth=len(self._chain),
+        )
 
     @staticmethod
     def _is_echo(original: str, candidate: str) -> bool:

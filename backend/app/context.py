@@ -24,6 +24,7 @@ from routing import (
     ProviderRouter,
 )
 from schemas import (
+    ProviderStatus,
     ReadyResponse,
 )
 from integrations.notion_rest import NotionRestClient
@@ -51,7 +52,16 @@ class RuntimeState:
 
 state = RuntimeState()
 whisper_engine = WhisperEngine()
-polish_engine = PolishEngine()
+
+# BYOM (R3): providers.json drives the registry; chains end at the regex
+# floor inside PolishEngine. Separate engines per task so "anthropic for
+# smart actions, ollama for polish" is expressible.
+from engines.provider_registry import ProviderRegistry, load_provider_config  # noqa: E402
+
+provider_config = load_provider_config()
+provider_registry = ProviderRegistry(provider_config)
+polish_engine = PolishEngine(chain=provider_registry.chain("polish"))
+smart_action_polish_engine = PolishEngine(chain=provider_registry.chain("smart_action"))
 translate_engine = TranslateEngine()
 prompt_framing_engine = PromptFramingEngine()
 consent_store = ConsentStore()
@@ -68,7 +78,7 @@ provider_router = ProviderRouter(
     prompt_framing_engine=prompt_framing_engine,
 )
 
-smart_action_engine = SmartActionEngine(polish_backend=polish_engine)
+smart_action_engine = SmartActionEngine(polish_backend=smart_action_polish_engine)
 notion_client = NotionRestClient()
 
 
@@ -130,6 +140,49 @@ def readiness_snapshot() -> ReadyResponse:
     if not models_dir:
         issues.append("VOXFLOW_MODELS_DIR is not configured")
 
+    polish_chain = provider_config.chains.get("polish", [])
+    smart_chain = provider_config.chains.get("smart_action", [])
+    provider_statuses = []
+    active_provider = ""
+    active_polish_model_name = ""
+    for spec in provider_config.providers:
+        reachable: bool | None
+        model_pulled: bool | None = None
+        model_name = spec.model
+        if spec.kind == "ollama":
+            reachable = probe_ollama_available()
+            backend = provider_registry.backend(spec.id)
+            model_name = model_name or getattr(backend, "model", None)
+            if reachable and model_name:
+                try:
+                    from engines.llm_backend import list_ollama_models
+
+                    installed = {m.get("name", "") for m in list_ollama_models(timeout=1.5)}
+                    model_pulled = model_name in installed
+                except Exception:
+                    model_pulled = None
+        elif spec.kind == "openai_compat":
+            # Local servers come and go; probe is cheap (1.5 s worst case).
+            try:
+                reachable = provider_registry.backend(spec.id).is_available()
+            except Exception:
+                reachable = False
+        else:
+            # Cloud APIs: a key on file is the best cheap signal.
+            reachable = bool(spec.api_key) if spec.api_key_env else None
+        provider_statuses.append(ProviderStatus(
+            id=spec.id, kind=spec.kind, model=model_name,
+            reachable=reachable, model_pulled=model_pulled,
+        ))
+
+    status_by_id = {s.id: s for s in provider_statuses}
+    for pid in polish_chain:
+        s = status_by_id.get(pid)
+        if s is not None and (s.reachable is True) and (s.model_pulled is not False):
+            active_provider = pid
+            active_polish_model_name = s.model or ""
+            break
+
     return ReadyResponse(
         service_status=state.service_status,
         ready_for_dictation=(state.service_status == "ok" and state.model_loaded),
@@ -147,6 +200,11 @@ def readiness_snapshot() -> ReadyResponse:
         private_api_policy_version=privacy_policy.version or "unset",
         private_api_policy_ready=private_api_policy_ready,
         ollama_available=probe_ollama_available(),
+        polish_chain=polish_chain,
+        smart_action_chain=smart_chain,
+        active_polish_provider=active_provider,
+        active_polish_model=active_polish_model_name,
+        polish_providers=provider_statuses,
         issues=issues,
     )
 
