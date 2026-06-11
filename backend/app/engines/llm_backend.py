@@ -43,6 +43,8 @@ class TextLLMBackend(Protocol):
         text: str,
         tone: str,
         system_prompt: str | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
     ) -> str:  # pragma: no cover - Protocol
         ...
 
@@ -101,6 +103,8 @@ class OllamaBackend:
         text: str,
         tone: str,
         system_prompt: str | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
     ) -> str:
         if not text.strip():
             return ""
@@ -119,7 +123,7 @@ class OllamaBackend:
                 f"{_OLLAMA_SYSTEM_PROMPT_BASE} {instruction}" if instruction else _OLLAMA_SYSTEM_PROMPT_BASE
             )
         payload = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
@@ -147,7 +151,7 @@ class OllamaBackend:
         )
 
         try:
-            with urlrequest.urlopen(req, timeout=self.timeout) as resp:
+            with urlrequest.urlopen(req, timeout=timeout or self.timeout) as resp:
                 body = resp.read()
         except (urlerror.URLError, TimeoutError, ConnectionError) as exc:
             logger.warning("Ollama polish unavailable: %s", exc)
@@ -176,6 +180,182 @@ class OllamaBackend:
                 return 200 <= resp.status < 300
         except Exception:
             return False
+
+
+class OpenAICompatBackend:
+    """Any server speaking the OpenAI chat-completions dialect: LM Studio,
+    llama.cpp server, vLLM, mlx_lm.server, or the cloud OpenAI API itself
+    (see OpenAIBackend). Errors collapse to "" — the chain moves on (R3.2).
+    """
+
+    name = "openai_compat"
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str = "",
+        timeout: float = 30.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def polish(
+        self,
+        text: str,
+        tone: str,
+        system_prompt: str | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        if not text.strip():
+            return ""
+        if system_prompt is None:
+            instruction = _tone_instruction(tone)
+            system_prompt = (
+                f"{_OLLAMA_SYSTEM_PROMPT_BASE} {instruction}" if instruction else _OLLAMA_SYSTEM_PROMPT_BASE
+            )
+        payload = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            "stream": False,
+            "temperature": 0.2,
+            "max_tokens": 512,
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urlrequest.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urlrequest.urlopen(req, timeout=timeout or self.timeout) as resp:
+                body = resp.read()
+        except (urlerror.URLError, TimeoutError, ConnectionError) as exc:
+            logger.warning("%s polish unavailable: %s", self.name, exc)
+            return ""
+        except Exception as exc:
+            logger.error("%s polish request failed: %s", self.name, exc)
+            return ""
+        try:
+            parsed = json.loads(body.decode("utf-8"))
+            content = parsed["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
+            logger.error("%s polish response malformed: %s", self.name, exc)
+            return ""
+        return str(content).strip()
+
+    def is_available(self) -> bool:
+        req = urlrequest.Request(f"{self.base_url}/v1/models", method="GET")
+        if self.api_key:
+            req.add_header("Authorization", f"Bearer {self.api_key}")
+        try:
+            with urlrequest.urlopen(req, timeout=1.5) as resp:
+                return 200 <= resp.status < 300
+        except Exception:
+            return False
+
+
+class OpenAIBackend(OpenAICompatBackend):
+    """Cloud OpenAI — the compat dialect with the official endpoint."""
+
+    name = "openai"
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        base_url: str | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        super().__init__(
+            base_url=base_url or "https://api.openai.com",
+            model=model,
+            api_key=api_key,
+            timeout=timeout,
+        )
+
+
+class AnthropicBackend:
+    """Cloud Anthropic Messages API. Declines without a key (no network)."""
+
+    name = "anthropic"
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        base_url: str | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        self.base_url = (base_url or "https://api.anthropic.com").rstrip("/")
+        self.model = model
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def polish(
+        self,
+        text: str,
+        tone: str,
+        system_prompt: str | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        if not text.strip():
+            return ""
+        if not self.api_key:
+            logger.warning("Anthropic backend has no API key — declining")
+            return ""
+        if system_prompt is None:
+            instruction = _tone_instruction(tone)
+            system_prompt = (
+                f"{_OLLAMA_SYSTEM_PROMPT_BASE} {instruction}" if instruction else _OLLAMA_SYSTEM_PROMPT_BASE
+            )
+        payload = {
+            "model": model or self.model,
+            "max_tokens": 512,
+            "temperature": 0.2,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": text}],
+        }
+        req = urlrequest.Request(
+            f"{self.base_url}/v1/messages",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+        try:
+            with urlrequest.urlopen(req, timeout=timeout or self.timeout) as resp:
+                body = resp.read()
+        except (urlerror.URLError, TimeoutError, ConnectionError) as exc:
+            logger.warning("Anthropic polish unavailable: %s", exc)
+            return ""
+        except Exception as exc:
+            logger.error("Anthropic polish request failed: %s", exc)
+            return ""
+        try:
+            parsed = json.loads(body.decode("utf-8"))
+            blocks = parsed["content"]
+            content = "".join(b.get("text", "") for b in blocks if isinstance(b, dict))
+        except (KeyError, IndexError, ValueError, TypeError) as exc:
+            logger.error("Anthropic polish response malformed: %s", exc)
+            return ""
+        return content.strip()
 
 
 _PROBE_LOCK = Lock()

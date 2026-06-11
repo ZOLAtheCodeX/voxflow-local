@@ -518,3 +518,127 @@ class _FakeSystemPromptBackend:
         self.received_text = text
         return self.response
 
+
+def _openai_compat_response(content: str) -> bytes:
+    return json.dumps(
+        {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    ).encode("utf-8")
+
+
+def _anthropic_response(content: str) -> bytes:
+    return json.dumps(
+        {"content": [{"type": "text", "text": content}], "stop_reason": "end_turn"}
+    ).encode("utf-8")
+
+
+class TestOpenAICompatBackend:
+    """R3.2: one backend covers LM Studio, llama.cpp server, vLLM,
+    mlx_lm.server — anything speaking /v1/chat/completions."""
+
+    def test_posts_to_compat_endpoint_with_auth_and_model(self) -> None:
+        from engines.llm_backend import OpenAICompatBackend
+
+        backend = OpenAICompatBackend(base_url="http://localhost:1234", model="qwen3:8b", api_key="sk-local")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_openai_compat_response("Cleaned text.")),
+        ) as urlopen_mock:
+            result = backend.polish("uh cleaned text", "neutral")
+
+        assert result == "Cleaned text."
+        req = urlopen_mock.call_args.args[0]
+        assert req.full_url == "http://localhost:1234/v1/chat/completions"
+        assert req.get_header("Authorization") == "Bearer sk-local"
+        body = json.loads(req.data.decode("utf-8"))
+        assert body["model"] == "qwen3:8b"
+        assert body["max_tokens"] == 512
+        assert [m["role"] for m in body["messages"]] == ["system", "user"]
+
+    def test_no_api_key_omits_auth_header(self) -> None:
+        from engines.llm_backend import OpenAICompatBackend
+
+        backend = OpenAICompatBackend(base_url="http://localhost:1234", model="m")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_openai_compat_response("x")),
+        ) as urlopen_mock:
+            backend.polish("text to polish", "neutral")
+        assert urlopen_mock.call_args.args[0].get_header("Authorization") is None
+
+    def test_per_request_model_override(self) -> None:
+        from engines.llm_backend import OpenAICompatBackend
+
+        backend = OpenAICompatBackend(base_url="http://localhost:1234", model="default-model")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_openai_compat_response("x")),
+        ) as urlopen_mock:
+            backend.polish("text", "neutral", model="override-model")
+        body = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        assert body["model"] == "override-model"
+
+    def test_connection_error_returns_empty(self) -> None:
+        from engines.llm_backend import OpenAICompatBackend
+
+        backend = OpenAICompatBackend(base_url="http://localhost:1234", model="m")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=urlerror.URLError("refused"),
+        ):
+            assert backend.polish("some text", "neutral") == ""
+
+
+class TestOpenAIBackend:
+    def test_defaults_to_openai_base_url(self) -> None:
+        from engines.llm_backend import OpenAIBackend
+
+        backend = OpenAIBackend(model="gpt-4o-mini", api_key="sk-cloud")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_openai_compat_response("x")),
+        ) as urlopen_mock:
+            backend.polish("text", "neutral")
+        assert urlopen_mock.call_args.args[0].full_url == "https://api.openai.com/v1/chat/completions"
+        assert backend.name == "openai"
+
+
+class TestAnthropicBackend:
+    def test_posts_messages_api_with_system_top_level(self) -> None:
+        from engines.llm_backend import AnthropicBackend
+
+        backend = AnthropicBackend(model="claude-haiku-4-5-20251001", api_key="sk-ant")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_anthropic_response("Polished.")),
+        ) as urlopen_mock:
+            result = backend.polish("uh polished", "neutral")
+
+        assert result == "Polished."
+        req = urlopen_mock.call_args.args[0]
+        assert req.full_url == "https://api.anthropic.com/v1/messages"
+        assert req.get_header("X-api-key") == "sk-ant"
+        assert req.get_header("Anthropic-version") == "2023-06-01"
+        body = json.loads(req.data.decode("utf-8"))
+        assert body["model"] == "claude-haiku-4-5-20251001"
+        assert body["max_tokens"] == 512
+        assert isinstance(body["system"], str)
+        assert body["messages"] == [{"role": "user", "content": "uh polished"}]
+
+    def test_missing_key_declines_without_network(self) -> None:
+        from engines.llm_backend import AnthropicBackend
+
+        backend = AnthropicBackend(model="claude-haiku-4-5-20251001", api_key="")
+        with patch("engines.llm_backend.urlrequest.urlopen") as urlopen_mock:
+            assert backend.polish("text", "neutral") == ""
+            urlopen_mock.assert_not_called()
+
+    def test_error_returns_empty(self) -> None:
+        from engines.llm_backend import AnthropicBackend
+
+        backend = AnthropicBackend(model="m", api_key="k")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            side_effect=urlerror.URLError("dns"),
+        ):
+            assert backend.polish("text", "neutral") == ""
+
