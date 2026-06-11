@@ -117,7 +117,10 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - PII redaction: credit cards Luhn-validated before `[ACCOUNT_NUMBER]` redaction (Phase 5.2).
 - Whisper short-audio fast path: clips < 20 s skip the chunking + stride padding via per-call `chunk_length_s=0` (Phase 5.1).
 - WebSocket `/v1/events` enforces a 60 s idle timeout with clean close frame (Phase 5.4).
-- Polish engine wraps the selected `TextLLMBackend` (only Ollama post-3.5); guardrail + regex fallback live one layer up in `PolishEngine`. Guardrail is word-level with tone-aware floors (R2.2); `PolishEngine.polish` returns `(text, guardrail_triggered, degraded_reason)` and `CleanupResponse` carries `degraded_reason` (backend_unavailable / echo / guardrail_*).
+- Polish engine executes the BYOM provider chain (R3): availability failures fall to the next provider, guardrail rejections fall straight to the regex floor, the floor is unconditional. `run()` returns `PolishOutcome` (text, guardrail_triggered, degraded_reason, served_by, model_id, fallback_depth); `polish()` is the 3-tuple compat wrapper. Cloud-bound payloads pass `redact_sensitive_text` first. Guardrail is word-level with tone-aware floors (R2.2).
+- BYOM config: `~/Library/Application Support/VoxFlow/providers.json` (written by Swift `ProviderConfigStore`, read by the backend registry at launch; `VOXFLOW_PROVIDERS_CONFIG` dev override). Per-task chains: `polish`, `smart_action` — each task gets its OWN PolishEngine (`smart_action_polish_engine` in context.py). API keys live in the Keychain (`voxflow.provider.<id>`); the app injects them at backend launch as `VOXFLOW_PROVIDER_KEY_*` env vars named by `api_key_env` — never in the JSON file.
+- `/v1/ready` reports `polish_chain`, per-provider `reachable`/`model_pulled` (closes the ready-but-missing-model blind spot), and `active_polish_provider`/`active_polish_model` — the Swift mode-in-use indicator (palette footer + cockpit pill) renders these; empty provider = regex fallback (orange). `/v1/providers/test` powers the Settings test-connection button.
+- STT fallback chain is real (R3.5): dead local Whisper falls back to configured OpenAI STT; `stt_fallback_active` reports it.
 - Logging: `logging.getLogger("voxflow")`; never bare `print()`.
 
 ## Testing
@@ -168,6 +171,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Skip `_RATE_LIMIT_LOCK` when touching `_rate_limit_timestamps` — short critical sections only.
 - Push smart actions onto the cockpit undo stack when they fail the guardrail or return the transcript unchanged — `SmartActionService` filters those before recording history.
 - Mutate `LongFormSession.transcript` from outside `LongFormSessionService` — `currentSession` is `@Published private(set)`. Use `setTranscript(_:)` so the auto-save Task sees the change.
+- Edit `providers.json` schema on one side only — `ProviderConfigStore.swift` (writer) and `provider_registry.py` (reader) must stay in sync; the Swift `testFileSchemaMatchesBackendContract` pins the snake_case schema.
 - Add a new `SmartActionId` to `AppModels.swift` without adding the matching system-prompt entry in `backend/app/smart_actions.py` — the engine will fall back to a generic prompt template and the action label/tooltip will look fine while the LLM output stays generic.
 - Have the cockpit voice router fire actions while the session is `.recording` — voice keywords only resolve in `.reviewing`. Multi-word utterances must remain `.none` for Layer 0.
 - Bypass `BackendAPISmartActionAdapter` to call `/v1/smart_action` directly from views — go through `CockpitCoordinator.applyAction` so MRU + undo stay correct.

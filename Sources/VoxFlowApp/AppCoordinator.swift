@@ -127,6 +127,10 @@ final class AppCoordinator: ObservableObject {
         return DictionaryStore(fileURL: base.appendingPathComponent("dictionary.json"))
     }()
     private(set) lazy var cockpitSnippets: SnippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
+    // BYOM (R3.6): providers.json store — shared file the backend registry
+    // reads at launch. Mutations are followed by a backend restart so chains
+    // take effect (SettingsView calls applyProviderChanges()).
+    private(set) lazy var providerConfig: ProviderConfigStore = ProviderConfigStore()
     // Cockpit Layer 1 — Phase E workflow chains. Store mirrors cockpitSnippets;
     // the executor reuses the existing smart-action + text-insertion seams and
     // sources its frozen target from the cockpit session (the app the user was
@@ -179,6 +183,9 @@ final class AppCoordinator: ObservableObject {
         let settingsCoordinator = SettingsCoordinator(state: state, backendManager: backendManager)
         settingsCoordinator.migrateAPIKeysToKeychain()
         settingsCoordinator.configureInitialState()
+        settingsCoordinator.providerKeysResolver = { [weak self] in
+            self?.providerConfig.keychainBackedKeys() ?? [:]
+        }
         self.settings = settingsCoordinator
         startFocusMonitoring()
         beginWarmupMonitoring()
@@ -336,6 +343,8 @@ final class AppCoordinator: ObservableObject {
             state.backendReadiness.readinessIssue = readiness.issues.first
             state.backendReadiness.activeSTTModel = readiness.activeSttModel
             state.backendReadiness.ollamaAvailable = readiness.ollamaAvailable
+            state.backendReadiness.activePolishProvider = readiness.activePolishProvider
+            state.backendReadiness.activePolishModel = readiness.activePolishModel
             state.backendReadiness.statusSummary = readiness.readyForDictation
                 ? "Backend ready (\(readiness.activeSttModel))"
                 : "Backend not ready: \(readiness.issues.first ?? "unknown issue")"

@@ -584,6 +584,10 @@ struct BackendReadinessState: Equatable, Sendable {
     var statusSummary: String = "Backend not checked"
     var activeSTTModel: String = ""
     var ollamaAvailable = false
+    /// BYOM (R3.7): which provider/model the polish chain would use right
+    /// now. Empty provider = regex fallback (degraded).
+    var activePolishProvider: String = ""
+    var activePolishModel: String = ""
 }
 
 struct CalibrationItem: Identifiable, Hashable {

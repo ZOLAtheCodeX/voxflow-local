@@ -59,6 +59,11 @@ final class SettingsCoordinator: SettingsCoordinating {
         "com.apple.dt.Xcode": AppProfile(tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
     ]
 
+    /// Resolves Keychain-backed BYOM provider keys at launch-config build
+    /// time. AppCoordinator points this at ProviderConfigStore after
+    /// construction (the store is lazy; the coordinator is built in init).
+    var providerKeysResolver: @MainActor () -> [String: String] = { [:] }
+
     init(state: AppState, backendManager: BackendProcessManager) {
         self.state = state
         self.backendManager = backendManager
@@ -367,7 +372,8 @@ final class SettingsCoordinator: SettingsCoordinating {
             openAIAPIKey: KeychainService.load(account: Self.keychainOpenAIAPIKeyAccount) ?? "",
             openAISTTModel: state.openAISTTModel,
             openAITTSModel: state.openAITTSModel,
-            openAITTSVoice: state.openAITTSVoice
+            openAITTSVoice: state.openAITTSVoice,
+            providerKeys: providerKeysResolver()
         )
     }
 

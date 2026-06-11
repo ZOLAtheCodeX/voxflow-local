@@ -27,8 +27,14 @@ struct CockpitTopBarView: View {
     }
 
     private var modelPill: some View {
-        let model = state.backendReadiness.ollamaAvailable ? "gemma4:e4b-mlx" : "regex fallback"
-        return pill(model, tint: VF.colorNeutral)
+        // R3.7: provenance from /v1/ready — which provider/model the polish
+        // chain would use right now. Empty provider = regex fallback.
+        let provider = state.backendReadiness.activePolishProvider
+        let model = state.backendReadiness.activePolishModel
+        let label = provider.isEmpty
+            ? "regex fallback"
+            : (model.isEmpty ? provider : "\(provider) · \(model)")
+        return pill(label, tint: provider.isEmpty ? .orange : VF.colorNeutral)
     }
 
     @ViewBuilder private var targetPill: some View {

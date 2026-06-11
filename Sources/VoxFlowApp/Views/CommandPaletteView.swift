@@ -710,6 +710,8 @@ struct CommandPaletteView: View {
 
             Spacer()
 
+            polishProviderIndicator
+
             Button {
                 onQuit()
             } label: {
@@ -723,6 +725,27 @@ struct CommandPaletteView: View {
         .labelStyle(.iconOnly)
         .controlSize(.regular)
         .padding(.horizontal, 16)
+    }
+
+    /// R3.7 mode-in-use indicator: which provider serves polish right now.
+    /// Orange = degraded to the local regex fallback (provider chain down).
+    @ViewBuilder private var polishProviderIndicator: some View {
+        let provider = state.backendReadiness.activePolishProvider
+        let model = state.backendReadiness.activePolishModel
+        if state.backendReadiness.processRunning || !provider.isEmpty {
+            HStack(spacing: 3) {
+                Image(systemName: provider.isEmpty ? "exclamationmark.triangle" : "brain")
+                    .font(VF.microFont)
+                Text(provider.isEmpty ? "regex fallback" : (model.isEmpty ? provider : "\(provider) · \(model)"))
+                    .font(VF.microFont)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(provider.isEmpty ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            .accessibilityLabel(provider.isEmpty ? "Polish degraded to regex fallback" : "Polish served by \(provider)")
+            .help(provider.isEmpty
+                  ? "No polish provider reachable — output uses the local rules pipeline"
+                  : "Polish provider: \(provider) \(model)")
+        }
     }
 
     private func appProfilePopover(bundleID: String, appName: String) -> some View {

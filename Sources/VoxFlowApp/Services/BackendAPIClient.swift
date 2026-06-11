@@ -76,6 +76,10 @@ struct BackendReadinessResponse: Codable {
     let privateApiPolicyVersion: String
     let privateApiPolicyReady: Bool
     let ollamaAvailable: Bool
+    // BYOM provenance (R3.4) — optional so older backends still decode.
+    let activePolishProvider: String
+    let activePolishModel: String
+    let polishChain: [String]
     let issues: [String]
 
     init(
@@ -95,6 +99,9 @@ struct BackendReadinessResponse: Codable {
         privateApiPolicyVersion: String,
         privateApiPolicyReady: Bool,
         ollamaAvailable: Bool = false,
+        activePolishProvider: String = "",
+        activePolishModel: String = "",
+        polishChain: [String] = [],
         issues: [String]
     ) {
         self.serviceStatus = serviceStatus
@@ -113,6 +120,9 @@ struct BackendReadinessResponse: Codable {
         self.privateApiPolicyVersion = privateApiPolicyVersion
         self.privateApiPolicyReady = privateApiPolicyReady
         self.ollamaAvailable = ollamaAvailable
+        self.activePolishProvider = activePolishProvider
+        self.activePolishModel = activePolishModel
+        self.polishChain = polishChain
         self.issues = issues
     }
 
@@ -134,6 +144,9 @@ struct BackendReadinessResponse: Codable {
         privateApiPolicyVersion = try container.decode(String.self, forKey: .privateApiPolicyVersion)
         privateApiPolicyReady = try container.decode(Bool.self, forKey: .privateApiPolicyReady)
         ollamaAvailable = try container.decodeIfPresent(Bool.self, forKey: .ollamaAvailable) ?? false
+        activePolishProvider = try container.decodeIfPresent(String.self, forKey: .activePolishProvider) ?? ""
+        activePolishModel = try container.decodeIfPresent(String.self, forKey: .activePolishModel) ?? ""
+        polishChain = try container.decodeIfPresent([String].self, forKey: .polishChain) ?? []
         issues = try container.decode([String].self, forKey: .issues)
     }
 }
@@ -501,6 +514,23 @@ enum BackendAPIClient {
     }
 
     // MARK: - Notion Integration (Phase C)
+
+    struct ProviderTestResult: Decodable {
+        let providerId: String
+        let reachable: Bool
+        let detail: String
+    }
+
+    static func providerTest(providerID: String) async throws -> ProviderTestResult {
+        struct Request: Encodable { let providerId: String }
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/providers/test"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(Request(providerId: providerID))
+        let (data, response) = try await session.data(for: request)
+        try checkHTTPStatus(response, data: data)
+        return try decoder.decode(ProviderTestResult.self, from: data)
+    }
 
     static func notionSearch(query: String, token: String) async throws -> [NotionTarget] {
         struct Request: Encodable { let notionToken: String; let query: String }

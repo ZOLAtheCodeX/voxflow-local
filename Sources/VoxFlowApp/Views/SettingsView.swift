@@ -7,6 +7,7 @@ struct SettingsView: View {
     @ObservedObject var dictionary: DictionaryStore
     @ObservedObject var snippetStore: SnippetStore
     @ObservedObject var chainStore: ChainStore
+    @ObservedObject var providerStore: ProviderConfigStore
     @State private var newWrong = ""
     @State private var newRight = ""
     @State private var newSnippetKeyword = ""
@@ -25,6 +26,12 @@ struct SettingsView: View {
     @State private var privateAPIBaseURLDraft = ""
     @State private var privateAPIModelDraft = ""
     @State private var privateAPIKeyDraft = ""
+    @State private var newProviderID = ""
+    @State private var newProviderKind: ProviderKind = .openaiCompat
+    @State private var newProviderBaseURL = ""
+    @State private var newProviderModel = ""
+    @State private var newProviderKey = ""
+    @State private var providerTestResults: [String: String] = [:]
     @State private var openAIBaseURLDraft = ""
     @State private var openAIAPIKeyDraft = ""
     @State private var openAISTTModelDraft = ""
@@ -209,6 +216,69 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                }
+            }
+
+
+            Section("Model Providers (BYOM)") {
+                ForEach(providerStore.providers) { spec in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(spec.id).font(VF.captionEmphasizedFont)
+                            Text(spec.kind.rawValue)
+                                .font(VF.microFont)
+                                .foregroundStyle(.secondary)
+                            if let model = spec.model, !model.isEmpty {
+                                Text(model).font(VF.monoCaptionFont).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Test") { testProvider(spec.id) }
+                            if spec.id != "ollama" {
+                                Button(role: .destructive) {
+                                    providerStore.remove(id: spec.id)
+                                    applyProviderChanges()
+                                } label: { Image(systemName: "trash") }
+                            }
+                        }
+                        if let result = providerTestResults[spec.id] {
+                            Text(result).font(VF.microFont).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                ForEach(ProviderConfigStore.tasks, id: \.self) { task in
+                    Picker(task == "polish" ? "Polish provider" : "Smart-action provider", selection: chainPrimaryBinding(for: task)) {
+                        ForEach(providerStore.providers.map(\.id), id: \.self) { pid in
+                            Text(pid).tag(pid)
+                        }
+                    }
+                }
+                Text("Chains fall back to Ollama, then the local regex pipeline — dictation keeps working offline no matter what.")
+                    .font(VF.microFont)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Add provider").font(VF.captionEmphasizedFont)
+                    TextField("Identifier (e.g. lmstudio, claude)", text: $newProviderID)
+                        .textFieldStyle(.roundedBorder)
+                    Picker("Type", selection: $newProviderKind) {
+                        ForEach(ProviderKind.allCases) { kind in
+                            Text(kind.displayName).tag(kind)
+                        }
+                    }
+                    if newProviderKind == .ollama || newProviderKind == .openaiCompat {
+                        TextField("Base URL (e.g. http://localhost:1234)", text: $newProviderBaseURL)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    TextField("Model id", text: $newProviderModel)
+                        .textFieldStyle(.roundedBorder)
+                    if newProviderKind.isCloud {
+                        SecureField("API key (stored in Keychain)", text: $newProviderKey)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    Button("Add Provider") { addProvider() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(newProviderID.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
 
@@ -839,6 +909,56 @@ struct SettingsView: View {
     }
 
     @MainActor
+    private func chainPrimaryBinding(for task: String) -> Binding<String> {
+        Binding(
+            get: { providerStore.chains[task]?.first ?? "ollama" },
+            set: { newPrimary in
+                var chain = [newPrimary]
+                // Keep local Ollama as the availability fallback unless it IS the primary.
+                if newPrimary != "ollama", providerStore.providers.contains(where: { $0.id == "ollama" }) {
+                    chain.append("ollama")
+                }
+                providerStore.setChain(task: task, providerIDs: chain)
+                applyProviderChanges()
+            }
+        )
+    }
+
+    private func addProvider() {
+        let id = newProviderID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let spec = ProviderSpecModel(
+            id: id,
+            kind: newProviderKind,
+            baseURL: newProviderBaseURL.trimmingCharacters(in: .whitespaces).isEmpty ? nil : newProviderBaseURL.trimmingCharacters(in: .whitespaces),
+            model: newProviderModel.trimmingCharacters(in: .whitespaces).isEmpty ? nil : newProviderModel.trimmingCharacters(in: .whitespaces)
+        )
+        guard providerStore.add(spec) else { return }
+        let key = newProviderKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty {
+            KeychainService.save(account: ProviderConfigStore.keychainAccount(for: id), value: key)
+        }
+        newProviderID = ""; newProviderBaseURL = ""; newProviderModel = ""; newProviderKey = ""
+        applyProviderChanges()
+    }
+
+    private func applyProviderChanges() {
+        // The backend reads providers.json at launch; restart so the new
+        // registry takes effect (same pattern as every other config apply).
+        coordinator.settings.restartBackendWithCurrentConfiguration(status: "Model providers updated")
+    }
+
+    private func testProvider(_ providerID: String) {
+        providerTestResults[providerID] = "Testing…"
+        Task {
+            do {
+                let result = try await BackendAPIClient.providerTest(providerID: providerID)
+                providerTestResults[providerID] = (result.reachable ? "✓ " : "✕ ") + result.detail
+            } catch {
+                providerTestResults[providerID] = "✕ Backend unreachable — start the backend first"
+            }
+        }
+    }
+
     private func refreshOllamaStatus() async {
         do {
             ollamaStatus = try await BackendAPIClient.ollamaModels()
