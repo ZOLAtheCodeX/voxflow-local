@@ -61,7 +61,7 @@ def _bench_model(model: str, cases: list[dict]) -> dict:
 
     for case in cases:
         start = time.perf_counter()
-        _, was_triggered = engine.polish(case["input"], case["tone"])
+        _, was_triggered, _reason = engine.polish(case["input"], case["tone"])
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         if cold_ms is None:
             cold_ms = elapsed_ms

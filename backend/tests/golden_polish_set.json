@@ -4,57 +4,289 @@
     "tone": "neutral",
     "input": "uh can you send the q3 financial report to bob and alice by end of day friday",
     "scripted_output": "Can you send the Q3 financial report to Bob and Alice by end of day Friday?",
-    "expected_substrings": ["Q3 financial report", "Bob", "Alice", "Friday"]
+    "expected_substrings": [
+      "Q3 financial report",
+      "Bob",
+      "Alice",
+      "Friday"
+    ]
   },
   {
     "name": "filler_heavy_sentence",
     "tone": "concise",
     "input": "um so basically i think we should kind of you know maybe consider rescheduling the meeting",
     "scripted_output": "We should consider rescheduling the meeting.",
-    "expected_substrings": ["reschedul", "meeting"],
-    "forbidden_substrings": [" um ", " uh ", " basically ", " kind of "]
+    "expected_substrings": [
+      "reschedul",
+      "meeting"
+    ],
+    "forbidden_substrings": [
+      " um ",
+      " uh ",
+      " basically ",
+      " kind of "
+    ]
   },
   {
     "name": "multi_clause_legal",
     "tone": "formal",
     "input": "the data controller has the right to access personal data under article 15 but the data subject can request restriction under article 18",
     "scripted_output": "The data controller has the right to access personal data under Article 15, but the data subject can request restriction under Article 18.",
-    "expected_substrings": ["Article 15", "Article 18", "data controller", "data subject"]
+    "expected_substrings": [
+      "Article 15",
+      "Article 18",
+      "data controller",
+      "data subject"
+    ]
   },
   {
     "name": "short_imperative",
     "tone": "friendly",
     "input": "send the deck to marketing",
     "scripted_output": "Could you send the deck to marketing?",
-    "expected_substrings": ["deck", "marketing"]
+    "expected_substrings": [
+      "deck",
+      "marketing"
+    ]
   },
   {
     "name": "spoken_punctuation",
     "tone": "neutral",
     "input": "hello team comma we will discuss the new policy period thanks comma jamie",
     "scripted_output": "Hello team, we will discuss the new policy. Thanks, Jamie.",
-    "expected_substrings": ["Hello team,", "policy.", "Thanks, Jamie"],
-    "forbidden_substrings": [" comma ", " period "]
+    "expected_substrings": [
+      "Hello team,",
+      "policy.",
+      "Thanks, Jamie"
+    ],
+    "forbidden_substrings": [
+      " comma ",
+      " period "
+    ]
   },
   {
     "name": "iso_jargon",
     "tone": "formal",
     "input": "the iso 42001 implementation requires aigp certification and quarterly audits",
     "scripted_output": "The ISO 42001 implementation requires AIGP certification and quarterly audits.",
-    "expected_substrings": ["ISO 42001", "AIGP", "quarterly audits"]
+    "expected_substrings": [
+      "ISO 42001",
+      "AIGP",
+      "quarterly audits"
+    ]
   },
   {
     "name": "long_paragraph",
     "tone": "neutral",
     "input": "we discussed the migration plan during standup the team agreed to move forward with the phased approach starting next sprint with the auth service then the billing service then everything else",
     "scripted_output": "We discussed the migration plan during standup. The team agreed to move forward with the phased approach, starting next sprint with the auth service, then the billing service, then everything else.",
-    "expected_substrings": ["migration plan", "phased approach", "auth service", "billing service"]
+    "expected_substrings": [
+      "migration plan",
+      "phased approach",
+      "auth service",
+      "billing service"
+    ]
   },
   {
     "name": "casual_slack_message",
     "tone": "concise",
     "input": "hey just wanted to follow up on the thing from yesterday any updates",
-    "scripted_output": "Following up on yesterday — any updates?",
-    "expected_substrings": ["follow", "update"]
+    "scripted_output": "Following up on yesterday \u2014 any updates?",
+    "expected_substrings": [
+      "follow",
+      "update"
+    ]
+  },
+  {
+    "name": "neutral_short_clean",
+    "tone": "neutral",
+    "input": "schedule a sync with priya for tuesday at ten",
+    "scripted_output": "Schedule a sync with Priya for Tuesday at 10.",
+    "expected_substrings": [
+      "Priya",
+      "Tuesday"
+    ]
+  },
+  {
+    "name": "neutral_numbers_preserved",
+    "tone": "neutral",
+    "input": "uh the budget is forty seven thousand dollars and the deadline is march 3rd",
+    "scripted_output": "The budget is forty-seven thousand dollars and the deadline is March 3rd.",
+    "expected_substrings": [
+      "forty",
+      "thousand",
+      "March 3"
+    ]
+  },
+  {
+    "name": "neutral_question_not_answered",
+    "tone": "neutral",
+    "input": "um what time does the all hands start tomorrow",
+    "scripted_output": "What time does the all-hands start tomorrow?",
+    "expected_substrings": [
+      "what time",
+      "tomorrow"
+    ],
+    "forbidden_substrings": [
+      " um "
+    ]
+  },
+  {
+    "name": "neutral_filler_medium",
+    "tone": "neutral",
+    "input": "so like i was thinking we could you know move the standup to nine thirty instead of nine",
+    "scripted_output": "I was thinking we could move the standup to nine thirty instead of nine.",
+    "expected_substrings": [
+      "standup",
+      "nine thirty"
+    ],
+    "forbidden_substrings": [
+      " you know "
+    ]
+  },
+  {
+    "name": "neutral_long_paragraph_52w",
+    "tone": "neutral",
+    "input": "okay so for the quarterly review i want to cover three things first the revenue numbers which came in about eight percent above forecast second the hiring plan for the platform team because we still have four open recs and third um the customer feedback themes from the latest survey round",
+    "scripted_output": "For the quarterly review, I want to cover three things. First, the revenue numbers, which came in about eight percent above forecast. Second, the hiring plan for the platform team, because we still have four open recs. Third, the customer feedback themes from the latest survey round.",
+    "expected_substrings": [
+      "quarterly review",
+      "eight percent",
+      "platform team",
+      "survey"
+    ]
+  },
+  {
+    "name": "neutral_homophone_context",
+    "tone": "neutral",
+    "input": "please review the draft and send your feedback by thursday",
+    "scripted_output": "Please review the draft and send your feedback by Thursday.",
+    "expected_substrings": [
+      "draft",
+      "feedback",
+      "Thursday"
+    ]
+  },
+  {
+    "name": "concise_rambling_request",
+    "tone": "concise",
+    "input": "so basically what i wanted to ask is whether you could possibly take a quick look at the onboarding doc sometime this week if you get a chance",
+    "scripted_output": "Could you review the onboarding doc this week?",
+    "expected_substrings": [
+      "onboarding doc",
+      "week"
+    ],
+    "forbidden_substrings": [
+      " basically "
+    ]
+  },
+  {
+    "name": "concise_status_update",
+    "tone": "concise",
+    "input": "um yeah so the migration is like mostly done we just have the two legacy tables left and uh those should be finished by friday i think",
+    "scripted_output": "The migration is mostly done; two legacy tables remain, finishing by Friday.",
+    "expected_substrings": [
+      "migration",
+      "legacy tables",
+      "Friday"
+    ]
+  },
+  {
+    "name": "concise_meeting_recap",
+    "tone": "concise",
+    "input": "okay so just to recap what we decided in the meeting we are going to ship the beta on the fifteenth and then collect feedback for two weeks before the general release",
+    "scripted_output": "Recap: beta ships on the 15th, then two weeks of feedback before general release.",
+    "expected_substrings": [
+      "beta",
+      "feedback",
+      "release"
+    ]
+  },
+  {
+    "name": "concise_very_heavy_filler",
+    "tone": "concise",
+    "input": "um so like i guess what im kind of trying to say is that you know maybe we should just sort of postpone the launch until like next month or something",
+    "scripted_output": "We should postpone the launch until next month.",
+    "expected_substrings": [
+      "postpone",
+      "launch",
+      "next month"
+    ],
+    "forbidden_substrings": [
+      " like ",
+      " sort of "
+    ]
+  },
+  {
+    "name": "formal_client_email",
+    "tone": "formal",
+    "input": "hey just wanted to let you know that well need the signed contract back before we can kick things off",
+    "scripted_output": "Please note that we will need the signed contract returned before we can begin.",
+    "expected_substrings": [
+      "signed contract"
+    ]
+  },
+  {
+    "name": "formal_hipaa_compliance",
+    "tone": "formal",
+    "input": "uh under hipaa the covered entity has to do a risk assessment before sharing phi with a business associate",
+    "scripted_output": "Under HIPAA, the covered entity must conduct a risk assessment before sharing PHI with a business associate.",
+    "expected_substrings": [
+      "HIPAA",
+      "risk assessment",
+      "business associate"
+    ]
+  },
+  {
+    "name": "formal_policy_summary",
+    "tone": "formal",
+    "input": "so the new policy says remote employees need manager approval for equipment purchases over five hundred dollars",
+    "scripted_output": "The new policy states that remote employees require manager approval for equipment purchases exceeding five hundred dollars.",
+    "expected_substrings": [
+      "remote employees",
+      "manager approval",
+      "five hundred"
+    ]
+  },
+  {
+    "name": "friendly_thanks_note",
+    "tone": "friendly",
+    "input": "thanks for jumping on the call earlier really appreciate you walking me through the deployment stuff",
+    "scripted_output": "Thanks so much for jumping on the call earlier \u2014 I really appreciate you walking me through the deployment details!",
+    "expected_substrings": [
+      "call",
+      "deployment"
+    ]
+  },
+  {
+    "name": "friendly_reminder",
+    "tone": "friendly",
+    "input": "hey dont forget to submit your expenses before the end of the month",
+    "scripted_output": "Hey, don't forget to submit your expenses before the end of the month!",
+    "expected_substrings": [
+      "expenses",
+      "month"
+    ]
+  },
+  {
+    "name": "neutral_acronym_dense",
+    "tone": "neutral",
+    "input": "the api returns json over https and the sdk handles oauth token refresh automatically",
+    "scripted_output": "The API returns JSON over HTTPS, and the SDK handles OAuth token refresh automatically.",
+    "expected_substrings": [
+      "API",
+      "JSON",
+      "OAuth"
+    ]
+  },
+  {
+    "name": "neutral_spoken_corrections",
+    "tone": "neutral",
+    "input": "send it to john no wait send it to sarah on the legal team",
+    "scripted_output": "Send it to John \u2014 no wait, send it to Sarah on the legal team.",
+    "expected_substrings": [
+      "Sarah",
+      "legal team"
+    ]
   }
 ]

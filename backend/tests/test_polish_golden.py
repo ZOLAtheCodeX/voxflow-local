@@ -98,7 +98,7 @@ def test_golden_pipeline_runs_without_crashing(case: dict) -> None:
     reason="Live Ollama golden tests are env-gated (set VOXFLOW_OLLAMA_GOLDEN=1 to run)",
 )
 def test_live_ollama_guardrail_trigger_rate() -> None:
-    """Acceptance bar: < 15% of golden cases should trip the guardrail
+    """Acceptance bar (R2): < 10% of golden cases should trip the guardrail
     against a real Ollama server. Run only when explicitly opted in.
     """
     backend = OllamaBackend()
@@ -111,8 +111,8 @@ def test_live_ollama_guardrail_trigger_rate() -> None:
         if triggered:
             triggered_count += 1
     rate = triggered_count / len(GOLDEN_CASES)
-    assert rate < 0.15, (
-        f"Guardrail trigger rate {rate:.1%} exceeds 15% acceptance bar — "
+    assert rate < 0.10, (
+        f"Guardrail trigger rate {rate:.1%} exceeds the 10% acceptance bar — "
         "tune the system prompt or relax the guardrail thresholds."
     )
 
