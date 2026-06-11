@@ -57,15 +57,25 @@ final class WhisperKitSTTService: ChunkTranscribing {
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         let latencyMs = started.elapsedMilliseconds()
 
-        let confidence: Double = {
-            guard let first = results.first, let seg = first.segments.first else { return 0.0 }
-            // avgLogprob is negative; convert to 0-1 range using sigmoid-like mapping
-            let prob = exp(Double(seg.avgLogprob))
-            return min(1.0, max(0.0, prob))
-        }()
+        let audioDurationS = Double(audio.pcm.count) / (audio.sampleRate * 2.0) // 2 bytes per Int16 sample
+
+        // Coverage-based confidence across ALL segments of ALL results — the
+        // old exp(avgLogprob)-of-first-segment estimate scored multi-word
+        // noise hallucinations 0.3-0.6, past every downstream gate.
+        let segmentSignals = results.flatMap(\.segments).map { seg in
+            TranscriptionConfidence.SegmentSignal(
+                startSeconds: Double(seg.start),
+                endSeconds: Double(seg.end),
+                noSpeechProb: Double(seg.noSpeechProb)
+            )
+        }
+        let confidence = TranscriptionConfidence.estimate(
+            segments: segmentSignals,
+            text: text,
+            audioDurationSeconds: audioDurationS
+        )
 
         // Apply hallucination filter
-        let audioDurationS = Double(audio.pcm.count) / (audio.sampleRate * 2.0) // 2 bytes per Int16 sample
         let isShort = audioDurationS < 3.0
         if HallucinationFilter.isLikelyHallucination(text, shortAudio: isShort) {
             #if DEBUG
