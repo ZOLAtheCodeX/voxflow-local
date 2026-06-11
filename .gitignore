@@ -17,3 +17,6 @@ backend/tests/fixtures/golden_clips/*.aiff
 .worktrees/
 .claude/settings.local.json
 .superpowers/
+
+# Claude Code worktrees (session-local, never commit)
+.claude/worktrees/
