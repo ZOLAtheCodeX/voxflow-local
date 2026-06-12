@@ -20,3 +20,9 @@ backend/tests/fixtures/golden_clips/*.aiff
 
 # Claude Code worktrees (session-local, never commit)
 .claude/worktrees/
+
+# Session/dev droppings (R6.2 hygiene, untracked 2026-06-12)
+/progress.md
+/progress.txt
+/*.log
+/.cursorrules
