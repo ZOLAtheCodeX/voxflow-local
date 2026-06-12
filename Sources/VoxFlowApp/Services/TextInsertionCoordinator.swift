@@ -18,9 +18,13 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     private let state: AppState
     private let insertService: AccessibilityInsertService
 
-    init(state: AppState, insertService: AccessibilityInsertService) {
+    /// Ghost-text forensics: every insertion gets a local JSONL receipt.
+    private let audit: InsertionAuditLog
+
+    init(state: AppState, insertService: AccessibilityInsertService, audit: InsertionAuditLog? = nil) {
         self.state = state
         self.insertService = insertService
+        self.audit = audit ?? InsertionAuditLog()
     }
 
     func insertCurrentText() async {
@@ -102,6 +106,12 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             }
             state.statusLine = statusSuffix
             state.lastInsertedText = text
+            audit.recordInsertion(
+                text: text,
+                targetApp: targetApp?.localizedName ?? appName,
+                source: statusSuffix,
+                confidence: state.transcriptCandidate?.confidence
+            )
             return true
         } else {
             state.failedInsertCount += 1

@@ -95,7 +95,8 @@ final class AppCoordinator: ObservableObject {
 
     private(set) var settings: SettingsCoordinating!
     private(set) lazy var onboarding: OnboardingCoordinating = OnboardingCoordinator(state: state)
-    private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService)
+    private(set) lazy var insertionAudit = InsertionAuditLog()
+    private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService, audit: insertionAudit)
     private(set) lazy var benchmark: TranslationBenchmarkCoordinating = TranslationBenchmarkCoordinator(state: state, backendManager: backendManager, settings: settings)
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
     private(set) lazy var translationWorkflow: TranslationWorkflowCoordinating = TranslationWorkflowCoordinator(state: state)
@@ -160,7 +161,8 @@ final class AppCoordinator: ObservableObject {
         capture: AudioCaptureService(),
         transcriber: whisperKitService,
         session: cockpitSessionService,
-        dictionary: cockpitDictionary
+        dictionary: cockpitDictionary,
+        audit: insertionAudit
     )
 
     private var timer: Timer?
@@ -719,6 +721,13 @@ final class AppCoordinator: ObservableObject {
             audioDurationSeconds: audioDurationSec
         ) {
             log.info("TranscriptGate rejected transcript (\(reason), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s) — discarding")
+            insertionAudit.recordRejection(
+                text: rawText,
+                reason: reason,
+                confidence: transcription.confidenceEstimate,
+                durationSeconds: audioDurationSec,
+                source: commandLane ? "command_lane" : "quick_dictation"
+            )
             state.sessionState = .idle
             state.statusLine = "No speech detected — try again"
             state.recordingDuration = 0

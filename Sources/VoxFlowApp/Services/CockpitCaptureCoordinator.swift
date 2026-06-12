@@ -13,6 +13,7 @@ final class CockpitCaptureCoordinator {
     private let transcriber: ChunkTranscribing
     private let session: LongFormSessionService
     private let dictionary: DictionaryStore?
+    private let audit: InsertionAuditLog?
     private let flushIntervalNs: UInt64
     private let minChunkBytes: Int
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCaptureCoordinator")
@@ -24,6 +25,7 @@ final class CockpitCaptureCoordinator {
         transcriber: ChunkTranscribing,
         session: LongFormSessionService,
         dictionary: DictionaryStore? = nil,
+        audit: InsertionAuditLog? = nil,
         flushIntervalNs: UInt64 = 5_000_000_000,
         // 0.3 s at 16 kHz mono PCM16 — aligned with the quick-dictation
         // minimum (TranscriptGate.minAudioSeconds); was 8_000 (0.25 s).
@@ -33,6 +35,7 @@ final class CockpitCaptureCoordinator {
         self.transcriber = transcriber
         self.session = session
         self.dictionary = dictionary
+        self.audit = audit
         self.flushIntervalNs = flushIntervalNs
         self.minChunkBytes = minChunkBytes
     }
@@ -103,7 +106,16 @@ final class CockpitCaptureCoordinator {
                 confidence: response.confidenceEstimate,
                 audioDurationSeconds: durationSeconds
             ) {
-                if reason != "empty" { log.info("TranscriptGate rejected cockpit chunk (\(reason))") }
+                if reason != "empty" {
+                    log.info("TranscriptGate rejected cockpit chunk (\(reason))")
+                    audit?.recordRejection(
+                        text: text,
+                        reason: reason,
+                        confidence: response.confidenceEstimate,
+                        durationSeconds: durationSeconds,
+                        source: "cockpit_chunk"
+                    )
+                }
                 return
             }
             let corrected = dictionary?.apply(to: text) ?? text

@@ -13,7 +13,11 @@ echo "[voxflow] installing bundle..."
 echo "[voxflow] creating desktop launcher..."
 "${ROOT_DIR}/scripts/create_desktop_launcher.sh"
 
-echo "[voxflow] launching..."
+echo "[voxflow] relaunching (quit running instance first — open alone only activates it)..."
+osascript -e 'tell application "VoxFlow" to quit' >/dev/null 2>&1 || true
+for _ in $(seq 1 20); do pgrep -x VoxFlowLocal >/dev/null || break; sleep 0.5; done
+pkill -x VoxFlowLocal >/dev/null 2>&1 || true
+sleep 1
 if ! open "${DEST_APP}"; then
   echo "[voxflow] launchservices open failed."
   echo ""
