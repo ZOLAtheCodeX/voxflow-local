@@ -1466,10 +1466,8 @@ final class AppCoordinator: ObservableObject {
         )
         .frame(width: 430)
 
-        menuBarPanel = MenuBarPanelController(
-            content: panelContent,
-            iconName: iconName(for: state)
-        )
+        menuBarPanel = MenuBarPanelController(content: panelContent)
+        menuBarPanel?.updateIcon(state: Self.menuBarIconState(for: state.sessionState, commandLane: state.isCommandLaneActive))
 
         // Observe sessionState and commandLane for icon updates + auto-open on review
         state.$sessionState
@@ -1477,7 +1475,7 @@ final class AppCoordinator: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] newState, _ in
                 guard let self else { return }
-                self.menuBarPanel?.updateIcon(systemName: self.iconName(for: self.state))
+                self.menuBarPanel?.updateIcon(state: Self.menuBarIconState(for: self.state.sessionState, commandLane: self.state.isCommandLaneActive))
                 // Auto-open panel when entering review state so user sees the review card
                 if newState == .review, !(self.menuBarPanel?.isOpen ?? true) {
                     self.menuBarPanel?.open()
@@ -1486,16 +1484,16 @@ final class AppCoordinator: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func iconName(for state: AppState) -> String {
-        if state.isCommandLaneActive { return "terminal.fill" }
-        switch state.sessionState {
-        case .idle: return "mic.fill"
-        case .recording: return "record.circle.fill"
-        case .transcribing: return "waveform"
-        case .review: return "checkmark.bubble.fill"
-        case .inserting: return "square.and.arrow.down.fill"
-        case .onboarding: return "sparkles"
-        case .error: return "exclamationmark.triangle.fill"
+    static func menuBarIconState(for sessionState: SessionState, commandLane: Bool) -> MenuBarIconState {
+        if commandLane { return .symbol("terminal.fill") }
+        switch sessionState {
+        case .idle: return .idle
+        case .recording: return .recording
+        case .transcribing: return .transcribing
+        case .review: return .symbol("checkmark.bubble.fill")
+        case .inserting: return .symbol("square.and.arrow.down.fill")
+        case .onboarding: return .symbol("sparkles")
+        case .error: return .symbol("exclamationmark.triangle.fill")
         }
     }
 

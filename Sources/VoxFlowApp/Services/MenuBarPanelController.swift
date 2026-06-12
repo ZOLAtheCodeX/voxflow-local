@@ -108,6 +108,40 @@ final class MenuBarPanelController {
         }
     }
 
+    // R4.5: Waveline identity states. Recording pulses between two wave
+    // amplitudes (subtle, 0.45 s cadence) — visible at a glance without
+    // being a flasher.
+    private var pulseTimer: Timer?
+    private var pulsePhase = false
+    private(set) var currentIconState: MenuBarIconState = .idle
+
+    func updateIcon(state: MenuBarIconState) {
+        currentIconState = state
+        pulseTimer?.invalidate()
+        pulseTimer = nil
+        pulsePhase = false
+        applyIconImage(MenuBarGlyph.image(for: state))
+        if state == .recording {
+            pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.pulsePhase.toggle()
+                    self.applyIconImage(MenuBarGlyph.image(for: .recording, pulsePhase: self.pulsePhase))
+                }
+            }
+        }
+    }
+
+    private func applyIconImage(_ image: NSImage?) {
+        guard let button = statusItem.button else { return }
+        if let image {
+            button.image = image
+        } else if let fallback = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "VoxFlow") {
+            fallback.isTemplate = true
+            button.image = fallback
+        }
+    }
+
     private func menuBarImage(named symbolName: String) -> NSImage? {
         guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "VoxFlow")?
             .withSymbolConfiguration(Self.symbolConfig) else { return nil }
