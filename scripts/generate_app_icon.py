@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import argparse
-import math
 import shutil
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 
 ICON_FILES = [
@@ -37,91 +36,110 @@ def blend(c1: tuple[int, int, int], c2: tuple[int, int, int], t: float) -> tuple
     )
 
 
-def build_icon(size: int) -> Image.Image:
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-
-    top = (36, 182, 221)
-    bottom = (11, 53, 120)
-
-    for y in range(size):
-        t = y / max(size - 1, 1)
-        color = blend(top, bottom, t)
-        draw.line((0, y, size, y), fill=color + (255,))
-
-    inset = int(size * 0.08)
-    radius = int(size * 0.24)
-    mask = Image.new("L", (size, size), 0)
-    mask_draw = ImageDraw.Draw(mask)
-    mask_draw.rounded_rectangle(
-        (inset, inset, size - inset, size - inset),
-        radius=radius,
-        fill=255,
-    )
-
-    clipped = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    clipped.paste(image, (0, 0), mask)
-    image = clipped
-    draw = ImageDraw.Draw(image)
-
-    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(glow)
-    glow_draw.ellipse(
-        (
-            int(size * 0.13),
-            int(size * 0.08),
-            int(size * 0.92),
-            int(size * 0.83),
-        ),
-        fill=(255, 255, 255, 45),
-    )
-    glow = glow.filter(ImageFilter.GaussianBlur(radius=size * 0.04))
-    image.alpha_composite(glow)
-
-    draw = ImageDraw.Draw(image)
-    wave_color = (255, 255, 255, 230)
-    stroke = max(2, int(size * 0.04))
-    waveform_top = int(size * 0.36)
-    waveform_height = int(size * 0.24)
-    left = int(size * 0.22)
-    right = int(size * 0.78)
-    points: list[tuple[int, int]] = []
-    steps = 12
+def _quad_bezier(p0, p1, p2, steps=80):
+    """Sample a quadratic bezier as a point list."""
+    pts = []
     for i in range(steps + 1):
-        x = int(lerp(left, right, i / steps))
-        phase = (i / steps) * math.pi * 2.5
-        y = waveform_top + int((math.sin(phase) * 0.36 + 0.5) * waveform_height)
-        points.append((x, y))
-    draw.line(points, fill=wave_color, width=stroke, joint="curve")
+        s = i / steps
+        x = (1 - s) ** 2 * p0[0] + 2 * (1 - s) * s * p1[0] + s ** 2 * p2[0]
+        y = (1 - s) ** 2 * p0[1] + 2 * (1 - s) * s * p1[1] + s ** 2 * p2[1]
+        pts.append((x, y))
+    return pts
 
-    mic_width = int(size * 0.18)
-    mic_height = int(size * 0.23)
-    mic_x = int((size - mic_width) / 2)
-    mic_y = int(size * 0.53)
-    draw.rounded_rectangle(
-        (mic_x, mic_y, mic_x + mic_width, mic_y + mic_height),
-        radius=int(mic_width * 0.45),
-        outline=wave_color,
-        width=stroke,
-    )
-    stem_x = int(size / 2)
-    stem_y0 = mic_y + mic_height
-    stem_y1 = int(size * 0.84)
-    draw.line((stem_x, stem_y0, stem_x, stem_y1), fill=wave_color, width=stroke)
-    draw.arc(
-        (
-            int(size * 0.37),
-            int(size * 0.72),
-            int(size * 0.63),
-            int(size * 0.92),
-        ),
-        start=195,
-        end=-15,
-        fill=wave_color,
-        width=stroke,
-    )
 
-    return image
+# Waveline design (2026-06-12, direction A from docs/design/2026-06-12-icon-directions.html):
+# one continuous monoline stroke — a voice waveform resolving into a written
+# baseline — ending in a teal cursor dot. Flat ink ground, no gloss, no glow.
+INK_TOP = (35, 38, 46)       # #23262e
+INK_BOTTOM = (20, 22, 27)    # #14161b
+PAPER = (244, 242, 236, 255)  # #f4f2ec
+TEAL = (47, 212, 197, 255)    # #2fd4c5
+
+# Path in 0-100 body coordinates (T segments pre-expanded to explicit controls).
+WAVE_SEGMENTS = [
+    ((12, 50), (17, 22), (22, 50)),
+    ((22, 50), (27, 78), (32, 50)),
+    ((32, 50), (37, 30), (42, 50)),
+    ((42, 50), (47, 70), (52, 50)),
+]
+BASELINE_END = (76, 50)
+DOT_CENTER = (85, 50)
+
+
+def build_icon(size: int) -> Image.Image:
+    # Supersample 4x for clean anti-aliased strokes at every ladder size.
+    ss = 4
+    big = size * ss
+    image = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+
+    # macOS icon grid: the squircle body floats inside the canvas with
+    # ~9.8% margins; the corner radius is ~22.5% of the body width.
+    inset = big * 0.098
+    body = big - 2 * inset
+    radius = body * 0.225
+
+    # Flat ink ground with a barely-there vertical gradient (not a glow).
+    bg = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    bg_draw = ImageDraw.Draw(bg)
+    for y in range(int(inset), int(big - inset) + 1):
+        s = (y - inset) / max(body, 1)
+        bg_draw.line((0, y, big, y), fill=blend(INK_TOP, INK_BOTTOM, s) + (255,))
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (inset, inset, big - inset, big - inset), radius=radius, fill=255
+    )
+    image.paste(bg, (0, 0), mask)
+    draw = ImageDraw.Draw(image)
+
+    def bx(v: float) -> float:
+        return inset + v / 100.0 * body
+
+    def by(v: float) -> float:
+        return inset + v / 100.0 * body
+
+    # Small sizes need a heavier stroke and dot to stay legible.
+    if size >= 128:
+        stroke_pct, dot_pct = 6.5, 4.6
+    elif size >= 32:
+        stroke_pct, dot_pct = 8.0, 5.5
+    else:
+        stroke_pct, dot_pct = 11.0, 7.0
+    stroke = max(2, int(body * stroke_pct / 100.0))
+    dot_r = body * dot_pct / 100.0
+
+    points: list[tuple[float, float]] = []
+    for p0, p1, p2 in WAVE_SEGMENTS:
+        seg = _quad_bezier((bx(p0[0]), by(p0[1])), (bx(p1[0]), by(p1[1])), (bx(p2[0]), by(p2[1])))
+        if points:
+            seg = seg[1:]
+        points.extend(seg)
+    points.append((bx(BASELINE_END[0]), by(BASELINE_END[1])))
+
+    # Brush-stamp the stroke: filled circles at tight arc-length intervals.
+    # Pillow's thick polylines produce seam/joint artifacts; stamping gives a
+    # clean monoline with round caps for free.
+    r = stroke / 2.0
+    step = max(1.0, r * 0.3)
+    stamped: list[tuple[float, float]] = [points[0]]
+    carry = 0.0
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        seg_len = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+        if seg_len == 0:
+            continue
+        d = step - carry
+        while d <= seg_len:
+            s = d / seg_len
+            stamped.append((x0 + (x1 - x0) * s, y0 + (y1 - y0) * s))
+            d += step
+        carry = (carry + seg_len) % step
+    stamped.append(points[-1])
+    for (sx, sy) in stamped:
+        draw.ellipse((sx - r, sy - r, sx + r, sy + r), fill=PAPER)
+
+    cx, cy = bx(DOT_CENTER[0]), by(DOT_CENTER[1])
+    draw.ellipse((cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r), fill=TEAL)
+
+    return image.resize((size, size), Image.LANCZOS)
 
 
 def main() -> None:
