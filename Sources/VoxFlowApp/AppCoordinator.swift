@@ -209,6 +209,15 @@ final class AppCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // R5.1: the personal dictionary biases WhisperKit recognition.
+        // Feed terms now and on every dictionary change.
+        whisperKitService.vocabularyTerms = VocabularyBiasing.terms(from: cockpitDictionary.entries)
+        cockpitDictionary.$entries
+            .sink { [weak self] entries in
+                self?.whisperKitService.vocabularyTerms = VocabularyBiasing.terms(from: entries)
+            }
+            .store(in: &cancellables)
+
         // Defer panel setup until after the activation policy has settled.
         // WindowGroup auto-opens a window which triggers activateForWindow() →
         // setActivationPolicy(.regular). Creating the status item during that
@@ -702,7 +711,11 @@ final class AppCoordinator: ObservableObject {
         commandLane: Bool,
         trace: CapturePipelineTraceBuilder
     ) async throws {
-        let rawText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // R5.1: dictionary post-correction now applies on the quick path too
+        // (it was cockpit-only). Biasing improves recognition; this catches
+        // what biasing missed.
+        let rawText = cockpitDictionary.apply(
+            to: transcription.text.trimmingCharacters(in: .whitespacesAndNewlines))
         lastTranscriptionConfidence = transcription.confidenceEstimate
         #if DEBUG
         log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")

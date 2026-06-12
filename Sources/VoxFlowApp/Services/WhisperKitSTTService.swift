@@ -2,11 +2,36 @@
 import Foundation
 import os.log
 
+/// Adapts WhisperKit's tokenizer to the narrow biasing seam.
+private struct WhisperKitTokenizerAdapter: VocabularyTokenizing {
+    let tokenizer: WhisperTokenizer
+    var specialTokenThreshold: Int { tokenizer.specialTokens.specialTokenBegin }
+    func encodeText(_ text: String) -> [Int] { tokenizer.encode(text: text) }
+}
+
 @MainActor
 final class WhisperKitSTTService: ChunkTranscribing {
     private let log = Logger(subsystem: "local.voxflow.app", category: "WhisperKitSTT")
     private var pipe: WhisperKit?
     private(set) var isLoaded = false
+
+    /// R5.1: dictionary terms biasing recognition. Setting invalidates the
+    /// cached prompt encoding.
+    var vocabularyTerms: [String] = [] {
+        didSet { cachedPromptTokens = nil }
+    }
+    private var cachedPromptTokens: [Int]??
+
+    private func vocabularyPromptTokens() -> [Int]? {
+        if let cached = cachedPromptTokens { return cached }
+        guard let tokenizer = pipe?.tokenizer else { return nil }
+        let tokens = VocabularyBiasing.promptTokens(
+            terms: vocabularyTerms,
+            tokenizer: WhisperKitTokenizerAdapter(tokenizer: tokenizer)
+        )
+        cachedPromptTokens = tokens
+        return tokens
+    }
 
     nonisolated static func resolveModelFolder(modelsDir: String, modelName: String) -> String {
         (modelsDir as NSString).appendingPathComponent("whisperkit-coreml__\(modelName)")
@@ -57,6 +82,7 @@ final class WhisperKitSTTService: ChunkTranscribing {
                 language: "en",
                 temperatureFallbackCount: 5,
                 wordTimestamps: true,
+                promptTokens: vocabularyPromptTokens(),
                 compressionRatioThreshold: 2.4,
                 logProbThreshold: -1.0,
                 noSpeechThreshold: 0.6
