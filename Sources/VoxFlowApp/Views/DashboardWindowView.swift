@@ -88,7 +88,7 @@ struct DashboardWindowView: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(VF.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
         }
     }
 
@@ -105,7 +105,7 @@ struct DashboardWindowView: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(VF.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
             } else {
                 VStack(spacing: 8) {
                     headerRow
@@ -131,7 +131,7 @@ struct DashboardWindowView: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(VF.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
             } else {
                 VStack(spacing: 8) {
                     HStack {
@@ -183,7 +183,7 @@ struct DashboardWindowView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(VF.tintedBackground(VF.colorSuccess, opacity: 0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
             } else {
                 Text("No benchmark history yet. Run Translate Benchmark in Settings to generate a recommendation.")
                     .font(VF.secondaryFont)
@@ -191,7 +191,7 @@ struct DashboardWindowView: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(VF.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
             }
 
             if !state.benchmarkHistoryByProfile.isEmpty {

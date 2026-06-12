@@ -49,6 +49,10 @@ enum VF {
     static let colorSuccess: Color = .green
     static let colorWarning: Color = .orange
     static let colorError: Color = .red
+    /// Informational accents (R4.6) — replaces raw .blue scattered in views.
+    static let colorInfo: Color = .blue
+    /// External-service accents (Notion etc.) — replaces raw .orange icons.
+    static let colorExternal: Color = .orange
     static let colorNeutral: Color = .secondary
 
     /// Tinted background derived from a semantic color (used for status

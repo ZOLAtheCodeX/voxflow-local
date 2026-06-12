@@ -34,6 +34,12 @@ struct CockpitChipRowView: View {
     }
 
     private func chip(for action: SmartActionId, shortcut: Int) -> some View {
+        chipBody(for: action, shortcut: shortcut)
+            .accessibilityLabel("\(action.label) smart action")
+            .accessibilityHint("Command \(shortcut)")
+    }
+
+    private func chipBody(for action: SmartActionId, shortcut: Int) -> some View {
         Button {
             onActionTriggered(action)
         } label: {

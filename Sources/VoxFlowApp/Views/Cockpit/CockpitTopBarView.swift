@@ -20,7 +20,12 @@ struct CockpitTopBarView: View {
         case .idle:
             pill("● ready", tint: VF.colorNeutral)
         case .recording(let startedAt):
-            pill("● recording · \(elapsedString(since: startedAt))", tint: VF.colorError)
+            // TimelineView drives the tick — without it the elapsed string
+            // only refreshed when the parent happened to redraw (R4.6).
+            TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                pill("● recording · \(elapsedString(since: startedAt))", tint: VF.colorError)
+            }
+            .accessibilityLabel("Recording in progress")
         case .reviewing:
             pill("● review", tint: .blue)
         }

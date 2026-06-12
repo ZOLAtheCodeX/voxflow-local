@@ -44,7 +44,7 @@ struct CommandPaletteView: View {
             if let error = state.errorMessage {
                 Text(error)
                     .font(VF.labelFont)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(VF.colorError)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -189,7 +189,7 @@ struct CommandPaletteView: View {
             if state.providerMode == .privateAPI && (state.privateAPIBaseURL.isEmpty || state.privateAPIModel.isEmpty || !state.privateAPIKeyConfigured) {
                 Text("Private API mode needs Base URL, Model, and API key in Settings.")
                     .font(VF.captionFont.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(VF.colorExternal)
             }
 
             Picker("Mode", selection: Binding(
@@ -268,7 +268,7 @@ struct CommandPaletteView: View {
                 .background {
                     RoundedRectangle(cornerRadius: VF.cornerMedium)
                         .fill(.regularMaterial)
-                        .overlay(Color.blue.opacity(0.08))
+                        .overlay(VF.colorInfo.opacity(0.08))
                 }
                 .lineLimit(4)
 
@@ -333,7 +333,9 @@ struct CommandPaletteView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .tint(state.toneStyle == tone ? .accentColor : .gray)
+                    .tint(state.toneStyle == tone ? .accentColor : VF.colorNeutral)
+                    .accessibilityLabel("\(tone.displayName) tone")
+                    .accessibilityAddTraits(state.toneStyle == tone ? .isSelected : [])
                 }
             }
 
@@ -354,7 +356,7 @@ struct CommandPaletteView: View {
                     if state.appProfiles[bundleID] != nil {
                         Text("Custom")
                             .font(VF.captionFont.weight(.medium))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(VF.colorInfo)
                     }
                 }
             }
@@ -397,7 +399,7 @@ struct CommandPaletteView: View {
                         Label("Approve Translation", systemImage: "checkmark.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.green)
+                    .tint(VF.colorSuccess)
                 }
             } else {
                 Text("Hold hotkey, speak in English, release to produce German text.")
@@ -439,7 +441,7 @@ struct CommandPaletteView: View {
                     .background {
                         RoundedRectangle(cornerRadius: VF.cornerMedium)
                             .fill(.regularMaterial)
-                            .overlay(Color.blue.opacity(0.08))
+                            .overlay(VF.colorInfo.opacity(0.08))
                     }
                 }
 
@@ -501,7 +503,7 @@ struct CommandPaletteView: View {
                         Label("Approve Meeting Notes", systemImage: "checkmark.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.green)
+                    .tint(VF.colorSuccess)
                 }
             } else {
                 Text("Meeting mode: hold hotkey to capture, then review summary, decisions, actions, and follow-ups.")
@@ -603,6 +605,7 @@ struct CommandPaletteView: View {
                 }
                 .frame(height: 54)
             }
+            .accessibilityLabel("Live recording level")
 
             Text(String(format: "%.1f", state.recordingDuration))
                 .font(VF.monoTimerFont)

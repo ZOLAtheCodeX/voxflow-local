@@ -32,7 +32,7 @@ struct CockpitSidePanelView: View {
             sectionTitle("Target")
             HStack(spacing: VF.spacingSmall) {
                 Image(systemName: "arrow.right.circle.fill")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(VF.colorInfo)
                 if let target = sessionService.currentSession?.targetApp,
                    let name = target.appName {
                     VStack(alignment: .leading, spacing: 2) {
@@ -76,7 +76,7 @@ struct CockpitSidePanelView: View {
                 // Selected state — show current target
                 HStack(spacing: VF.spacingSmall) {
                     Image(systemName: "doc.text.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(VF.colorExternal)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Notion · \(selected.title)")
                             .font(VF.labelFont)
@@ -118,7 +118,7 @@ struct CockpitSidePanelView: View {
                             } label: {
                                 HStack(spacing: VF.spacingSmall) {
                                     Image(systemName: "doc.text")
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(VF.colorExternal)
                                         .font(VF.captionFont)
                                     Text(result.title)
                                         .font(VF.captionFont)
@@ -137,7 +137,7 @@ struct CockpitSidePanelView: View {
                 if let err = coordinator.notionSearchError {
                     Text(err)
                         .font(VF.microFont)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(VF.colorExternal)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if notionQuery.isEmpty {
                     Text("Type to search your Notion pages. Token required — set in Settings.")

@@ -18,8 +18,10 @@ struct ModeChip: View {
                         Capsule().fill(.regularMaterial)
                     }
                 }
-                .foregroundColor(selected ? .white : .primary)
+                .foregroundStyle(selected ? .white : .primary)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(mode.displayName) cleanup mode")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

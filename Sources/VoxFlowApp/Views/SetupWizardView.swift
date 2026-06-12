@@ -60,7 +60,7 @@ struct SetupWizardView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
     private var permissionsCard: some View {
@@ -103,7 +103,7 @@ struct SetupWizardView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
     private var backendCard: some View {
@@ -161,7 +161,7 @@ struct SetupWizardView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
     private var calibrationCard: some View {
@@ -203,7 +203,7 @@ struct SetupWizardView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
     private var validationCard: some View {
@@ -236,7 +236,7 @@ struct SetupWizardView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
     private func statusPill(title: String, ok: Bool) -> some View {

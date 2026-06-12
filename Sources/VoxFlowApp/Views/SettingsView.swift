@@ -245,7 +245,7 @@ struct SettingsView: View {
                 if let error = ollamaLoadError {
                     Text(error)
                         .font(VF.captionFont)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(VF.colorExternal)
                 }
             }
             .task { await refreshOllamaStatus() }
@@ -255,7 +255,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top) {
                             Image(systemName: "info.circle.fill")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(VF.colorInfo)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Ollama not detected")
                                     .font(VF.labelFont)
@@ -422,7 +422,7 @@ struct SettingsView: View {
                                 if result.placeholderDetected {
                                     Text("Model Missing")
                                         .font(VF.captionEmphasizedFont)
-                                        .foregroundStyle(.orange)
+                                        .foregroundStyle(VF.colorExternal)
                                 } else {
                                     Text("med \(result.medianLatencyMs)ms · p95 \(result.p95LatencyMs)ms")
                                         .font(VF.captionEmphasizedFont)
@@ -942,7 +942,7 @@ struct SettingsView: View {
                     .foregroundStyle(status.available ? .green : .secondary)
             } else if ollamaLoadError != nil {
                 Text("Error")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(VF.colorExternal)
             } else {
                 Text("Checking…")
                     .foregroundStyle(.secondary)

@@ -37,7 +37,7 @@ struct VoicePromptStripView: View {
                 RoundedRectangle(cornerRadius: VF.cornerSmall)
                     .strokeBorder(.blue.opacity(0.3), lineWidth: 1)
             )
-            .foregroundStyle(.blue)
+            .foregroundStyle(VF.colorInfo)
         }
     }
 }
