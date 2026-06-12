@@ -87,6 +87,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | `VOXFLOW_POLISH_BACKEND` | Polish selector (only `ollama` recognised post-3.5) | `ollama` |
 | `VOXFLOW_SIGN_IDENTITY` | Code-signing identity override | auto-detected Apple Development cert |
 | `VOXFLOW_OFFLINE` | Disable HF downloads | `1` |
+| `VOXFLOW_ADOPT_FOREIGN_BACKEND` | `1` = app pairs with a manually run backend instead of reaping stamp-less listeners on 8765 (dev only) | unset |
 
 ## Key Patterns
 
@@ -126,8 +127,8 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 ## Testing
 
 ```bash
-swift test                                              # ~294 Swift tests
-./.venv/bin/python -m pytest backend/tests              # ~354 Python tests (+9 live-Ollama skipped)
+swift test                                              # ~449 Swift tests
+./.venv/bin/python -m pytest backend/tests              # ~451 Python tests (+26 model/live-Ollama skipped)
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
 VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py  # live Ollama acceptance
@@ -149,7 +150,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 
 ## Git
 - Primary branch: `master`. Phase branches: `feature/phase-{N}-*`.
-- Imperative commits with detailed body; `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` trailer.
+- Imperative commits with detailed body; Claude-assisted commits carry the standard `Co-Authored-By: Claude ... <noreply@anthropic.com>` trailer for whichever model did the work.
 - `models/`, `.env`, credential files never committed.
 
 ## Do Not
@@ -171,6 +172,8 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Skip `_RATE_LIMIT_LOCK` when touching `_rate_limit_timestamps` — short critical sections only.
 - Push smart actions onto the cockpit undo stack when they fail the guardrail or return the transcript unchanged — `SmartActionService` filters those before recording history.
 - Mutate `LongFormSession.transcript` from outside `LongFormSessionService` — `currentSession` is `@Published private(set)`. Use `setTranscript(_:)` so the auto-save Task sees the change.
+- Construct real system-touching services in tests — use the seams: `TextInserting` for insertion, `BackendProcessRunning` + `BackendProcessRunnerFake` for process/port/PID-file. Two shipped incidents came from exactly this (ghost "hello" AX insertions; test-spawned uvicorn squatters on port 8765).
+- Attach window-open notification listeners to a view — `.voxflowOpenCockpit`/`Dashboard`/`Setup` route through `AppCoordinator.installWindowOpenHandler` (app-lifetime); a view-bound `.onReceive` dies with its window and silently kills the ⌥⌘V hotkey.
 - Edit `providers.json` schema on one side only — `ProviderConfigStore.swift` (writer) and `provider_registry.py` (reader) must stay in sync; the Swift `testFileSchemaMatchesBackendContract` pins the snake_case schema.
 - Add a new `SmartActionId` to `AppModels.swift` without adding the matching system-prompt entry in `backend/app/smart_actions.py` — the engine will fall back to a generic prompt template and the action label/tooltip will look fine while the LLM output stays generic.
 - Have the cockpit voice router fire actions while the session is `.recording` — voice keywords only resolve in `.reviewing`. Multi-word utterances must remain `.none` for Layer 0.
