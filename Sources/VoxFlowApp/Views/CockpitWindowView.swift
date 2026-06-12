@@ -35,13 +35,21 @@ struct CockpitWindowView: View {
         }
         .frame(minWidth: 720, minHeight: 480)
         .background(.regularMaterial)
-        .sheet(isPresented: $showPalette) {
-            ActionPaletteView(
-                onActionTriggered: { action in triggerAction(action) },
-                chains: chainStore.chains,
-                onChainTriggered: onChainTriggered
-            )
+        .overlay(alignment: .top) {
+            // R4.4: spotlight-style overlay, not a sheet — sheets slide from
+            // the window chrome and read as modal dialogs.
+            if showPalette {
+                ActionPaletteView(
+                    onActionTriggered: { action in triggerAction(action) },
+                    chains: chainStore.chains,
+                    onChainTriggered: onChainTriggered,
+                    onDismiss: { showPalette = false }
+                )
+                .padding(.top, 64)
+                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+            }
         }
+        .animation(VF.animationStandard, value: showPalette)
         .background(
             KeyEventBridge { event in
                 handleKey(event)
