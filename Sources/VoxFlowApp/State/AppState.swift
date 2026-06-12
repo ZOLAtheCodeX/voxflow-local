@@ -168,7 +168,9 @@ final class AppState: ObservableObject {
     }
 
     var backendShouldRun: Bool {
-        isBenchmarkRunning || workflowNeedsBackend
+        // An open cockpit needs the backend for smart actions even when the
+        // active workflow runs fully in-app (WhisperKit dictation/prompt).
+        isBenchmarkRunning || workflowNeedsBackend || cockpitVisible
     }
 
     var backendStatusColorName: String {

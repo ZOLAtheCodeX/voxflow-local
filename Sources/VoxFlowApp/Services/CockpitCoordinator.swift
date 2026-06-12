@@ -28,6 +28,10 @@ final class CockpitCoordinator: ObservableObject {
     /// R5.4: side-panel handoff button routes here; AppCoordinator stages
     /// the preview gate.
     var onHandoffRequested: (() -> Void)?
+    /// Fired by ``open()``. AppCoordinator wires this to backend warmup: an
+    /// open cockpit makes `backendShouldRun` true, and smart actions need a
+    /// live backend that nothing else in dictation mode would have spawned.
+    var onCockpitOpened: (() -> Void)?
 
     func requestAssistantHandoff() { onHandoffRequested?() }
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCoordinator")
@@ -68,6 +72,7 @@ final class CockpitCoordinator: ObservableObject {
     func open() {
         state.cockpitVisible = true
         log.info("cockpit opened")
+        onCockpitOpened?()
     }
 
     func close() {

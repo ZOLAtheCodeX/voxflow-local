@@ -202,6 +202,31 @@ final class SettingsCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testOpenCockpitRequiresBackendEvenInDictationMode() {
+        let (_, state, _) = makeSUT()
+        state.workflowMode = .dictation
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+
+        state.cockpitVisible = true
+
+        XCTAssertFalse(state.workflowNeedsBackend)
+        XCTAssertTrue(state.backendShouldRun)
+    }
+
+    @MainActor
+    func testClosedCockpitDoesNotRequireBackend() {
+        let (_, state, _) = makeSUT()
+        state.workflowMode = .dictation
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+
+        state.cockpitVisible = false
+
+        XCTAssertFalse(state.backendShouldRun)
+    }
+
+    @MainActor
     func testRestartBackendWithLocalWhisperKitLeavesBackendIdle() {
         let (sut, state, _) = makeSUT()
         state.workflowMode = .dictation

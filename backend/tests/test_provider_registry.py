@@ -188,3 +188,57 @@ class TestChainIntegrationWithConfigFile:
         assert out.fallback_depth == 2
         assert out.text
 
+
+class TestOllamaModelAutoResolution:
+    """A providers.json ollama entry without an explicit model must resolve
+    through the RAM-tier logic (env > tier-recommendation-if-pulled > any
+    pulled gemma4), not the hardcoded e4b literal — on a 16 GB machine the
+    registry otherwise silently selects the thrash-inducing 9 GB model."""
+
+    def _patch_probes(self, monkeypatch, installed, memory_gb):
+        from engines import llm_backend
+
+        monkeypatch.setattr(
+            llm_backend, "list_ollama_models",
+            lambda timeout=1.5: [{"name": name} for name in installed],
+        )
+        monkeypatch.setattr(
+            llm_backend, "detect_host_memory_bytes",
+            lambda: memory_gb * 1024**3,
+        )
+        monkeypatch.delenv("VOXFLOW_OLLAMA_MODEL", raising=False)
+
+    def _registry(self, spec):
+        return ProviderRegistry(
+            ProviderConfig(providers=[spec], chains={"polish": [spec.id]})
+        )
+
+    def test_no_model_uses_ram_tier_resolution(self, monkeypatch):
+        self._patch_probes(
+            monkeypatch,
+            installed=["gemma4:e2b-mlx", "gemma4:e4b-mlx"],
+            memory_gb=16,
+        )
+        registry = self._registry(ProviderSpec(id="ollama", kind="ollama"))
+        assert registry.backend("ollama").model == "gemma4:e2b-mlx"
+
+    def test_explicit_model_wins_over_resolution(self, monkeypatch):
+        self._patch_probes(
+            monkeypatch,
+            installed=["gemma4:e2b-mlx", "gemma4:e4b-mlx"],
+            memory_gb=16,
+        )
+        registry = self._registry(
+            ProviderSpec(id="ollama", kind="ollama", model="gemma4:e4b-mlx")
+        )
+        assert registry.backend("ollama").model == "gemma4:e4b-mlx"
+
+    def test_env_override_wins_when_no_explicit_model(self, monkeypatch):
+        self._patch_probes(
+            monkeypatch,
+            installed=["gemma4:e2b-mlx"],
+            memory_gb=16,
+        )
+        monkeypatch.setenv("VOXFLOW_OLLAMA_MODEL", "gemma4:custom")
+        registry = self._registry(ProviderSpec(id="ollama", kind="ollama"))
+        assert registry.backend("ollama").model == "gemma4:custom"

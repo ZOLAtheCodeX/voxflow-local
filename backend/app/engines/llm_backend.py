@@ -410,17 +410,28 @@ def select_backend() -> TextLLMBackend:
             "post-3.5 — using ollama.",
             choice,
         )
+    model = auto_resolve_ollama_model()
+    logger.info("Polish backend: ollama, model=%s", model)
+    return OllamaBackend(model=model)
+
+
+def auto_resolve_ollama_model() -> str:
+    """Probe installed models + host RAM and apply the default-model policy
+    (env > tier-recommendation-if-pulled > any pulled gemma4 > tier
+    recommendation). Single chokepoint for every construction site that has
+    no explicit model — ``select_backend`` and the BYOM provider registry
+    must pick identically, otherwise a providers.json entry silently selects
+    the thrash-inducing 9 GB e4b on 16 GB machines (2026-06-12 finding).
+    """
     try:
         installed = [m.get("name", "") for m in list_ollama_models(timeout=1.5)]
     except Exception:
         installed = []
-    model = resolve_default_ollama_model(
+    return resolve_default_ollama_model(
         env_override=os.environ.get("VOXFLOW_OLLAMA_MODEL"),
         installed_models=installed,
         host_memory_bytes=detect_host_memory_bytes(),
     )
-    logger.info("Polish backend: ollama, model=%s", model)
-    return OllamaBackend(model=model)
 
 
 def resolve_default_ollama_model(

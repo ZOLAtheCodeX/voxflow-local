@@ -220,6 +220,11 @@ final class AppCoordinator: ObservableObject {
 
         cockpit.onHandoffRequested = { [weak self] in self?.requestAssistantHandoff() }
 
+        // Stale-backend hardening (2026-06-12): an open cockpit makes
+        // backendShouldRun true (smart actions need the backend); spawn +
+        // warmup-poll it through the existing machinery.
+        cockpit.onCockpitOpened = { [weak self] in self?.scheduleRuntimeWarmupIfNeeded() }
+
         // R5.6: cockpit review can trigger protocols (gated inside the
         // coordinator on state.protocolCommandsEnabled + strict grammar).
         cockpit.chainProvider = { [weak self] name in self?.cockpitChains.chain(named: name) }
@@ -358,16 +363,56 @@ final class AppCoordinator: ObservableObject {
         beginWarmupMonitoring()
     }
 
+    /// Dev escape hatch for the stale-listener checks: pair the app with a
+    /// manually launched backend (`run_backend.sh`) instead of killing it.
+    private static let adoptForeignBackendOverride =
+        ProcessInfo.processInfo.environment["VOXFLOW_ADOPT_FOREIGN_BACKEND"] == "1"
+
+    /// Launch-time identity probe (stale-backend hardening, 2026-06-12).
+    /// The idle early-return below is the ONLY readiness path in WhisperKit
+    /// dictation mode, so a squatter on our port must be caught here — the
+    /// R4.7 in-poll check never executes while `backendShouldRun` is false,
+    /// yet smart actions still POST to whatever listens on 8765.
+    /// Returns true when a stale listener was terminated.
+    private func reapStaleIdleListenerIfNeeded() async -> Bool {
+        var listenerResponded = false
+        var reportedStamp: String?
+        do {
+            let readiness = try await BackendAPIClient.readyProbe()
+            listenerResponded = true
+            reportedStamp = readiness.instanceStamp
+        } catch {
+            // Connection refused / timeout / non-JSON responder: nothing we
+            // recognise is listening. A wedged or draining stray from a
+            // crashed run can still hold the port though — reap it via the
+            // PID file (self-guarding: no-op unless the file records a live
+            // child we previously spawned; atexit misses SIGKILL/crash).
+            BackendProcessManager.killStaleBackend()
+        }
+        guard BackendProcessManager.shouldTerminateIdleListener(
+            listenerResponded: listenerResponded,
+            reportedStamp: reportedStamp,
+            expectedStamp: backendManager.instanceStamp,
+            adoptForeignOverride: Self.adoptForeignBackendOverride
+        ) else { return false }
+        log.warning("Stale backend on port 8765 (missing/foreign stamp, idle mode) — terminating")
+        backendManager.terminateForeignListenerAsync()
+        return true
+    }
+
     private func refreshBackendReadiness() async {
         let startupIssue = backendManager.lastStartupFailureReason
         let backendRunning = backendManager.isRunning
         state.backendReadiness.processRunning = backendRunning
 
         if !backendRunning && !state.backendShouldRun && !state.backendReadiness.warmupInProgress {
+            let reaped = await reapStaleIdleListenerIfNeeded()
             state.backendReadiness.readyForDictation = false
             state.backendReadiness.readinessIssue = nil
             state.backendReadiness.activeSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
-            state.backendReadiness.statusSummary = "Backend idle — current workflow runs in app"
+            state.backendReadiness.statusSummary = reaped
+                ? "Stale backend on port 8765 removed — backend idle"
+                : "Backend idle — current workflow runs in app"
             return
         }
 
@@ -375,7 +420,8 @@ final class AppCoordinator: ObservableObject {
             let readiness = try await BackendAPIClient.ready()
             // R4.7: a healthy port answered by a backend we didn't launch is
             // stale/foreign — replace it instead of silently trusting it.
-            if BackendProcessManager.isForeignBackend(
+            if !Self.adoptForeignBackendOverride,
+               BackendProcessManager.isForeignBackend(
                 reportedStamp: readiness.instanceStamp,
                 expectedStamp: backendManager.instanceStamp,
                 managerOwnsProcess: backendManager.isRunning

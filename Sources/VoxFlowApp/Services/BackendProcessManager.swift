@@ -23,6 +23,67 @@ struct BackendLaunchConfiguration: Equatable, Sendable {
     var providerKeys: [String: String] = [:]
 }
 
+/// Seam between the manager's lifecycle logic and the real system: child
+/// process launch, port-listener queries, signal delivery, and the PID file
+/// used to recognise our own strays. Production injects
+/// ``SystemBackendProcessRunner``; tests MUST inject a recorder fake — a
+/// unit test that constructs the real runner spawns a genuine uvicorn on
+/// port 8765 that outlives the test runner (the 2026-06-12 squatter
+/// incident was planted by exactly that, the same failure class as the
+/// ghost-hello AX test).
+protocol BackendProcessRunning: Sendable {
+    func run(_ process: Process) throws
+    func listeningPIDs(onPort port: Int) -> [pid_t]
+    func terminate(_ pids: [pid_t], signal: Int32)
+    func writePIDFile(_ pid: pid_t)
+    func readPIDFile() -> pid_t?
+    func removePIDFile()
+}
+
+struct SystemBackendProcessRunner: BackendProcessRunning {
+    func run(_ process: Process) throws {
+        try process.run()
+    }
+
+    func listeningPIDs(onPort port: Int) -> [pid_t] {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        task.arguments = ["-ti", "tcp:\(port)", "-sTCP:LISTEN"]
+
+        let stdout = Pipe()
+        task.standardOutput = stdout
+        task.standardError = Pipe()
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            Logger(subsystem: "local.voxflow.app", category: "BackendProcessRunner")
+                .error("Failed to query port listeners on \(port): \(error.localizedDescription)")
+            return []
+        }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard let raw = String(data: data, encoding: .utf8), !raw.isEmpty else {
+            return []
+        }
+
+        return raw
+            .split(separator: "\n")
+            .compactMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    func terminate(_ pids: [pid_t], signal: Int32) {
+        for pid in pids {
+            _ = kill(pid, signal)
+        }
+    }
+
+    func writePIDFile(_ pid: pid_t) { BackendProcessManager.writePIDFile(pid) }
+    func readPIDFile() -> pid_t? { BackendProcessManager.readPIDFile() }
+    func removePIDFile() { BackendProcessManager.removePIDFile() }
+}
+
 final class BackendProcessManager: @unchecked Sendable {
     private static let defaultBackendPort = 8765
 
@@ -41,24 +102,33 @@ final class BackendProcessManager: @unchecked Sendable {
         return (reportedStamp ?? "") != expectedStamp
     }
 
+    /// Launch-time identity probe verdict for the idle path, where the
+    /// manager never owns the listener: anything answering on our port
+    /// without this instance's stamp is presumed stale (a pre-stamp squatter
+    /// or an orphan from a prior run). `adoptForeignOverride` is the dev
+    /// escape hatch (`VOXFLOW_ADOPT_FOREIGN_BACKEND=1`) for intentionally
+    /// pairing the app with a manually launched backend.
+    static func shouldTerminateIdleListener(
+        listenerResponded: Bool,
+        reportedStamp: String?,
+        expectedStamp: String,
+        adoptForeignOverride: Bool
+    ) -> Bool {
+        guard listenerResponded, !adoptForeignOverride else { return false }
+        return isForeignBackend(
+            reportedStamp: reportedStamp,
+            expectedStamp: expectedStamp,
+            managerOwnsProcess: false
+        )
+    }
+
     /// Terminate whatever is listening on the backend port (SIGTERM). Only
     /// called after a foreign verdict; never signals our own process.
     func terminateForeignListenerAsync(port: Int = BackendProcessManager.defaultBackendPort) {
-        workQueue.async {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-            task.arguments = ["-nP", "-t", "-iTCP:\(port)", "-sTCP:LISTEN"]
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            do { try task.run() } catch { return }
-            task.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        workQueue.async { [runner] in
             let ownPid = ProcessInfo.processInfo.processIdentifier
-            for line in (String(data: data, encoding: .utf8) ?? "").split(separator: "\n") {
-                if let pid = Int32(line.trimmingCharacters(in: .whitespaces)), pid != ownPid {
-                    kill(pid, SIGTERM)
-                }
-            }
+            let pids = runner.listeningPIDs(onPort: port).filter { $0 != ownPid }
+            runner.terminate(pids, signal: SIGTERM)
         }
     }
     private let workQueue = DispatchQueue(label: "local.voxflow.app.backend-process-manager")
@@ -85,7 +155,10 @@ final class BackendProcessManager: @unchecked Sendable {
         syncOnWorkQueue { _lastStartupFailureReason }
     }
 
-    init() {
+    private let runner: BackendProcessRunning
+
+    init(runner: BackendProcessRunning = SystemBackendProcessRunner()) {
+        self.runner = runner
         workQueue.setSpecific(key: workQueueSpecificKey, value: workQueueSpecificValue)
     }
 
@@ -201,13 +274,13 @@ final class BackendProcessManager: @unchecked Sendable {
         stderrPipe = stderr
 
         do {
-            try task.run()
+            try runner.run(task)
             process = task
             activeConfiguration = configuration
             lastSpawnedPID = task.processIdentifier
             _lastStartupFailureReason = nil
             log.info("Backend started (pid: \(task.processIdentifier))")
-            Self.writePIDFile(task.processIdentifier)
+            runner.writePIDFile(task.processIdentifier)
 
             // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts.
             // Skip restart if the shutdown was intentional (stop/restart called).
@@ -289,7 +362,7 @@ final class BackendProcessManager: @unchecked Sendable {
             self.activeConfiguration = nil
             self._lastStartupFailureReason = nil
             self.clearPipeHandlers()
-            Self.removePIDFile()
+            runner.removePIDFile()
             log.info("Backend process cleanup completed")
         }
 
@@ -486,13 +559,13 @@ final class BackendProcessManager: @unchecked Sendable {
     }
 
     private func ensureBackendPortAvailable(_ port: Int) -> Bool {
-        var pids = listeningPIDs(onPort: port)
+        var pids = runner.listeningPIDs(onPort: port)
         pids.removeAll { $0 == getpid() }
         guard !pids.isEmpty else { return true }
 
         // Only kill PIDs that we previously spawned (in-memory or from PID file).
         // If an unknown process holds the port, log a warning and fail rather than force-killing.
-        let stalePID = Self.readPIDFile()
+        let stalePID = runner.readPIDFile()
         if let ownPID = lastSpawnedPID ?? stalePID {
             let ownPIDs = pids.filter { $0 == ownPID }
             let foreignPIDs = pids.filter { $0 != ownPID }
@@ -503,13 +576,13 @@ final class BackendProcessManager: @unchecked Sendable {
 
             if !ownPIDs.isEmpty {
                 log.warning("Port \(port) held by previous backend (pid \(ownPID)); terminating")
-                terminatePIDs(ownPIDs, signal: SIGTERM)
+                runner.terminate(ownPIDs, signal: SIGTERM)
                 usleep(400_000)
 
                 // Check again — force-kill only our own PID if still alive
-                let remaining = listeningPIDs(onPort: port).filter { $0 == ownPID }
+                let remaining = runner.listeningPIDs(onPort: port).filter { $0 == ownPID }
                 if !remaining.isEmpty {
-                    terminatePIDs(remaining, signal: SIGKILL)
+                    runner.terminate(remaining, signal: SIGKILL)
                     usleep(250_000)
                 }
             }
@@ -517,15 +590,9 @@ final class BackendProcessManager: @unchecked Sendable {
             log.warning("Port \(port) in use by \(pids) but no previously spawned PID to match")
         }
 
-        pids = listeningPIDs(onPort: port)
+        pids = runner.listeningPIDs(onPort: port)
         pids.removeAll { $0 == getpid() }
         return pids.isEmpty
-    }
-
-    private func terminatePIDs(_ pids: [pid_t], signal: Int32) {
-        for pid in pids {
-            _ = kill(pid, signal)
-        }
     }
 
     // MARK: - PID file persistence
@@ -563,33 +630,6 @@ final class BackendProcessManager: @unchecked Sendable {
         log.info("Killing stale backend (pid \(pid)) from PID file")
         kill(pid, SIGTERM)
         removePIDFile()
-    }
-
-    private func listeningPIDs(onPort port: Int) -> [pid_t] {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-ti", "tcp:\(port)", "-sTCP:LISTEN"]
-
-        let stdout = Pipe()
-        task.standardOutput = stdout
-        task.standardError = Pipe()
-
-        do {
-            try task.run()
-            task.waitUntilExit()
-        } catch {
-            log.error("Failed to query port listeners on \(port): \(error.localizedDescription)")
-            return []
-        }
-
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        guard let raw = String(data: data, encoding: .utf8), !raw.isEmpty else {
-            return []
-        }
-
-        return raw
-            .split(separator: "\n")
-            .compactMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
 }

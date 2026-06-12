@@ -28,6 +28,23 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertFalse(state.cockpitVisible)
     }
 
+    func test_open_fires_onCockpitOpened() {
+        let (_, coord, _, _) = makeCoordinator()
+        var fired = 0
+        coord.onCockpitOpened = { fired += 1 }
+        coord.open()
+        XCTAssertEqual(fired, 1)
+    }
+
+    func test_close_does_not_fire_onCockpitOpened() {
+        let (_, coord, _, _) = makeCoordinator()
+        coord.open()
+        var fired = 0
+        coord.onCockpitOpened = { fired += 1 }
+        coord.close()
+        XCTAssertEqual(fired, 0)
+    }
+
     // MARK: - applyAction
 
     func test_applyAction_increments_invocation_count() async throws {

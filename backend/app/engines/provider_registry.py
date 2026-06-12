@@ -202,12 +202,15 @@ class ProviderRegistry:
             OllamaBackend,
             OpenAIBackend,
             OpenAICompatBackend,
+            auto_resolve_ollama_model,
         )
 
         if spec.kind == "ollama":
+            # No explicit model in providers.json: resolve through the same
+            # RAM-tier policy as select_backend, never the e4b literal.
             return OllamaBackend(
                 base_url=spec.base_url,
-                model=spec.model,
+                model=spec.model or auto_resolve_ollama_model(),
                 timeout=spec.timeout,
             )
         if spec.kind == "openai_compat":

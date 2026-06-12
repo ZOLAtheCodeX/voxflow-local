@@ -266,9 +266,15 @@ enum BackendAPIClient {
         return try decoder.decode(Response.self, from: data)
     }
 
-    private static func performGetRequest<Response: Decodable>(path: String) async throws -> Response {
+    private static func performGetRequest<Response: Decodable>(
+        path: String,
+        timeoutInterval: TimeInterval? = nil
+    ) async throws -> Response {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = "GET"
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
 
         let (data, response) = try await session.data(for: request)
         try checkHTTPStatus(response, data: data)
@@ -281,6 +287,13 @@ enum BackendAPIClient {
 
     static func ready() async throws -> BackendReadinessResponse {
         return try await performGetRequest(path: "v1/ready")
+    }
+
+    /// Identity probe for the launch-time stale-listener check. The shared
+    /// session allows 120 s (model warmup); this must fail fast instead when
+    /// a wedged process squats on the port.
+    static func readyProbe(timeoutInterval: TimeInterval = 3) async throws -> BackendReadinessResponse {
+        return try await performGetRequest(path: "v1/ready", timeoutInterval: timeoutInterval)
     }
 
     static func ollamaModels() async throws -> OllamaModelsResponse {
