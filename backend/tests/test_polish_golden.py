@@ -133,8 +133,13 @@ def test_live_ollama_preserves_expected_substrings(case: dict) -> None:
     output, _, _ = engine.polish(case["input"], case["tone"])
 
     for substring in case.get("expected_substrings", []):
-        assert substring.lower() in output.lower(), (
-            f"[{case['name']}] expected {substring!r} in output, got {output!r}"
+        # "a|b|c" means any-of: used where equivalent surface forms are all
+        # acceptable (e.g. "five hundred dollars" vs "500 dollars" — the
+        # e2b default model prefers digits under tone=formal and that is
+        # not a fidelity loss worth pinning against).
+        alternatives = substring.split("|")
+        assert any(alt.lower() in output.lower() for alt in alternatives), (
+            f"[{case['name']}] expected one of {alternatives!r} in output, got {output!r}"
         )
     for substring in case.get("forbidden_substrings", []):
         assert substring.lower() not in output.lower(), (

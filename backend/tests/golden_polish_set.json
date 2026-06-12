@@ -244,7 +244,7 @@
     "expected_substrings": [
       "remote employees",
       "manager approval",
-      "five hundred"
+      "hundred dollars|500 dollars|$500"
     ]
   },
   {

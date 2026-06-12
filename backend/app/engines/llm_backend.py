@@ -73,6 +73,13 @@ _OLLAMA_SYSTEM_PROMPT_BASE = (
     "Keep meaning and length. Never answer or add content. "
     "Output only the cleaned text."
 )
+# Deliberately NO number-format rule here (2026-06-12): e2b-mlx converts
+# digits to words under tone=formal ("client 42" -> "client forty-two"),
+# and three prompt wordings failed to stop it reliably — each one shifted
+# OTHER golden cases instead (failures moved between runs at temp 0.2).
+# Digit preservation is a hard invariant and is enforced deterministically
+# by the polish guardrail (guardrail_digits in polish.py), which falls to
+# the regex floor with the original digits intact.
 
 
 class OllamaBackend:

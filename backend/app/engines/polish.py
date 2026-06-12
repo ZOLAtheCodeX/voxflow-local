@@ -225,6 +225,19 @@ class PolishEngine:
         if not candidate.strip():
             return "guardrail_empty"
 
+        # Digit preservation (2026-06-12): every maximal digit run in the
+        # input must survive as a substring of the candidate. The e2b
+        # default model converts digits to words under tone=formal
+        # ("client 42" -> "client forty-two") and prompt wording does not
+        # reliably stop it — hard invariants belong here, not in the
+        # prompt. Substring match keeps this lenient: "10 30" -> "10:30"
+        # passes; words->digits ("five hundred" -> "500") adds digits and
+        # loses nothing, so it never trips. Checked before the short-input
+        # early exit below — digit loss in a 3-word utterance still counts.
+        for digit_run in re.findall(r"\d+", original):
+            if digit_run not in candidate:
+                return "guardrail_digits"
+
         concise = tone.lower() == "concise"
         original_words = PolishEngine._tokens(original)
         candidate_words = PolishEngine._tokens(candidate)

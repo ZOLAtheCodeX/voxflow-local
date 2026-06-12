@@ -123,6 +123,52 @@ class _StubBackend:
         return self._response
 
 
+class TestGuardrailDigitPreservation:
+    """Digit runs in the input must survive polish VERBATIM. The e2b
+    default model converts digits to words under tone=formal ("client 42"
+    -> "client forty-two") and no prompt wording reliably stops it
+    (2026-06-12: three attempts, failures moved between golden runs).
+    Hard invariants live in the guardrail, not the prompt: digit loss
+    falls to the regex floor, which preserves the original text.
+    """
+
+    def test_digit_loss_trips_guardrail(self):
+        original = "please send 3 follow ups to client 42 before 10 30 am tomorrow"
+        candidate = "Please send three follow-ups to client forty-two before ten thirty ante meridiem tomorrow."
+        assert PolishEngine._guardrail_triggered(original, candidate, "formal") == "guardrail_digits"
+
+    def test_digits_reformatted_as_time_do_not_trip(self):
+        # "10 30" -> "10:30" keeps both runs as substrings; punctuation
+        # between digits is a legitimate polish, not a loss.
+        assert PolishEngine._guardrail_triggered(
+            "meet at 10 30 am", "Meet at 10:30 AM.", "neutral"
+        ) is None
+
+    def test_short_input_digit_loss_still_trips(self):
+        # The <=5-word early exit must not bypass digit preservation.
+        assert PolishEngine._guardrail_triggered(
+            "call client 42", "Call client forty-two.", "neutral"
+        ) == "guardrail_digits"
+
+    def test_words_to_digits_does_not_trip(self):
+        # The model adding digits where the input had words loses nothing.
+        assert PolishEngine._guardrail_triggered(
+            "the budget is five hundred dollars and that is final",
+            "The budget is 500 dollars, and that is final.",
+            "formal",
+        ) is None
+
+    def test_polish_falls_to_regex_floor_with_digits_intact(self):
+        engine = PolishEngine(
+            backend=_StubBackend("Please send three follow-ups to client forty-two.")
+        )
+        output, guardrail, _reason = engine.polish(
+            "please send 3 follow ups to client 42", "formal"
+        )
+        assert guardrail is True
+        assert "3" in output and "42" in output
+
+
 class TestPolishEngineSmartActionBypass:
     """Smart-action calls (system_prompt supplied) bypass the polish
     guardrail + echo checks. Structural transformations (memo, MECE,
