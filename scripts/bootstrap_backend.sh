@@ -27,10 +27,10 @@ source "${VENV_DIR}/bin/activate"
 echo "[bootstrap] upgrading pip..."
 python -m pip install --upgrade pip
 
-echo "[bootstrap] installing backend dependencies..."
-if ! python -m pip install -r "${ROOT_DIR}/backend/requirements.txt"; then
+echo "[bootstrap] installing backend dependencies (runtime + test)..."
+if ! python -m pip install -r "${ROOT_DIR}/backend/requirements-dev.txt"; then
   echo "[bootstrap] error: failed to install requirements"
-  echo "[bootstrap] check ${ROOT_DIR}/backend/requirements.txt and network connectivity"
+  echo "[bootstrap] check ${ROOT_DIR}/backend/requirements-dev.txt and network connectivity"
   exit 1
 fi
 

@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements-dev.txt
 
       # Dedicated venv: on the macOS arm64 image the toolcache python is a
       # shim into /Library/Frameworks, so pip and pytest diverged across
@@ -54,7 +54,7 @@ jobs:
       - name: Install dependencies
         run: |
           ${{ steps.py.outputs.python-path }} -m venv .ci-venv
-          ./.ci-venv/bin/python -m pip install -r backend/requirements.txt
+          ./.ci-venv/bin/python -m pip install -r backend/requirements-dev.txt
 
       - name: Test
         run: ./.ci-venv/bin/python -m pytest backend/tests -q

@@ -1,2 +1,9 @@
+# Test/dev dependencies, on top of the runtime set.
+# (CI run 3, 2026-06-12: pytest-asyncio lived only as an ad-hoc install in
+# the local venv and this file was not wired into bootstrap or CI — a fresh
+# clone could not run the async test suites at all.)
+-r requirements.txt
 pytest>=8.0
+pytest-asyncio>=1.0
+anyio>=4.0
 httpx>=0.27
