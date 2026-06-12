@@ -1,13 +1,33 @@
 import XCTest
 @testable import VoxFlowApp
 
+/// NEVER the real AccessibilityInsertService here: tests with the real
+/// service performed genuine AX insertions into the focused app on every
+/// suite run (the ghost-"hello" root cause, receipts in insertions.jsonl).
+@MainActor
+private final class ScriptedInsertService: TextInserting {
+    var result = InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
+    private(set) var insertedTexts: [String] = []
+
+    func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
+        insertedTexts.append(text)
+        return result
+    }
+}
+
 final class TextInsertionCoordinatorTests: XCTestCase {
 
     @MainActor
     private func makeSUT() -> (TextInsertionCoordinator, AppState) {
         let state = AppState()
-        let insertService = AccessibilityInsertService()
-        let sut = TextInsertionCoordinator(state: state, insertService: insertService)
+        let insertService = ScriptedInsertService()
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
+        let sut = TextInsertionCoordinator(
+            state: state,
+            insertService: insertService,
+            audit: InsertionAuditLog(fileURL: auditURL)
+        )
         return (sut, state)
     }
 

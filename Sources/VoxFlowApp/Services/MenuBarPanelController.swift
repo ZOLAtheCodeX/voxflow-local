@@ -111,25 +111,11 @@ final class MenuBarPanelController {
     // R4.5: Waveline identity states. Recording pulses between two wave
     // amplitudes (subtle, 0.45 s cadence) — visible at a glance without
     // being a flasher.
-    private var pulseTimer: Timer?
-    private var pulsePhase = false
     private(set) var currentIconState: MenuBarIconState = .idle
 
     func updateIcon(state: MenuBarIconState) {
         currentIconState = state
-        pulseTimer?.invalidate()
-        pulseTimer = nil
-        pulsePhase = false
         applyIconImage(MenuBarGlyph.image(for: state))
-        if state == .recording {
-            pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.pulsePhase.toggle()
-                    self.applyIconImage(MenuBarGlyph.image(for: .recording, pulsePhase: self.pulsePhase))
-                }
-            }
-        }
     }
 
     private func applyIconImage(_ image: NSImage?) {
@@ -161,7 +147,14 @@ final class MenuBarPanelController {
 
         // Create fresh item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        configureStatusItemButton(iconName: currentIconName)
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+        }
+        // Re-apply the CURRENT state glyph — the old string-icon path here
+        // reverted the menu bar to mic.fill on every activation-policy
+        // round-trip, clobbering the Waveline mark and the recording state.
+        applyIconImage(MenuBarGlyph.image(for: currentIconState))
 
         // Restore panel state
         if wasOpen {

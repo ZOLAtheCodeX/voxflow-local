@@ -17,9 +17,10 @@ enum MenuBarIconState: Equatable {
 /// status-item states.
 enum MenuBarGlyph {
 
-    /// - Parameter amplitude: 1.0 = full wave (recording pulse peak);
-    ///   lower values calm the wave (idle uses 0.75, pulse trough 0.55).
-    static func waveline(amplitude: CGFloat, includeDot: Bool) -> NSImage {
+    /// Fixed-amplitude waveline so the menu-bar bounding box NEVER changes
+    /// between states (amplitude pulsing read as the icon "resizing").
+    /// `recording` distinguishes itself with a filled dot, not a taller wave.
+    static func waveline(amplitude: CGFloat = 0.85, includeDot: Bool = true, recordingDot: Bool = false) -> NSImage {
         let size = NSSize(width: 22, height: 22)
         let image = NSImage(size: size, flipped: false) { rect in
             let midY = rect.midY
@@ -45,7 +46,7 @@ enum MenuBarGlyph {
             path.stroke()
 
             if includeDot {
-                let r: CGFloat = 1.7
+                let r: CGFloat = recordingDot ? 2.6 : 1.7
                 let dot = NSBezierPath(ovalIn: NSRect(x: 19.5 - r, y: midY - r, width: r * 2, height: r * 2))
                 NSColor.black.setFill()
                 dot.fill()
@@ -56,14 +57,15 @@ enum MenuBarGlyph {
         return image
     }
 
-    static func image(for state: MenuBarIconState, pulsePhase: Bool = false) -> NSImage? {
+    static func image(for state: MenuBarIconState) -> NSImage? {
         switch state {
         case .idle:
-            return waveline(amplitude: 0.75, includeDot: true)
+            return waveline()
         case .recording:
-            return waveline(amplitude: pulsePhase ? 0.55 : 1.0, includeDot: true)
+            // Same wave height as idle; the larger filled dot signals "live".
+            return waveline(recordingDot: true)
         case .transcribing:
-            return waveline(amplitude: 0.4, includeDot: false)
+            return waveline(includeDot: false)
         case .symbol(let name):
             let config = NSImage.SymbolConfiguration(scale: .medium)
             guard let image = NSImage(systemSymbolName: name, accessibilityDescription: "VoxFlow")?

@@ -16,12 +16,12 @@ import os.log
 final class TextInsertionCoordinator: TextInsertionCoordinating {
     private let log = Logger(subsystem: "local.voxflow.app", category: "TextInsertion")
     private let state: AppState
-    private let insertService: AccessibilityInsertService
+    private let insertService: TextInserting
 
     /// Ghost-text forensics: every insertion gets a local JSONL receipt.
     private let audit: InsertionAuditLog
 
-    init(state: AppState, insertService: AccessibilityInsertService, audit: InsertionAuditLog? = nil) {
+    init(state: AppState, insertService: TextInserting, audit: InsertionAuditLog? = nil) {
         self.state = state
         self.insertService = insertService
         self.audit = audit ?? InsertionAuditLog()

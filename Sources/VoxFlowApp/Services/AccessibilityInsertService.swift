@@ -2,8 +2,18 @@ import AppKit
 import ApplicationServices
 import Foundation
 
+/// Seam for text insertion so unit tests can NEVER reach the real
+/// accessibility machinery. The ghost-"hello" saga's final culprit:
+/// TextInsertionCoordinatorTests used the real service, so every
+/// `swift test` run performed genuine AX insertions of "hello" into
+/// whatever app had focus on the developer's machine — for weeks.
 @MainActor
-final class AccessibilityInsertService {
+protocol TextInserting {
+    func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult
+}
+
+@MainActor
+final class AccessibilityInsertService: TextInserting {
     private let systemWide = AXUIElementCreateSystemWide()
 
     func focusedTargetSnapshot() -> FocusTargetSnapshot {

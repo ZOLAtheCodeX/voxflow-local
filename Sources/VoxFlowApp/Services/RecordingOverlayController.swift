@@ -20,7 +20,7 @@ final class RecordingOverlayController {
         override var canBecomeMain: Bool { false }
     }
 
-    static let pillSize = NSSize(width: 280, height: 64)
+    static let pillSize = NSSize(width: 156, height: 30)
 
     private let panel: PillPanel
     private let state: AppState
@@ -96,66 +96,44 @@ struct RecordingPillView: View {
     var onCancel: () -> Void
 
     var body: some View {
-        HStack(spacing: VF.spacingMedium) {
+        HStack(spacing: 7) {
             if state.sessionState == .recording {
-                TimelineView(.animation(minimumInterval: 0.08)) { context in
-                    HStack(alignment: .center, spacing: 3) {
-                        ForEach(0..<7, id: \.self) { index in
-                            RoundedRectangle(cornerRadius: 2)
+                TimelineView(.animation(minimumInterval: 0.1)) { context in
+                    HStack(alignment: .center, spacing: 2) {
+                        ForEach(0..<5, id: \.self) { index in
+                            RoundedRectangle(cornerRadius: 1.5)
                                 .fill(Color(red: 0.18, green: 0.83, blue: 0.77))
-                                .frame(width: 4, height: pillBarHeight(index: index, time: context.date.timeIntervalSinceReferenceDate))
+                                .frame(width: 3, height: pillBarHeight(index: index, time: context.date.timeIntervalSinceReferenceDate))
                         }
                     }
-                    .frame(width: 52, height: 32)
+                    .frame(width: 26, height: 16)
                 }
                 .accessibilityLabel("Recording level")
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(String(format: "%.1fs", state.recordingDuration))
-                        .font(VF.monoTimerFont)
-                    if let appName = state.focusTarget.appName, !appName.isEmpty {
-                        Text("→ \(appName)")
-                            .font(VF.microFont)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    } else {
-                        Text("Recording")
-                            .font(VF.microFont)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(String(format: "%.0fs", state.recordingDuration))
+                    .font(VF.monoCaptionFont)
+                    .foregroundStyle(.secondary)
             } else {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Transcribing…")
-                    .font(VF.captionEmphasizedFont)
+                ProgressView().controlSize(.mini)
+                Text("Transcribing")
+                    .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
-
-            Spacer(minLength: 0)
-
-            Button {
-                onCancel()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(state.sessionState == .recording ? "Cancel recording" : "Cancel transcription")
-            .help("Cancel (esc)")
         }
-        .padding(.horizontal, VF.spacingMedium)
-        .padding(.vertical, VF.spacingSmall)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.08)))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(state.sessionState == .recording ? "VoxFlow recording" : "VoxFlow transcribing")
+        .overlay(Capsule().strokeBorder(.white.opacity(0.07)))
+        .contentShape(Capsule())
+        .onTapGesture { onCancel() }
+        .help("Click to cancel (esc)")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(state.sessionState == .recording ? "VoxFlow recording, tap to cancel" : "VoxFlow transcribing")
     }
 
     private func pillBarHeight(index: Int, time: TimeInterval) -> CGFloat {
         let phase = time * 5 + Double(index) * 0.9
         let amplitude = (sin(phase) * 0.5 + 0.5) * 0.7 + 0.3
-        return CGFloat(8 + amplitude * 22)
+        return CGFloat(5 + amplitude * 10)
     }
 }
