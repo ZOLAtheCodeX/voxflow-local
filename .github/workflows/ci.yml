@@ -40,13 +40,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        id: py
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
+      # Explicit interpreter path on both steps: the macos-26 image ships a
+      # /Library/Frameworks Python that shadows the toolcache one for bare
+      # `python`, so pip and pytest silently ran on different interpreters
+      # (first run: "No module named pytest").
       - name: Install dependencies
-        run: pip install -r backend/requirements.txt
+        run: ${{ steps.py.outputs.python-path }} -m pip install -r backend/requirements.txt
 
       - name: Test
-        run: python -m pytest backend/tests -q
+        run: ${{ steps.py.outputs.python-path }} -m pytest backend/tests -q
