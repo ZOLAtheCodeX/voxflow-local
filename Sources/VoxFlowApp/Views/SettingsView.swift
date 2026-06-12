@@ -46,35 +46,42 @@ struct SettingsView: View {
     @State private var notionToken: String = ""
 
     var body: some View {
+        TabView {
+            generalTab
+                .tabItem { Label("General", systemImage: "gearshape") }
+            modelsTab
+                .tabItem { Label("Models", systemImage: "brain") }
+            toolsTab
+                .tabItem { Label("Dictation Tools", systemImage: "text.badge.star") }
+            privacyTab
+                .tabItem { Label("Privacy", systemImage: "lock.shield") }
+            advancedTab
+                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
+            permissionsTab
+                .tabItem { Label("Permissions", systemImage: "checkmark.shield") }
+        }
+        .frame(minWidth: 620, idealWidth: 660, minHeight: 480, idealHeight: 560)
+        .onDisappear {
+            permissionPollTimer?.invalidate()
+            permissionPollTimer = nil
+        }
+        .onAppear {
+            refreshPermissions()
+            privateAPIBaseURLDraft = state.privateAPIBaseURL
+            privateAPIModelDraft = state.privateAPIModel
+            privateAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainPrivateAPIKeyAccount) ?? ""
+            openAIBaseURLDraft = state.openAIBaseURL
+            openAIAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainOpenAIAPIKeyAccount) ?? ""
+            openAISTTModelDraft = state.openAISTTModel
+            openAITTSModelDraft = state.openAITTSModel
+            openAITTSVoiceDraft = state.openAITTSVoice
+            localWhisperModelDraft = state.localWhisperModel
+            notionToken = KeychainService.load(account: NotionKeychain.account) ?? ""
+        }
+    }
+
+    private var generalTab: some View {
         Form {
-            Section("Permissions") {
-                HStack {
-                    Text("Microphone")
-                    Spacer()
-                    Text(permissions.microphoneAuthorized ? "Granted" : "Missing")
-                        .foregroundStyle(permissions.microphoneAuthorized ? .green : .orange)
-                    Button("Request") {
-                        coordinator.requestMicrophonePermission()
-                        refreshPermissions()
-                    }
-                }
-
-                HStack {
-                    Text("Accessibility")
-                    Spacer()
-                    Text(permissions.accessibilityAuthorized ? "Granted" : "Missing")
-                        .foregroundStyle(permissions.accessibilityAuthorized ? .green : .orange)
-                    Button("Request") {
-                        coordinator.requestAccessibilityPermission()
-                        startPermissionPolling()
-                    }
-                }
-
-                Button("Refresh Permissions") {
-                    refreshPermissions()
-                }
-            }
-
             Section("Hotkeys") {
                 Picker(
                     "Dictation hold-to-talk",
@@ -105,46 +112,97 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Provider Mode") {
+            Section("Dictation") {
                 Picker(
-                    "Inference routing",
+                    "Insert behavior",
                     selection: Binding(
-                        get: { state.providerMode },
-                        set: { coordinator.selectProviderMode($0) }
+                        get: { state.insertBehavior },
+                        set: { coordinator.selectInsertBehavior($0) }
                     )
                 ) {
-                    ForEach(ProviderMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
+                    ForEach(InsertBehavior.allCases) { behavior in
+                        Text(behavior.displayName).tag(behavior)
                     }
                 }
-                .pickerStyle(.segmented)
 
-                if state.providerMode == .privateAPI {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Private API Base URL", text: $privateAPIBaseURLDraft)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("Private API Model", text: $privateAPIModelDraft)
-                            .textFieldStyle(.roundedBorder)
-                        SecureField("Private API Key", text: $privateAPIKeyDraft)
-                            .textFieldStyle(.roundedBorder)
+                Text(insertBehaviorNote)
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
 
-                        Button("Apply Private API Config") {
-                            coordinator.updatePrivateAPIConfig(
-                                baseURL: privateAPIBaseURLDraft,
-                                model: privateAPIModelDraft,
-                                apiKey: privateAPIKeyDraft
-                            )
+                Divider()
+
+                Text("App Profiles")
+                    .font(VF.labelFont)
+
+                if state.appProfiles.isEmpty {
+                    Text("No custom overrides. Apps use your selected settings or built-in defaults (Slack → Concise, Mail → Formal, etc).")
+                        .font(VF.captionFont)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(state.appProfiles.keys.sorted()), id: \.self) { bundleID in
+                        if let profile = state.appProfiles[bundleID] {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(bundleID.components(separatedBy: ".").last ?? bundleID)
+                                        .font(VF.labelFont)
+                                    Spacer()
+                                    Button("Remove") {
+                                        coordinator.updateAppProfile(bundleID: bundleID, profile: nil)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                                HStack(spacing: 12) {
+                                    Picker("Tone", selection: Binding(
+                                        get: { profile.tone },
+                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: $0, cleanupMode: profile.cleanupMode, insertBehavior: profile.insertBehavior)) }
+                                    )) {
+                                        ForEach(ToneStyle.allCases) { t in Text(t.displayName).tag(t) }
+                                    }
+                                    .frame(width: 110)
+                                    Picker("Mode", selection: Binding(
+                                        get: { profile.cleanupMode },
+                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: $0, insertBehavior: profile.insertBehavior)) }
+                                    )) {
+                                        ForEach(CleanupMode.allCases) { m in Text(m.displayName).tag(m) }
+                                    }
+                                    .frame(width: 90)
+                                    Picker("Insert", selection: Binding(
+                                        get: { profile.insertBehavior },
+                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: profile.cleanupMode, insertBehavior: $0)) }
+                                    )) {
+                                        ForEach(InsertBehavior.allCases) { b in Text(b.displayName).tag(b) }
+                                    }
+                                    .frame(width: 150)
+                                }
+                                .font(VF.captionFont)
+                            }
+                            .padding(.vertical, 2)
                         }
-                        .buttonStyle(.borderedProminent)
-
-                        Text("Private API calls always require per-request privacy preview and approval.")
-                            .font(VF.captionFont)
-                            .foregroundStyle(.secondary)
                     }
-                    .padding(.top, 4)
                 }
             }
 
+            Section("Activation Targeting") {
+                Picker("Dictation target", selection: $state.targetingMode) {
+                    ForEach(TargetingMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+
+                Text(state.targetingMode == .cursorAware
+                     ? "Dictation is enabled when an insertion cursor is active in any text target."
+                     : "Dictation is enabled only when a text input field is focused.")
+                    .font(VF.secondaryFont)
+                    .foregroundStyle(.secondary)
+            }
+
+        }
+        .formStyle(.grouped)
+    }
+
+    private var modelsTab: some View {
+        Form {
             Section("Local AI Model") {
                 ollamaStatusRow
                 if let status = ollamaStatus {
@@ -220,6 +278,64 @@ struct SettingsView: View {
             }
 
 
+            Section("Speech Models") {
+                Picker(
+                    "STT Backend",
+                    selection: Binding(
+                        get: { state.sttBackend },
+                        set: { coordinator.selectSTTBackend($0) }
+                    )
+                ) {
+                    ForEach(STTBackend.allCases) { backend in
+                        Text(backend.displayName).tag(backend)
+                    }
+                }
+
+                Text(sttBackendNote)
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+
+                if state.sttBackend == .whisper {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Local Whisper Model", text: $localWhisperModelDraft)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button("Apply Local Whisper Model") {
+                            coordinator.updateLocalWhisperModel(whisperModel: localWhisperModelDraft)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(.top, 4)
+                }
+
+                if state.sttBackend == .openAI {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("OpenAI Base URL", text: $openAIBaseURLDraft)
+                            .textFieldStyle(.roundedBorder)
+                        SecureField("OpenAI API Key", text: $openAIAPIKeyDraft)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("OpenAI STT Model", text: $openAISTTModelDraft)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("OpenAI TTS Model", text: $openAITTSModelDraft)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("OpenAI TTS Voice", text: $openAITTSVoiceDraft)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button("Apply OpenAI Speech Config") {
+                            coordinator.updateOpenAIConfig(
+                                baseURL: openAIBaseURLDraft,
+                                apiKey: openAIAPIKeyDraft,
+                                sttModel: openAISTTModelDraft,
+                                ttsModel: openAITTSModelDraft,
+                                ttsVoice: openAITTSVoiceDraft
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.top, 4)
+                }
+            }
+
             Section("Model Providers (BYOM)") {
                 ForEach(providerStore.providers) { spec in
                     VStack(alignment: .leading, spacing: 4) {
@@ -282,135 +398,60 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Speech Models") {
-                Picker(
-                    "STT Backend",
-                    selection: Binding(
-                        get: { state.sttBackend },
-                        set: { coordinator.selectSTTBackend($0) }
-                    )
-                ) {
-                    ForEach(STTBackend.allCases) { backend in
-                        Text(backend.displayName).tag(backend)
+            Section("Benchmark") {
+                Button {
+                    Task { await coordinator.runTranslationBenchmark() }
+                } label: {
+                    HStack {
+                        if state.isBenchmarkRunning {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(state.isBenchmarkRunning ? "Benchmark Running..." : "Run Translate Benchmark")
                     }
                 }
+                .disabled(state.isBenchmarkRunning)
 
-                Text(sttBackendNote)
-                    .font(VF.captionFont)
-                    .foregroundStyle(.secondary)
-
-                if state.sttBackend == .whisper {
+                if !state.translationBenchmarkResults.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        TextField("Local Whisper Model", text: $localWhisperModelDraft)
-                            .textFieldStyle(.roundedBorder)
-
-                        Button("Apply Local Whisper Model") {
-                            coordinator.updateLocalWhisperModel(whisperModel: localWhisperModelDraft)
+                        ForEach(state.translationBenchmarkResults) { result in
+                            HStack {
+                                Text(result.profile.displayName)
+                                    .font(VF.labelFont)
+                                Spacer()
+                                if result.placeholderDetected {
+                                    Text("Model Missing")
+                                        .font(VF.captionEmphasizedFont)
+                                        .foregroundStyle(.orange)
+                                } else {
+                                    Text("med \(result.medianLatencyMs)ms · p95 \(result.p95LatencyMs)ms")
+                                        .font(VF.captionEmphasizedFont)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
-                        .buttonStyle(.bordered)
                     }
                     .padding(.top, 4)
-                }
 
-                if state.sttBackend == .openAI {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("OpenAI Base URL", text: $openAIBaseURLDraft)
-                            .textFieldStyle(.roundedBorder)
-                        SecureField("OpenAI API Key", text: $openAIAPIKeyDraft)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("OpenAI STT Model", text: $openAISTTModelDraft)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("OpenAI TTS Model", text: $openAITTSModelDraft)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("OpenAI TTS Voice", text: $openAITTSVoiceDraft)
-                            .textFieldStyle(.roundedBorder)
-
-                        Button("Apply OpenAI Speech Config") {
-                            coordinator.updateOpenAIConfig(
-                                baseURL: openAIBaseURLDraft,
-                                apiKey: openAIAPIKeyDraft,
-                                sttModel: openAISTTModelDraft,
-                                ttsModel: openAITTSModelDraft,
-                                ttsVoice: openAITTSVoiceDraft
-                            )
-                        }
-                        .buttonStyle(.borderedProminent)
+                    Button("Apply Fastest Profile") {
+                        coordinator.applyFastestBenchmarkProfile()
                     }
-                    .padding(.top, 4)
-                }
-            }
-
-            Section("Dictation") {
-                Picker(
-                    "Insert behavior",
-                    selection: Binding(
-                        get: { state.insertBehavior },
-                        set: { coordinator.selectInsertBehavior($0) }
-                    )
-                ) {
-                    ForEach(InsertBehavior.allCases) { behavior in
-                        Text(behavior.displayName).tag(behavior)
-                    }
+                    .disabled(state.isBenchmarkRunning)
                 }
 
-                Text(insertBehaviorNote)
-                    .font(VF.captionFont)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
-                Text("App Profiles")
-                    .font(VF.labelFont)
-
-                if state.appProfiles.isEmpty {
-                    Text("No custom overrides. Apps use your selected settings or built-in defaults (Slack → Concise, Mail → Formal, etc).")
+                if let benchmarkStatusLine = state.benchmarkStatusLine {
+                    Text(benchmarkStatusLine)
                         .font(VF.captionFont)
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(state.appProfiles.keys.sorted()), id: \.self) { bundleID in
-                        if let profile = state.appProfiles[bundleID] {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(bundleID.components(separatedBy: ".").last ?? bundleID)
-                                        .font(VF.labelFont)
-                                    Spacer()
-                                    Button("Remove") {
-                                        coordinator.updateAppProfile(bundleID: bundleID, profile: nil)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                                HStack(spacing: 12) {
-                                    Picker("Tone", selection: Binding(
-                                        get: { profile.tone },
-                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: $0, cleanupMode: profile.cleanupMode, insertBehavior: profile.insertBehavior)) }
-                                    )) {
-                                        ForEach(ToneStyle.allCases) { t in Text(t.displayName).tag(t) }
-                                    }
-                                    .frame(width: 110)
-                                    Picker("Mode", selection: Binding(
-                                        get: { profile.cleanupMode },
-                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: $0, insertBehavior: profile.insertBehavior)) }
-                                    )) {
-                                        ForEach(CleanupMode.allCases) { m in Text(m.displayName).tag(m) }
-                                    }
-                                    .frame(width: 90)
-                                    Picker("Insert", selection: Binding(
-                                        get: { profile.insertBehavior },
-                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: profile.cleanupMode, insertBehavior: $0)) }
-                                    )) {
-                                        ForEach(InsertBehavior.allCases) { b in Text(b.displayName).tag(b) }
-                                    }
-                                    .frame(width: 150)
-                                }
-                                .font(VF.captionFont)
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
                 }
             }
 
+        }
+        .formStyle(.grouped)
+    }
+
+    private var toolsTab: some View {
+        Form {
             Section("Dictionary") {
                 if dictionary.entries.isEmpty {
                     Text("No corrections yet. Fix a mangled term in the cockpit review to teach VoxFlow.")
@@ -602,20 +643,70 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Activation Targeting") {
-                Picker("Dictation target", selection: $state.targetingMode) {
-                    ForEach(TargetingMode.allCases) { mode in
+            Section("Notion") {
+                SecureField("Personal access token", text: $notionToken)
+                Button("Save token") {
+                    KeychainService.save(account: NotionKeychain.account, value: notionToken)
+                }
+                if KeychainService.load(account: NotionKeychain.account)?.isEmpty == false {
+                    Label("Token stored in Keychain", systemImage: "checkmark.seal")
+                        .font(VF.captionFont).foregroundStyle(.secondary)
+                }
+                Text("Create a Personal Access Token in Notion's Developer portal → Personal access tokens (grant the “Notion API” capability). No page-sharing needed — it uses your own access; expires after 1 year.")
+                    .font(VF.captionFont).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var privacyTab: some View {
+        Form {
+            Section("Provider Mode") {
+                Picker(
+                    "Inference routing",
+                    selection: Binding(
+                        get: { state.providerMode },
+                        set: { coordinator.selectProviderMode($0) }
+                    )
+                ) {
+                    ForEach(ProviderMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                .pickerStyle(.segmented)
 
-                Text(state.targetingMode == .cursorAware
-                     ? "Dictation is enabled when an insertion cursor is active in any text target."
-                     : "Dictation is enabled only when a text input field is focused.")
-                    .font(VF.secondaryFont)
-                    .foregroundStyle(.secondary)
+                if state.providerMode == .privateAPI {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Private API Base URL", text: $privateAPIBaseURLDraft)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Private API Model", text: $privateAPIModelDraft)
+                            .textFieldStyle(.roundedBorder)
+                        SecureField("Private API Key", text: $privateAPIKeyDraft)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button("Apply Private API Config") {
+                            coordinator.updatePrivateAPIConfig(
+                                baseURL: privateAPIBaseURLDraft,
+                                model: privateAPIModelDraft,
+                                apiKey: privateAPIKeyDraft
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Text("Private API calls always require per-request privacy preview and approval.")
+                            .font(VF.captionFont)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
+                }
             }
 
+        }
+        .formStyle(.grouped)
+    }
+
+    private var advancedTab: some View {
+        Form {
             Section("Workflow") {
                 Toggle(
                     "Enable Experimental Translate Mode (EN→DE)",
@@ -714,54 +805,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Benchmark") {
-                Button {
-                    Task { await coordinator.runTranslationBenchmark() }
-                } label: {
-                    HStack {
-                        if state.isBenchmarkRunning {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(state.isBenchmarkRunning ? "Benchmark Running..." : "Run Translate Benchmark")
-                    }
-                }
-                .disabled(state.isBenchmarkRunning)
-
-                if !state.translationBenchmarkResults.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(state.translationBenchmarkResults) { result in
-                            HStack {
-                                Text(result.profile.displayName)
-                                    .font(VF.labelFont)
-                                Spacer()
-                                if result.placeholderDetected {
-                                    Text("Model Missing")
-                                        .font(VF.captionEmphasizedFont)
-                                        .foregroundStyle(.orange)
-                                } else {
-                                    Text("med \(result.medianLatencyMs)ms · p95 \(result.p95LatencyMs)ms")
-                                        .font(VF.captionEmphasizedFont)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.top, 4)
-
-                    Button("Apply Fastest Profile") {
-                        coordinator.applyFastestBenchmarkProfile()
-                    }
-                    .disabled(state.isBenchmarkRunning)
-                }
-
-                if let benchmarkStatusLine = state.benchmarkStatusLine {
-                    Text(benchmarkStatusLine)
-                        .font(VF.captionFont)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             Section("Onboarding") {
                 Button("Open Setup Wizard") {
                     openWindow(id: "setup")
@@ -773,39 +816,44 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Notion") {
-                SecureField("Personal access token", text: $notionToken)
-                Button("Save token") {
-                    KeychainService.save(account: NotionKeychain.account, value: notionToken)
-                }
-                if KeychainService.load(account: NotionKeychain.account)?.isEmpty == false {
-                    Label("Token stored in Keychain", systemImage: "checkmark.seal")
-                        .font(VF.captionFont).foregroundStyle(.secondary)
-                }
-                Text("Create a Personal Access Token in Notion's Developer portal → Personal access tokens (grant the “Notion API” capability). No page-sharing needed — it uses your own access; expires after 1 year.")
-                    .font(VF.captionFont).foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
-        .padding(16)
-        .onDisappear {
-            permissionPollTimer?.invalidate()
-            permissionPollTimer = nil
-        }
-        .onAppear {
-            refreshPermissions()
-            privateAPIBaseURLDraft = state.privateAPIBaseURL
-            privateAPIModelDraft = state.privateAPIModel
-            privateAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainPrivateAPIKeyAccount) ?? ""
-            openAIBaseURLDraft = state.openAIBaseURL
-            openAIAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainOpenAIAPIKeyAccount) ?? ""
-            openAISTTModelDraft = state.openAISTTModel
-            openAITTSModelDraft = state.openAITTSModel
-            openAITTSVoiceDraft = state.openAITTSVoice
-            localWhisperModelDraft = state.localWhisperModel
-            notionToken = KeychainService.load(account: NotionKeychain.account) ?? ""
-        }
     }
+
+    private var permissionsTab: some View {
+        Form {
+            Section("Permissions") {
+                HStack {
+                    Text("Microphone")
+                    Spacer()
+                    Text(permissions.microphoneAuthorized ? "Granted" : "Missing")
+                        .foregroundStyle(permissions.microphoneAuthorized ? .green : .orange)
+                    Button("Request") {
+                        coordinator.requestMicrophonePermission()
+                        refreshPermissions()
+                    }
+                }
+
+                HStack {
+                    Text("Accessibility")
+                    Spacer()
+                    Text(permissions.accessibilityAuthorized ? "Granted" : "Missing")
+                        .foregroundStyle(permissions.accessibilityAuthorized ? .green : .orange)
+                    Button("Request") {
+                        coordinator.requestAccessibilityPermission()
+                        startPermissionPolling()
+                    }
+                }
+
+                Button("Refresh Permissions") {
+                    refreshPermissions()
+                }
+            }
+
+        }
+        .formStyle(.grouped)
+    }
+
 
     private var insertBehaviorNote: String {
         switch state.insertBehavior {

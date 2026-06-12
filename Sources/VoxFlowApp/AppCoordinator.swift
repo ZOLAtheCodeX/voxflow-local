@@ -1160,12 +1160,12 @@ final class AppCoordinator: ObservableObject {
         }
 
         if mainWindowController == nil {
-            let host = NSHostingController(rootView: MainWindowView(coordinator: self, state: state))
+            let host = NSHostingController(rootView: WelcomeView(coordinator: self, state: state))
             let window = NSWindow(contentViewController: host)
             window.identifier = mainWindowIdentifier
             window.title = "VoxFlow"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 980, height: 700))
+            window.setContentSize(NSSize(width: 460, height: 540))
             window.center()
             window.isReleasedWhenClosed = false
             mainWindowController = NSWindowController(window: window)

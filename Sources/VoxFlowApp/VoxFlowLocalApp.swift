@@ -10,8 +10,7 @@ struct VoxFlowLocalApp: App {
 
     var body: some Scene {
         WindowGroup("VoxFlow", id: "main") {
-            MainWindowView(coordinator: coordinator, state: coordinator.state)
-                .frame(minWidth: 900, minHeight: 680)
+            WelcomeView(coordinator: coordinator, state: coordinator.state)
                 .task {
                     await MainActor.run {
                         appDelegate.installAutomationURLHandler { url in
@@ -37,7 +36,7 @@ struct VoxFlowLocalApp: App {
         }
         .commands {
             CommandMenu("VoxFlow") {
-                Button("Show Main Window") {
+                Button("Welcome Window") {
                     coordinator.showMainWindow()
                 }
                 .keyboardShortcut("0", modifiers: [.command])
@@ -73,8 +72,8 @@ struct VoxFlowLocalApp: App {
 
         Settings {
             SettingsView(coordinator: coordinator, state: coordinator.state, dictionary: coordinator.cockpitDictionary, snippetStore: coordinator.cockpitSnippets, chainStore: coordinator.cockpitChains, providerStore: coordinator.providerConfig)
-                .frame(width: 520, height: 420)
         }
+        .windowResizability(.contentMinSize)
 
         Window("VoxFlow Dashboard", id: "dashboard") {
             DashboardWindowView(coordinator: coordinator, state: coordinator.state)
