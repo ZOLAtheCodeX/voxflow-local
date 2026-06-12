@@ -44,7 +44,22 @@ final class AccessibilityInsertService {
         await insert(text: text, targetApp: NSWorkspace.shared.frontmostApplication)
     }
 
+    /// Character immediately before the insertion point, read via AX.
+    /// nil when the field is empty, unreadable, or has a selection start at 0.
+    private func precedingCharacter() -> Character? {
+        guard let focused = copyFocusedElement(),
+              let value = copyStringAttribute(kAXValueAttribute as CFString, on: focused),
+              let range = copySelectedRange(on: focused),
+              range.location > 0 else { return nil }
+        let ns = value as NSString
+        guard range.location <= ns.length else { return nil }
+        return ns.substring(with: NSRange(location: range.location - 1, length: 1)).first
+    }
+
     func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
+        // R5.0: boundary-aware spacing — successive dictations used to land
+        // back-to-back ("test.I've tested").
+        let text = SmartSpacing.adjusted(text, precedingCharacter: precedingCharacter())
         // No ``?? NSWorkspace.shared.frontmostApplication`` fallback here —
         // callers must commit to a target. The frozen snapshot is the
         // source of truth for "where the user was typing"; resolving
