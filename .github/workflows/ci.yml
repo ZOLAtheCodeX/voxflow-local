@@ -46,12 +46,15 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      # Explicit interpreter path on both steps: the macos-26 image ships a
-      # /Library/Frameworks Python that shadows the toolcache one for bare
-      # `python`, so pip and pytest silently ran on different interpreters
-      # (first run: "No module named pytest").
+      # Dedicated venv: on the macOS arm64 image the toolcache python is a
+      # shim into /Library/Frameworks, so pip and pytest diverged across
+      # interpreters even with an explicit python-path (runs 1 and 2 both
+      # died with "No module named pytest"). Venv binaries are
+      # self-referential — install and test cannot disagree.
       - name: Install dependencies
-        run: ${{ steps.py.outputs.python-path }} -m pip install -r backend/requirements.txt
+        run: |
+          ${{ steps.py.outputs.python-path }} -m venv .ci-venv
+          ./.ci-venv/bin/python -m pip install -r backend/requirements.txt
 
       - name: Test
-        run: ${{ steps.py.outputs.python-path }} -m pytest backend/tests -q
+        run: ./.ci-venv/bin/python -m pytest backend/tests -q

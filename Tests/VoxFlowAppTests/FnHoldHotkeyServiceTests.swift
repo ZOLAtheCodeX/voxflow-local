@@ -79,8 +79,12 @@ final class FnHoldHotkeyServiceTests: XCTestCase {
 
         service.handleFlagsChanged(pressEvent)
 
-        // Wait 0.07s (more than 0.05s activationDelay)
-        try await Task.sleep(nanoseconds: 70_000_000)
+        // Condition-based wait, deadline 2 s: a fixed 70 ms sleep left only
+        // a 20 ms margin over the 50 ms activationDelay and flaked on a
+        // loaded CI runner (passed run 1, failed run 2).
+        for _ in 0..<200 where pressCount == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
 
         XCTAssertEqual(pressCount, 1, "Press should trigger after activationDelay")
 
