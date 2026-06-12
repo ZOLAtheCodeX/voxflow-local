@@ -1158,6 +1158,43 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - App-lifetime window-open routing
+
+    private var windowOpenHandler: ((String) -> Void)?
+    private var windowNotificationTokens: [NSObjectProtocol] = []
+
+    /// Bridges the window-open notifications (⌥⌘V hotkey, menu-panel
+    /// buttons, voice commands, protocol `.openWindow` steps) to SwiftUI's
+    /// `openWindow`. Installed once from the App scene's `.task` and
+    /// retained for the app's lifetime — the original view-bound
+    /// `.onReceive` listeners lived on WelcomeView, so closing the Welcome
+    /// window silently killed the cockpit hotkey (2026-06-12 user report).
+    func installWindowOpenHandler(_ handler: @escaping (String) -> Void) {
+        windowOpenHandler = handler
+        guard windowNotificationTokens.isEmpty else { return }
+        let center = NotificationCenter.default
+        // queue nil → blocks run synchronously on the posting thread; every
+        // post site is @MainActor (hotkey/voice/protocol/UI), so the
+        // assumeIsolated hop is sound.
+        windowNotificationTokens.append(center.addObserver(forName: .voxflowOpenCockpit, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated {
+                let coordinator = AppCoordinator.shared
+                coordinator.cockpit.open()
+                coordinator.windowOpenHandler?("cockpit")
+            }
+        })
+        windowNotificationTokens.append(center.addObserver(forName: .voxflowOpenDashboard, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated {
+                AppCoordinator.shared.windowOpenHandler?("dashboard")
+            }
+        })
+        windowNotificationTokens.append(center.addObserver(forName: .voxflowOpenSetup, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated {
+                AppCoordinator.shared.windowOpenHandler?("setup")
+            }
+        })
+    }
+
     func handleAutomationCommand(
         _ command: AppAutomationCommand,
         openWindow: (String) -> Void
@@ -1175,6 +1212,9 @@ final class AppCoordinator: ObservableObject {
                 openWindow("setup")
             case .settings:
                 openSettings()
+            case .cockpit:
+                cockpit.open()
+                openWindow("cockpit")
             }
         case .selectWorkflow(let mode, let enableIfNeeded):
             if enableIfNeeded {

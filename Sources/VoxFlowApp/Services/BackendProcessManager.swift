@@ -84,6 +84,19 @@ struct SystemBackendProcessRunner: BackendProcessRunning {
     func removePIDFile() { BackendProcessManager.removePIDFile() }
 }
 
+/// Inert runner selected automatically under XCTest (see
+/// ``BackendProcessManager/defaultRunner()``): the AppCoordinator singleton
+/// is reachable from tests, and its warmup paths must never spawn, signal,
+/// or PID-file-touch the real system from a test process.
+struct NoopBackendProcessRunner: BackendProcessRunning {
+    func run(_ process: Process) throws {}
+    func listeningPIDs(onPort port: Int) -> [pid_t] { [] }
+    func terminate(_ pids: [pid_t], signal: Int32) {}
+    func writePIDFile(_ pid: pid_t) {}
+    func readPIDFile() -> pid_t? { nil }
+    func removePIDFile() {}
+}
+
 final class BackendProcessManager: @unchecked Sendable {
     private static let defaultBackendPort = 8765
 
@@ -157,7 +170,16 @@ final class BackendProcessManager: @unchecked Sendable {
 
     private let runner: BackendProcessRunning
 
-    init(runner: BackendProcessRunning = SystemBackendProcessRunner()) {
+    /// Real system runner in the app; inert runner under XCTest so the
+    /// singleton-rooted object graph can never reach the system from tests.
+    /// Tests that assert on runner interactions still inject their own fake.
+    static func defaultRunner() -> BackendProcessRunning {
+        NSClassFromString("XCTestCase") != nil
+            ? NoopBackendProcessRunner()
+            : SystemBackendProcessRunner()
+    }
+
+    init(runner: BackendProcessRunning = BackendProcessManager.defaultRunner()) {
         self.runner = runner
         workQueue.setSpecific(key: workQueueSpecificKey, value: workQueueSpecificValue)
     }

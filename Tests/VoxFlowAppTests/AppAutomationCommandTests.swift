@@ -8,6 +8,11 @@ final class AppAutomationCommandTests: XCTestCase {
         XCTAssertEqual(command, .openWindow(.setup))
     }
 
+    func testParsesCockpitWindowCommand() throws {
+        let command = try AppAutomationCommand(url: XCTUnwrap(URL(string: "voxflow://window/cockpit")))
+        XCTAssertEqual(command, .openWindow(.cockpit))
+    }
+
     func testParsesWorkflowCommandWithEnableFlag() throws {
         let command = try AppAutomationCommand(
             url: XCTUnwrap(URL(string: "voxflow://workflow/translate?enable=1"))

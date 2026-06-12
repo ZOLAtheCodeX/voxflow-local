@@ -16,17 +16,14 @@ struct VoxFlowLocalApp: App {
                         appDelegate.installAutomationURLHandler { url in
                             handleAutomationURL(url)
                         }
+                        // App-lifetime handler: the hotkey/voice/protocol
+                        // window notifications must keep working after this
+                        // window closes — a view-bound .onReceive here died
+                        // with WelcomeView and silently killed ⌥⌘V.
+                        coordinator.installWindowOpenHandler { id in
+                            activateAndOpenWindow(id: id)
+                        }
                     }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .voxflowOpenDashboard)) { _ in
-                    activateAndOpenWindow(id: "dashboard")
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .voxflowOpenSetup)) { _ in
-                    activateAndOpenWindow(id: "setup")
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .voxflowOpenCockpit)) { _ in
-                    coordinator.cockpit.open()
-                    activateAndOpenWindow(id: "cockpit")
                 }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -60,6 +57,11 @@ struct VoxFlowLocalApp: App {
                     coordinator.cockpit.open()
                     activateAndOpenWindow(id: "cockpit")
                 }
+                // Mirrors the global Carbon hotkey: shows ⌥⌘V in the menu
+                // and works as an in-app fallback if Carbon registration
+                // fails. No double-fire: RegisterEventHotKey consumes the
+                // keystroke system-wide before menu dispatch sees it.
+                .keyboardShortcut("v", modifiers: [.command, .option])
 
                 Divider()
 

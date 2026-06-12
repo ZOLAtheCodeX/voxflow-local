@@ -5,6 +5,7 @@ enum AutomationWindowTarget: String, Equatable {
     case dashboard
     case setup
     case settings
+    case cockpit
 }
 
 enum AutomationBackendAction: String, Equatable {

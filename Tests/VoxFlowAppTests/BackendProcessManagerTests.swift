@@ -113,6 +113,14 @@ extension BackendProcessManagerTests {
             reportedStamp: "other", expectedStamp: "me", managerOwnsProcess: true))
     }
 
+    /// The default-init manager (used by the AppCoordinator singleton, which
+    /// tests can reach via `.shared`) must resolve to the no-op runner under
+    /// XCTest so no test can ever spawn, signal, or PID-file-touch the real
+    /// system through the singleton's warmup paths.
+    func testDefaultRunnerIsInertUnderXCTest() {
+        XCTAssertTrue(BackendProcessManager.defaultRunner() is NoopBackendProcessRunner)
+    }
+
     func testInstanceStampIsStablePerManager() {
         let manager = BackendProcessManager(runner: BackendProcessRunnerFake())
         XCTAssertFalse(manager.instanceStamp.isEmpty)
