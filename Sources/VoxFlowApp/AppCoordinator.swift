@@ -87,6 +87,11 @@ final class AppCoordinator: ObservableObject {
     private let sessionMemory = SessionMemoryStore(capacity: 20)
     private let whisperKitService = WhisperKitSTTService()
     private lazy var focusMonitor = FocusContextMonitor(insertService: insertService)
+    // R4.1: floating recording pill — feedback lives on screen, not in the
+    // menu bar panel, while the user dictates into another app.
+    private lazy var recordingOverlay = RecordingOverlayController(state: state) { [weak self] in
+        self?.cancelActiveCapture()
+    }
 
     private(set) var settings: SettingsCoordinating!
     private(set) lazy var onboarding: OnboardingCoordinating = OnboardingCoordinator(state: state)
@@ -192,6 +197,7 @@ final class AppCoordinator: ObservableObject {
         state.$sessionState
             .removeDuplicates()
             .sink { [weak self] newState in
+                self?.recordingOverlay.sessionStateChanged(newState)
                 if newState == .idle {
                     self?.capturedTargetApp = nil
                     self?.lastTranscriptionConfidence = 0.0
