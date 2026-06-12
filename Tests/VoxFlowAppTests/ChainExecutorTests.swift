@@ -378,4 +378,55 @@ private final class ThrowingSmartActionBackend: SmartActionBackend, @unchecked S
 @MainActor
 private final class CallCounter {
     var count = 0
+
+    /// R5.6: app-level steps dispatch through the injected handler and do
+    /// not disturb workingText.
+    @MainActor
+    func testAppStepsDispatchAndPreserveWorkingText() async {
+        let actionService = SmartActionService(backend: ConfigurableSmartActionBackend(
+            result: SmartActionResult(actionId: .memo, output: "transformed", guardrailTriggered: false, error: nil)))
+        let insertion = FakeTextInsertion(returns: true)
+        var performed: [ChainStep] = []
+        let executor = ChainExecutor(
+            actionService: actionService,
+            textInsertion: insertion,
+            currentTranscript: { "captured transcript" },
+            frozenTarget: { nil },
+            performAppStep: { step in performed.append(step); return true }
+        )
+        let chain = WorkflowChain(name: "Focus", steps: [
+            .capture(mode: .longForm),
+            .setMode(mode: "meeting"),
+            .openWindow(window: "cockpit"),
+            .insert(targetHint: nil),
+        ], createdAt: Date())
+        let result = await executor.run(chain)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(performed.count, 2)
+        XCTAssertEqual(insertion.calls.last?.text, "captured transcript")
+    }
+
+    @MainActor
+    func testFailedAppStepStopsChain() async {
+        let actionService = SmartActionService(backend: ConfigurableSmartActionBackend(
+            result: SmartActionResult(actionId: .memo, output: "x", guardrailTriggered: false, error: nil)))
+        let insertion = FakeTextInsertion(returns: true)
+        let executor = ChainExecutor(
+            actionService: actionService,
+            textInsertion: insertion,
+            currentTranscript: { "text" },
+            frozenTarget: { nil },
+            performAppStep: { _ in false }
+        )
+        let chain = WorkflowChain(name: "F", steps: [
+            .capture(mode: .longForm),
+            .setMode(mode: "nonsense"),
+            .insert(targetHint: nil),
+        ], createdAt: Date())
+        let result = await executor.run(chain)
+        XCTAssertNotNil(result.error)
+        XCTAssertEqual(result.failedStepIndex, 1)
+        XCTAssertTrue(insertion.calls.isEmpty, "stop-on-error: insert must not run")
+    }
 }
+

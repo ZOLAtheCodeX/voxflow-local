@@ -40,6 +40,8 @@ final class AppState: ObservableObject {
     /// the Keychain only — holding it in @Published state kept a plaintext
     /// copy in memory and broadcast it via Combine (audit S10).
     @Published var privateAPIKeyConfigured: Bool = false
+    /// R5.6: voice-triggered protocols (experimental, off by default).
+    @Published var protocolCommandsEnabled: Bool = false
     @Published var openAIBaseURL: String = "https://api.openai.com"
     @Published var openAISTTModel: String = "whisper-1"
     @Published var hostMemoryGB: Int = max(1, Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824))

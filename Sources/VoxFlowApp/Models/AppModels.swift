@@ -824,17 +824,25 @@ enum ChainStep: Codable, Equatable, Sendable {
     case capture(mode: CaptureMode)
     case action(actionId: SmartActionId)
     case insert(targetHint: String?)
+    // R5.6: app-level steps so voice protocols can drive the app itself
+    // ("focus mode protocol" = set meeting mode + open cockpit).
+    case setMode(mode: String)
+    case setTone(tone: String)
+    case openWindow(window: String)
 
     var summary: String {
         switch self {
         case .capture(let mode): "Capture (\(mode.label))"
         case .action(let actionId): "Action: \(actionId.label)"
         case .insert: "Insert"
+        case .setMode(let mode): "Mode: \(mode)"
+        case .setTone(let tone): "Tone: \(tone)"
+        case .openWindow(let window): "Open: \(window)"
         }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, mode, actionId, targetHint
+        case kind, mode, actionId, targetHint, tone, window
     }
 
     func encode(to encoder: Encoder) throws {
@@ -849,6 +857,15 @@ enum ChainStep: Codable, Equatable, Sendable {
         case .insert(let targetHint):
             try container.encode("insert", forKey: .kind)
             try container.encodeIfPresent(targetHint, forKey: .targetHint)
+        case .setMode(let mode):
+            try container.encode("setMode", forKey: .kind)
+            try container.encode(mode, forKey: .mode)
+        case .setTone(let tone):
+            try container.encode("setTone", forKey: .kind)
+            try container.encode(tone, forKey: .tone)
+        case .openWindow(let window):
+            try container.encode("openWindow", forKey: .kind)
+            try container.encode(window, forKey: .window)
         }
     }
 
@@ -865,6 +882,12 @@ enum ChainStep: Codable, Equatable, Sendable {
         case "insert":
             let targetHint = try container.decodeIfPresent(String.self, forKey: .targetHint)
             self = .insert(targetHint: targetHint)
+        case "setMode":
+            self = .setMode(mode: try container.decode(String.self, forKey: .mode))
+        case "setTone":
+            self = .setTone(tone: try container.decode(String.self, forKey: .tone))
+        case "openWindow":
+            self = .openWindow(window: try container.decode(String.self, forKey: .window))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: container,

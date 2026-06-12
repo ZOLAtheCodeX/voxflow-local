@@ -156,6 +156,9 @@ final class AppCoordinator: ObservableObject {
         frozenTarget: { [weak self] in
             self?.cockpitSessionService.currentSession?.targetApp?.processIdentifier
                 .flatMap { NSRunningApplication(processIdentifier: $0) }
+        },
+        performAppStep: { [weak self] step in
+            self?.performChainAppStep(step) ?? false
         })
     private(set) lazy var cockpitCapture: CockpitCaptureCoordinator = CockpitCaptureCoordinator(
         capture: AudioCaptureService(),
@@ -208,6 +211,13 @@ final class AppCoordinator: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // R5.6: cockpit review can trigger protocols (gated inside the
+        // coordinator on state.protocolCommandsEnabled + strict grammar).
+        cockpit.chainProvider = { [weak self] name in self?.cockpitChains.chain(named: name) }
+        cockpit.onProtocolTriggered = { [weak self] chain in
+            Task { await self?.runChain(chain) }
+        }
 
         // R5.1: the personal dictionary biases WhisperKit recognition.
         // Feed terms now and on every dictionary change.
@@ -1481,11 +1491,66 @@ final class AppCoordinator: ObservableObject {
             Task { @MainActor in
                 await runTranslationBenchmark()
             }
+        case .openCockpit:
+            NotificationCenter.default.post(name: .voxflowOpenCockpit, object: nil)
+            state.statusLine = "Cockpit opened"
+        case .openDashboard:
+            NotificationCenter.default.post(name: .voxflowOpenDashboard, object: nil)
+            state.statusLine = "Dashboard opened"
+        case .runProtocol(let name):
+            runProtocolCommand(named: name)
         }
 
         if state.sessionState == .transcribing {
             state.sessionState = .idle
         }
+    }
+
+    /// R5.6 — voice-triggered protocols. Defense in depth on top of the
+    /// strict full-utterance grammar: the feature is off by default, and a
+    /// low-confidence transcription never fires a macro (the ghost-hello
+    /// lesson applied forward — hallucinated audio must not run automations).
+    /// R5.6: app-level chain steps. Returns false (stopping the chain) for
+    /// unknown values so a typo'd protocol fails loudly instead of half-running.
+    private func performChainAppStep(_ step: ChainStep) -> Bool {
+        switch step {
+        case .setMode(let mode):
+            guard let workflowMode = WorkflowMode(rawValue: mode) else { return false }
+            selectWorkflowMode(workflowMode)
+            return true
+        case .setTone(let tone):
+            guard let toneStyle = ToneStyle(rawValue: tone) else { return false }
+            selectToneStyle(toneStyle)
+            return true
+        case .openWindow(let window):
+            switch window {
+            case "cockpit": NotificationCenter.default.post(name: .voxflowOpenCockpit, object: nil)
+            case "dashboard": NotificationCenter.default.post(name: .voxflowOpenDashboard, object: nil)
+            case "setup": NotificationCenter.default.post(name: .voxflowOpenSetup, object: nil)
+            default: return false
+            }
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func runProtocolCommand(named name: String) {
+        guard state.protocolCommandsEnabled else {
+            state.statusLine = "Protocol commands are disabled (Settings ▸ Advanced)"
+            return
+        }
+        guard lastTranscriptionConfidence >= 0.3 else {
+            log.warning("Protocol trigger '\(name)' rejected: confidence \(self.lastTranscriptionConfidence) below floor")
+            state.statusLine = "Protocol not run — low transcription confidence"
+            return
+        }
+        guard let chain = cockpitChains.chain(named: name) else {
+            state.statusLine = "No protocol named '\(name)'"
+            return
+        }
+        state.statusLine = "Running protocol: \(chain.name)"
+        Task { await runChain(chain) }
     }
 
     private func setupMenuBarPanel() {

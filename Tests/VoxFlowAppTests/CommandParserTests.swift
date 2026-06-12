@@ -161,4 +161,32 @@ final class CommandParserTests: XCTestCase {
     func testPartialModeAlone() {
         XCTAssertNil(CommandParser.parse(from: "mode"))
     }
+
+    // ── R5.3 grammar expansion ──
+
+    func testOpenCockpitIntent() {
+        XCTAssertEqual(CommandParser.parse(from: "open cockpit"), .openCockpit)
+        XCTAssertEqual(CommandParser.parse(from: "Open the cockpit."), .openCockpit)
+        XCTAssertEqual(CommandParser.parse(from: "open dashboard"), .openDashboard)
+    }
+
+    // ── R5.6 protocol command trigger ──
+    // Strict by design: the ENTIRE utterance must match
+    // "(run|start|execute) [the] <name> protocol" — a hallucinated fragment
+    // or mid-sentence mention must never launch a macro.
+
+    func testRunProtocolStrictGrammar() {
+        XCTAssertEqual(CommandParser.parse(from: "run memo protocol"), .runProtocol(name: "memo"))
+        XCTAssertEqual(CommandParser.parse(from: "Start the action items protocol."), .runProtocol(name: "action items"))
+        XCTAssertEqual(CommandParser.parse(from: "execute lockdown protocol"), .runProtocol(name: "lockdown"))
+    }
+
+    func testProtocolTriggerRejectsLooseMatches() {
+        XCTAssertNil(CommandParser.parse(from: "memo protocol"))
+        XCTAssertNil(CommandParser.parse(from: "please run memo protocol"))
+        XCTAssertNil(CommandParser.parse(from: "run memo protocol now"))
+        XCTAssertNil(CommandParser.parse(from: "we should run the memo protocol tomorrow"))
+        XCTAssertNil(CommandParser.parse(from: "run protocol"))
+    }
 }
+

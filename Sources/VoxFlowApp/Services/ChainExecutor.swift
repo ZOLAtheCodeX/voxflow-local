@@ -20,6 +20,7 @@ final class ChainExecutor {
         case noTranscript
         case actionFailed(String)
         case insertFailed
+        case appStepFailed(String)
     }
 
     struct ChainRunResult: Equatable {
@@ -40,13 +41,19 @@ final class ChainExecutor {
         actionService: SmartActionService,
         textInsertion: TextInsertionCoordinating,
         currentTranscript: @escaping @MainActor () -> String?,
-        frozenTarget: @escaping @MainActor () -> NSRunningApplication?
+        frozenTarget: @escaping @MainActor () -> NSRunningApplication?,
+        performAppStep: (@MainActor (ChainStep) -> Bool)? = nil
     ) {
         self.actionService = actionService
         self.textInsertion = textInsertion
         self.currentTranscript = currentTranscript
         self.frozenTarget = frozenTarget
+        self.performAppStep = performAppStep
     }
+
+    /// R5.6: dispatches app-level steps (.setMode/.setTone/.openWindow) to
+    /// the coordinator. Returns false to stop the chain.
+    private let performAppStep: (@MainActor (ChainStep) -> Bool)?
 
     func run(_ chain: WorkflowChain) async -> ChainRunResult {
         var workingText = ""
@@ -71,6 +78,13 @@ final class ChainExecutor {
                     workingText = result.output
                 } catch {
                     return failure(.actionFailed(error.localizedDescription), atIndex: index, workingText: workingText, clipboardFallback: false)
+                }
+
+            case .setMode, .setTone, .openWindow:
+                guard let performAppStep, performAppStep(step) else {
+                    return failure(
+                        .appStepFailed(step.summary), atIndex: index,
+                        workingText: workingText, clipboardFallback: false)
                 }
 
             case .insert:

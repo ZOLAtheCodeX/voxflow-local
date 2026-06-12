@@ -12,6 +12,7 @@ import os.log
     func setTranslationModeEnabled(_ isEnabled: Bool)
     func setMeetingModeEnabled(_ isEnabled: Bool)
     func setPromptModeEnabled(_ isEnabled: Bool)
+    func setProtocolCommandsEnabled(_ isEnabled: Bool)
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset)
     func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset)
     func selectInsertBehavior(_ behavior: InsertBehavior)
@@ -32,6 +33,7 @@ final class SettingsCoordinator: SettingsCoordinating {
     private let translationModeEnabledKey = "voxflow.translation.modeEnabled"
     private let meetingModeEnabledKey = "voxflow.meeting.modeEnabled"
     private let promptModeEnabledKey = "voxflow.prompt.modeEnabled"
+    private let protocolCommandsEnabledKey = "voxflow.protocols.enabled"
     private let dictationHotkeyPresetKey = "voxflow.hotkey.dictationPreset"
     private let commandLaneHotkeyPresetKey = "voxflow.hotkey.commandLanePreset"
     private let sttBackendKey = "voxflow.stt.backend"
@@ -108,6 +110,7 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.translationModeEnabled = defaults.bool(forKey: translationModeEnabledKey)
         state.meetingModeEnabled = defaults.bool(forKey: meetingModeEnabledKey)
         state.promptModeEnabled = defaults.bool(forKey: promptModeEnabledKey)
+        state.protocolCommandsEnabled = defaults.bool(forKey: protocolCommandsEnabledKey)
         if let dictationHotkeyRaw = defaults.string(forKey: dictationHotkeyPresetKey),
            let preset = DictationHotkeyPreset(rawValue: dictationHotkeyRaw) {
             state.dictationHotkeyPreset = preset
@@ -273,6 +276,14 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.statusLine = isEnabled
             ? "Prompt experimental mode enabled"
             : "Prompt experimental mode disabled"
+    }
+
+    func setProtocolCommandsEnabled(_ isEnabled: Bool) {
+        state.protocolCommandsEnabled = isEnabled
+        UserDefaults.standard.set(isEnabled, forKey: protocolCommandsEnabledKey)
+        state.statusLine = isEnabled
+            ? "Protocol commands enabled — say 'run <name> protocol' in the command lane"
+            : "Protocol commands disabled"
     }
 
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {

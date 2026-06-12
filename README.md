@@ -6,7 +6,7 @@ Mac-native, local-only dictation app with WhisperKit/Whisper STT, post-capture c
 
 - Main app window (Dashboard/Settings/Setup tabs) plus menu bar command palette (`SwiftUI` + `AppKit` bridge)
 - Global hold-to-talk hotkey (default `Fn` hold/release, configurable in Settings)
-- System command lane hotkey (default `Fn + Command + Space`, configurable in Settings) with alternate UI color state
+- In-app voice-control lane (default `Fn + Command + Space`, configurable): switch modes/tones/windows and run workflow chains by voice — see docs/voice-commands.md. Includes experimental voice-triggered protocol commands ('run memo protocol')
 - Keyboard-first palette shortcuts (`Opt+Cmd+1` setup, `Opt+Cmd+2` dashboard, `Opt+Cmd+V` cockpit, `Cmd+,` settings, `Cmd+Q` quit, `Esc` cancel capture/review)
 - Onboarding calibration flow (first run phrase capture)
 - Target-aware activation (focused text field / active cursor)

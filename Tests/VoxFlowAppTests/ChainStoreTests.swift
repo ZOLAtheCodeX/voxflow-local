@@ -199,4 +199,24 @@ final class ChainStoreTests: XCTestCase {
         """.utf8)
         XCTAssertThrowsError(try JSONDecoder().decode([ChainStep].self, from: json))
     }
+
+    // ── R5.6: app-level step kinds for voice protocols ──
+
+    func testNewStepKindsRoundTripThroughCodable() throws {
+        let steps: [ChainStep] = [
+            .setMode(mode: "meeting"),
+            .setTone(tone: "formal"),
+            .openWindow(window: "cockpit"),
+        ]
+        let data = try JSONEncoder().encode(steps)
+        let decoded = try JSONDecoder().decode([ChainStep].self, from: data)
+        XCTAssertEqual(decoded, steps)
+    }
+
+    func testNewStepSummaries() {
+        XCTAssertEqual(ChainStep.setMode(mode: "meeting").summary, "Mode: meeting")
+        XCTAssertEqual(ChainStep.setTone(tone: "formal").summary, "Tone: formal")
+        XCTAssertEqual(ChainStep.openWindow(window: "cockpit").summary, "Open: cockpit")
+    }
 }
+

@@ -69,7 +69,7 @@ struct CommandPaletteView: View {
                     Text("VoxFlow Local")
                         .font(VF.titleFont)
                     if state.isCommandLaneActive {
-                        Text("SYSTEM COMMAND")
+                        Text("VOICE CONTROL")
                             .font(VF.captionFont.weight(.bold))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)

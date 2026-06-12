@@ -22,6 +22,9 @@ final class CockpitCoordinator: ObservableObject {
     /// `.snippets` live at call time — never snapshot — so Settings edits are
     /// immediately visible to the review voice loop.
     private let snippetStore: SnippetStore?
+    /// R5.6: protocol lookup + dispatch, injected by AppCoordinator.
+    var chainProvider: ((String) -> WorkflowChain?)?
+    var onProtocolTriggered: ((WorkflowChain) -> Void)?
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCoordinator")
 
     // MARK: - Notion target state (Phase C)
@@ -101,6 +104,16 @@ final class CockpitCoordinator: ObservableObject {
 
     func handleVoiceUtterance(_ raw: String) async throws {
         guard sessionService.state == .reviewing else { return }
+        // R5.6: protocol trigger first (strict full-utterance grammar, off by
+        // default). Cockpit review is the second protocol surface after the
+        // command lane.
+        if state.protocolCommandsEnabled,
+           case .runProtocol(let name)? = CommandParser.parse(from: raw),
+           let chain = chainProvider?(name) {
+            state.statusLine = "Running protocol: \(chain.name)"
+            onProtocolTriggered?(chain)
+            return
+        }
         switch VoiceCommandRouter.parse(raw) {
         case .none:
             // Reserved/action words already lost (parse returned .none); try a

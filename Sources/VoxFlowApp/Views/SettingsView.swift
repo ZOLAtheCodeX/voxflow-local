@@ -698,6 +698,14 @@ struct SettingsView: View {
     private var advancedTab: some View {
         Form {
             Section("Workflow") {
+                Toggle("Protocol commands (experimental)", isOn: Binding(
+                    get: { state.protocolCommandsEnabled },
+                    set: { coordinator.settings.setProtocolCommandsEnabled($0) }
+                ))
+                Text("Say \u{201C}run <name> protocol\u{201D} in the voice-control lane or cockpit review to run a workflow chain by voice. The whole phrase must match exactly; low-confidence transcriptions never trigger.")
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+
                 Toggle(
                     "Enable Experimental Translate Mode (EN→DE)",
                     isOn: Binding(
