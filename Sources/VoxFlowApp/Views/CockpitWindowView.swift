@@ -50,6 +50,34 @@ struct CockpitWindowView: View {
             }
         }
         .animation(VF.animationStandard, value: showPalette)
+        .overlay {
+            // R5.4: preview-before-send gate + response card.
+            if let preview = state.handoffPreview {
+                handoffCard(
+                    title: "Send to assistant?",
+                    body: preview,
+                    primary: ("Send", { appCoordinator?.confirmAssistantHandoff() }),
+                    secondary: ("Cancel", { appCoordinator?.dismissAssistantHandoff() }),
+                    footnote: "Runs: \(state.assistantHandoffCommand) — transcript is passed on stdin. Nothing executes automatically."
+                )
+            } else if state.handoffInFlight {
+                ProgressView("Waiting for assistant…")
+                    .padding(VF.spacingLarge)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+            } else if let result = state.handoffResult {
+                handoffCard(
+                    title: "Assistant response",
+                    body: result,
+                    primary: ("Copy", {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(result, forType: .string)
+                        appCoordinator?.dismissAssistantHandoff()
+                    }),
+                    secondary: ("Dismiss", { appCoordinator?.dismissAssistantHandoff() }),
+                    footnote: nil
+                )
+            }
+        }
         .background(
             KeyEventBridge { event in
                 handleKey(event)
@@ -64,6 +92,45 @@ struct CockpitWindowView: View {
                 coordinator.didEnterReviewState()
             }
         }
+    }
+
+    /// AppCoordinator reference for the handoff flow (the cockpit otherwise
+    /// only knows its own coordinator).
+    private var appCoordinator: AppCoordinator? { AppCoordinator.shared }
+
+    private func handoffCard(
+        title: String,
+        body text: String,
+        primary: (String, () -> Void),
+        secondary: (String, () -> Void),
+        footnote: String?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: VF.spacingMedium) {
+            Text(title).font(VF.titleFont)
+            ScrollView {
+                Text(text)
+                    .font(VF.bodyFont)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 220)
+            .padding(VF.spacingSmall)
+            .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
+            if let footnote {
+                Text(footnote).font(VF.microFont).foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button(secondary.0, action: secondary.1)
+                    .keyboardShortcut(.escape, modifiers: [])
+                Button(primary.0, action: primary.1)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(VF.spacingLarge)
+        .frame(width: 480)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+        .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
     }
 
     private var mainPane: some View {

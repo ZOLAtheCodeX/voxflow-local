@@ -25,6 +25,11 @@ final class CockpitCoordinator: ObservableObject {
     /// R5.6: protocol lookup + dispatch, injected by AppCoordinator.
     var chainProvider: ((String) -> WorkflowChain?)?
     var onProtocolTriggered: ((WorkflowChain) -> Void)?
+    /// R5.4: side-panel handoff button routes here; AppCoordinator stages
+    /// the preview gate.
+    var onHandoffRequested: (() -> Void)?
+
+    func requestAssistantHandoff() { onHandoffRequested?() }
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCoordinator")
 
     // MARK: - Notion target state (Phase C)

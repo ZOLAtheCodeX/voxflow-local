@@ -42,6 +42,14 @@ final class AppState: ObservableObject {
     @Published var privateAPIKeyConfigured: Bool = false
     /// R5.6: voice-triggered protocols (experimental, off by default).
     @Published var protocolCommandsEnabled: Bool = false
+    /// R5.4: assistant handoff (experimental, off by default).
+    @Published var assistantHandoffEnabled: Bool = false
+    @Published var assistantHandoffCommand: String = ""
+    /// Pending handoff payload awaiting explicit user approval (preview card).
+    @Published var handoffPreview: String?
+    /// Last handoff response, shown for review/copy/append.
+    @Published var handoffResult: String?
+    @Published var handoffInFlight: Bool = false
     @Published var openAIBaseURL: String = "https://api.openai.com"
     @Published var openAISTTModel: String = "whisper-1"
     @Published var hostMemoryGB: Int = max(1, Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824))

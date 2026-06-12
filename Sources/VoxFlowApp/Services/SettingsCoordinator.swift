@@ -13,6 +13,8 @@ import os.log
     func setMeetingModeEnabled(_ isEnabled: Bool)
     func setPromptModeEnabled(_ isEnabled: Bool)
     func setProtocolCommandsEnabled(_ isEnabled: Bool)
+    func setAssistantHandoffEnabled(_ isEnabled: Bool)
+    func updateAssistantHandoffCommand(_ command: String)
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset)
     func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset)
     func selectInsertBehavior(_ behavior: InsertBehavior)
@@ -34,6 +36,8 @@ final class SettingsCoordinator: SettingsCoordinating {
     private let meetingModeEnabledKey = "voxflow.meeting.modeEnabled"
     private let promptModeEnabledKey = "voxflow.prompt.modeEnabled"
     private let protocolCommandsEnabledKey = "voxflow.protocols.enabled"
+    private let handoffEnabledKey = "voxflow.handoff.enabled"
+    private let handoffCommandKey = "voxflow.handoff.command"
     private let dictationHotkeyPresetKey = "voxflow.hotkey.dictationPreset"
     private let commandLaneHotkeyPresetKey = "voxflow.hotkey.commandLanePreset"
     private let sttBackendKey = "voxflow.stt.backend"
@@ -111,6 +115,8 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.meetingModeEnabled = defaults.bool(forKey: meetingModeEnabledKey)
         state.promptModeEnabled = defaults.bool(forKey: promptModeEnabledKey)
         state.protocolCommandsEnabled = defaults.bool(forKey: protocolCommandsEnabledKey)
+        state.assistantHandoffEnabled = defaults.bool(forKey: handoffEnabledKey)
+        state.assistantHandoffCommand = defaults.string(forKey: handoffCommandKey) ?? ""
         if let dictationHotkeyRaw = defaults.string(forKey: dictationHotkeyPresetKey),
            let preset = DictationHotkeyPreset(rawValue: dictationHotkeyRaw) {
             state.dictationHotkeyPreset = preset
@@ -284,6 +290,18 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.statusLine = isEnabled
             ? "Protocol commands enabled — say 'run <name> protocol' in the command lane"
             : "Protocol commands disabled"
+    }
+
+    func setAssistantHandoffEnabled(_ isEnabled: Bool) {
+        state.assistantHandoffEnabled = isEnabled
+        UserDefaults.standard.set(isEnabled, forKey: handoffEnabledKey)
+        state.statusLine = isEnabled ? "Assistant handoff enabled" : "Assistant handoff disabled"
+    }
+
+    func updateAssistantHandoffCommand(_ command: String) {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.assistantHandoffCommand = trimmed
+        UserDefaults.standard.set(trimmed, forKey: handoffCommandKey)
     }
 
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset) {

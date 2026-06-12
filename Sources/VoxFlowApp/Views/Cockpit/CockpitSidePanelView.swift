@@ -19,6 +19,7 @@ struct CockpitSidePanelView: View {
             targetSection
             notionSection
             dictionarySection
+            assistantSection
             recentSection
             Spacer()
         }
@@ -50,6 +51,24 @@ struct CockpitSidePanelView: View {
             }
             .padding(VF.spacingSmall)
             .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
+        }
+    }
+
+    @ViewBuilder private var assistantSection: some View {
+        if state.assistantHandoffEnabled {
+            VStack(alignment: .leading, spacing: 6) {
+                sectionTitle("Assistant")
+                Button {
+                    coordinator.requestAssistantHandoff()
+                } label: {
+                    Label("Send to Assistant…", systemImage: "paperplane")
+                        .font(VF.captionFont)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Preview the transcript, then hand it to your configured agent CLI")
+                .accessibilityLabel("Send transcript to assistant")
+            }
         }
     }
 

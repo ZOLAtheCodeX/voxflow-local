@@ -96,6 +96,12 @@ final class AppCoordinator: ObservableObject {
     private(set) var settings: SettingsCoordinating!
     private(set) lazy var onboarding: OnboardingCoordinating = OnboardingCoordinator(state: state)
     private(set) lazy var insertionAudit = InsertionAuditLog()
+    // R5.4: experimental assistant handoff — transcript via STDIN to a
+    // user-configured CLI, preview-gated, never auto-executed.
+    private(set) lazy var assistantHandoff = AssistantHandoffService(
+        isEnabled: { [weak self] in self?.state.assistantHandoffEnabled ?? false },
+        command: { [weak self] in self?.state.assistantHandoffCommand ?? "" }
+    )
     private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService, audit: insertionAudit)
     private(set) lazy var benchmark: TranslationBenchmarkCoordinating = TranslationBenchmarkCoordinator(state: state, backendManager: backendManager, settings: settings)
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
@@ -211,6 +217,8 @@ final class AppCoordinator: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        cockpit.onHandoffRequested = { [weak self] in self?.requestAssistantHandoff() }
 
         // R5.6: cockpit review can trigger protocols (gated inside the
         // coordinator on state.protocolCommandsEnabled + strict grammar).
@@ -1510,6 +1518,46 @@ final class AppCoordinator: ObservableObject {
     /// strict full-utterance grammar: the feature is off by default, and a
     /// low-confidence transcription never fires a macro (the ghost-hello
     /// lesson applied forward — hallucinated audio must not run automations).
+    // MARK: - Assistant handoff (R5.4)
+
+    /// Stage the payload for explicit approval — the preview card is the
+    /// gate; nothing leaves the app until confirmAssistantHandoff().
+    func requestAssistantHandoff() {
+        guard state.assistantHandoffEnabled else {
+            state.statusLine = "Assistant handoff is disabled (Settings ▸ Advanced)"
+            return
+        }
+        guard let transcript = cockpitSessionService.currentSession?.transcript,
+              !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            state.statusLine = "Nothing to hand off — transcript is empty"
+            return
+        }
+        state.handoffPreview = transcript
+    }
+
+    func confirmAssistantHandoff() {
+        guard let payload = state.handoffPreview else { return }
+        state.handoffPreview = nil
+        state.handoffInFlight = true
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.assistantHandoff.run(transcript: payload)
+            self.state.handoffInFlight = false
+            switch result {
+            case .success(let output):
+                self.state.handoffResult = output
+                self.state.statusLine = "Assistant responded"
+            case .failure(let error):
+                self.state.statusLine = "Handoff failed: \(String(describing: error))"
+            }
+        }
+    }
+
+    func dismissAssistantHandoff() {
+        state.handoffPreview = nil
+        state.handoffResult = nil
+    }
+
     /// R5.6: app-level chain steps. Returns false (stopping the chain) for
     /// unknown values so a typo'd protocol fails loudly instead of half-running.
     private func performChainAppStep(_ step: ChainStep) -> Bool {

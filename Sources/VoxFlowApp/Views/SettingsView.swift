@@ -706,6 +706,21 @@ struct SettingsView: View {
                     .font(VF.captionFont)
                     .foregroundStyle(.secondary)
 
+                Toggle("Assistant handoff (experimental)", isOn: Binding(
+                    get: { state.assistantHandoffEnabled },
+                    set: { coordinator.settings.setAssistantHandoffEnabled($0) }
+                ))
+                if state.assistantHandoffEnabled {
+                    TextField("Agent command (receives transcript on stdin)", text: Binding(
+                        get: { state.assistantHandoffCommand },
+                        set: { coordinator.settings.updateAssistantHandoffCommand($0) }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    Text("Example: claude -p — the cockpit transcript is piped to this command after you approve a visible preview. The response is only displayed; nothing executes automatically.")
+                        .font(VF.captionFont)
+                        .foregroundStyle(.secondary)
+                }
+
                 Toggle(
                     "Enable Experimental Translate Mode (EN→DE)",
                     isOn: Binding(
