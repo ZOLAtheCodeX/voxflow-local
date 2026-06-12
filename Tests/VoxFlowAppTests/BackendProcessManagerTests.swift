@@ -114,7 +114,7 @@ extension BackendProcessManagerTests {
     }
 
     func testInstanceStampIsStablePerManager() {
-        let manager = BackendProcessManager()
+        let manager = BackendProcessManager(runner: BackendProcessRunnerFake())
         XCTAssertFalse(manager.instanceStamp.isEmpty)
         XCTAssertEqual(manager.instanceStamp, manager.instanceStamp)
     }

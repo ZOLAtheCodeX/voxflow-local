@@ -365,8 +365,14 @@ final class AppCoordinator: ObservableObject {
 
     /// Dev escape hatch for the stale-listener checks: pair the app with a
     /// manually launched backend (`run_backend.sh`) instead of killing it.
+    /// Also forced on under XCTest: AppCoordinator is a singleton whose init
+    /// starts warmup, so any test touching `.shared` would otherwise probe
+    /// the REAL port 8765 with a stamp no live backend can match — and
+    /// SIGTERM the developer's running backend (the exact test-side-effect
+    /// class behind the ghost-hello and squatter incidents).
     private static let adoptForeignBackendOverride =
         ProcessInfo.processInfo.environment["VOXFLOW_ADOPT_FOREIGN_BACKEND"] == "1"
+        || NSClassFromString("XCTestCase") != nil
 
     /// Launch-time identity probe (stale-backend hardening, 2026-06-12).
     /// The idle early-return below is the ONLY readiness path in WhisperKit
@@ -375,6 +381,9 @@ final class AppCoordinator: ObservableObject {
     /// yet smart actions still POST to whatever listens on 8765.
     /// Returns true when a stale listener was terminated.
     private func reapStaleIdleListenerIfNeeded() async -> Bool {
+        // The override must gate BOTH kill paths below (identity terminate
+        // and PID-file reap), so short-circuit before probing at all.
+        guard !Self.adoptForeignBackendOverride else { return false }
         var listenerResponded = false
         var reportedStamp: String?
         do {

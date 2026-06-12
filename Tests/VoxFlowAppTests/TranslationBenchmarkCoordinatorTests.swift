@@ -6,7 +6,8 @@ final class TranslationBenchmarkCoordinatorTests: XCTestCase {
     @MainActor
     private func makeSUT() -> (TranslationBenchmarkCoordinator, AppState) {
         let state = AppState()
-        let backendManager = BackendProcessManager()
+        // Fake runner: never let a unit test reach the real spawn pipeline.
+        let backendManager = BackendProcessManager(runner: BackendProcessRunnerFake())
         let settings = SettingsCoordinator(state: state, backendManager: backendManager)
         let sut = TranslationBenchmarkCoordinator(
             state: state,

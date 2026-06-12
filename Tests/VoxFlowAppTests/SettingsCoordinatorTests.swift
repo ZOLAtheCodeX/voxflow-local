@@ -6,7 +6,10 @@ final class SettingsCoordinatorTests: XCTestCase {
     @MainActor
     private func makeSUT() -> (SettingsCoordinator, AppState, BackendProcessManager) {
         let state = AppState()
-        let backend = BackendProcessManager()
+        // Fake runner: a real one lets restart/stop paths touch the live
+        // system (the idle-restart test was deleting the production PID
+        // file on every suite run).
+        let backend = BackendProcessManager(runner: BackendProcessRunnerFake())
         let sut = SettingsCoordinator(state: state, backendManager: backend)
         return (sut, state, backend)
     }
