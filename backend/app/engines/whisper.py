@@ -2,7 +2,7 @@
 
 WhisperEngine wraps the local HuggingFace transformers pipeline for on-device
 transcription with coverage-based confidence estimation. OpenAIAudioClient
-talks to the OpenAI Whisper-1 API (cloud fallback) plus TTS endpoint.
+talks to the OpenAI Whisper-1 API (cloud fallback).
 
 Both engines return STTExecutionResult to give callers a uniform shape.
 """
@@ -296,8 +296,6 @@ class OpenAIAudioClient:
         self.base_url = os.environ.get("VOXFLOW_OPENAI_BASE_URL", "https://api.openai.com").strip() or "https://api.openai.com"
         self.api_key = os.environ.get("VOXFLOW_OPENAI_API_KEY", "").strip()
         self.stt_model = os.environ.get("VOXFLOW_OPENAI_STT_MODEL", "whisper-1").strip() or "whisper-1"
-        self.tts_model = os.environ.get("VOXFLOW_OPENAI_TTS_MODEL", "gpt-4o-mini-tts").strip() or "gpt-4o-mini-tts"
-        self.tts_voice = os.environ.get("VOXFLOW_OPENAI_TTS_VOICE", "alloy").strip() or "alloy"
 
     @property
     def configured(self) -> bool:
@@ -423,32 +421,3 @@ class OpenAIAudioClient:
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"OpenAI STT parse failure: {exc}") from exc
 
-    def synthesize(self, text: str, voice: str, fmt: str) -> bytes:
-        if not self.configured:
-            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
-
-        payload = {
-            "model": self.tts_model,
-            "voice": voice or self.tts_voice,
-            "input": text,
-            "response_format": fmt,
-        }
-        body = json.dumps(payload).encode("utf-8")
-        request = urlrequest.Request(
-            url=self._endpoint("/v1/audio/speech"),
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-        )
-
-        try:
-            with urlrequest.urlopen(request, timeout=40) as response:
-                return response.read()
-        except urlerror.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise HTTPException(status_code=502, detail=f"OpenAI TTS HTTP error: {detail[:160]}") from exc
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"OpenAI TTS request failed: {exc}") from exc

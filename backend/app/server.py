@@ -131,8 +131,6 @@ from schemas import (  # noqa: F401
     TranscribeResponse,
     TranslateRequest,
     TranslateResponse,
-    TTSRequest,
-    TTSResponse,
 )
 
 # WebSocket idle timeout — tests monkeypatch this via ``server._WEBSOCKET_IDLE_TIMEOUT_S``
@@ -154,7 +152,6 @@ from api.endpoints import (  # noqa: E402, F401
     smart_action,
     transcribe,
     translate,
-    tts,
 )
 
 # ── Application setup ────────────────────────────────────────────────

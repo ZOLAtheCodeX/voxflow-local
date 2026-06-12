@@ -17,8 +17,6 @@ final class BackendProcessManagerTests: XCTestCase {
             openAIBaseURL: "",
             openAIAPIKey: "",
             openAISTTModel: "",
-            openAITTSModel: "",
-            openAITTSVoice: ""
         )
 
         XCTAssertEqual(manager.crashRestartCount, 0)
@@ -43,8 +41,6 @@ final class BackendProcessManagerTests: XCTestCase {
             openAIBaseURL: "",
             openAIAPIKey: "",
             openAISTTModel: "",
-            openAITTSModel: "",
-            openAITTSVoice: ""
         )
 
         // Set crashRestartCount to max (3)

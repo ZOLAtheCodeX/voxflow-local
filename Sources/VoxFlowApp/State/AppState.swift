@@ -42,8 +42,6 @@ final class AppState: ObservableObject {
     @Published var privateAPIKeyConfigured: Bool = false
     @Published var openAIBaseURL: String = "https://api.openai.com"
     @Published var openAISTTModel: String = "whisper-1"
-    @Published var openAITTSModel: String = "gpt-4o-mini-tts"
-    @Published var openAITTSVoice: String = "alloy"
     @Published var hostMemoryGB: Int = max(1, Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824))
     @Published var isBenchmarkRunning = false
     @Published var benchmarkStatusLine: String?

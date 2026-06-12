@@ -80,8 +80,6 @@ from schemas import (
     TranscribeResponse,
     TranslateRequest,
     TranslateResponse,
-    TTSRequest,
-    TTSResponse,
 )
 
 logger = logging.getLogger("voxflow")
@@ -234,20 +232,6 @@ async def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
         model_loaded_after_request=result.model_loaded_after_request,
         cold_start=result.cold_start,
     )
-
-
-@router.post("/v1/tts", response_model=TTSResponse)
-def tts(payload: TTSRequest) -> TTSResponse:
-    text = normalize_whitespace(payload.text)
-    if not text:
-        raise HTTPException(status_code=400, detail="text is empty")
-
-    fmt = payload.format.lower()
-    if fmt not in {"mp3", "wav", "opus"}:
-        raise HTTPException(status_code=400, detail="Unsupported format. Use mp3, wav, or opus.")
-
-    audio_bytes = openai_audio_client.synthesize(text=text, voice=payload.voice, fmt=fmt)
-    return TTSResponse(audio_base64=base64.b64encode(audio_bytes).decode("utf-8"), format=fmt)
 
 
 @router.post("/v1/privacy/preview", response_model=PrivacyPreviewResponse)

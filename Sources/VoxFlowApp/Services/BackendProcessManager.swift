@@ -17,8 +17,6 @@ struct BackendLaunchConfiguration: Equatable, Sendable {
     let openAIBaseURL: String
     let openAIAPIKey: String
     let openAISTTModel: String
-    let openAITTSModel: String
-    let openAITTSVoice: String
     /// BYOM (R3.6): env-name -> API-key pairs resolved from the Keychain at
     /// launch time for providers declared in providers.json. Keys transit
     /// process environment only — never the config file.
@@ -416,8 +414,6 @@ final class BackendProcessManager: @unchecked Sendable {
         environment["VOXFLOW_OPENAI_BASE_URL"] = configuration.openAIBaseURL
         environment["VOXFLOW_OPENAI_API_KEY"] = configuration.openAIAPIKey
         environment["VOXFLOW_OPENAI_STT_MODEL"] = configuration.openAISTTModel
-        environment["VOXFLOW_OPENAI_TTS_MODEL"] = configuration.openAITTSModel
-        environment["VOXFLOW_OPENAI_TTS_VOICE"] = configuration.openAITTSVoice
         for (envName, key) in configuration.providerKeys where envName.hasPrefix("VOXFLOW_PROVIDER_KEY_") {
             environment[envName] = key
         }

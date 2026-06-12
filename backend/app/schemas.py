@@ -113,17 +113,6 @@ class PromptFrameResponse(BaseModel):
     detected_intent: str
 
 
-class TTSRequest(BaseModel):
-    text: str
-    voice: str = "alloy"
-    format: str = "mp3"
-
-
-class TTSResponse(BaseModel):
-    audio_base64: str
-    format: str
-
-
 class PrivacyPreviewRequest(BaseModel):
     session_id: str
     operation: str

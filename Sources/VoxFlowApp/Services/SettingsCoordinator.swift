@@ -7,7 +7,7 @@ import os.log
     func selectSTTBackend(_ backend: STTBackend)
     func updateLocalWhisperModel(whisperModel: String)
     func updatePrivateAPIConfig(baseURL: String, model: String, apiKey: String)
-    func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String, ttsModel: String, ttsVoice: String)
+    func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String)
     func selectTranslationProfile(_ profile: TranslationProfile)
     func setTranslationModeEnabled(_ isEnabled: Bool)
     func setMeetingModeEnabled(_ isEnabled: Bool)
@@ -45,8 +45,6 @@ final class SettingsCoordinator: SettingsCoordinating {
     private let openAIBaseURLKey = "voxflow.openai.baseURL"
     private let openAIAPIKeyKey = "voxflow.openai.apiKey"
     private let openAISTTModelKey = "voxflow.openai.sttModel"
-    private let openAITTSModelKey = "voxflow.openai.ttsModel"
-    private let openAITTSVoiceKey = "voxflow.openai.ttsVoice"
 
     static let keychainPrivateAPIKeyAccount = "voxflow.privateapi.key"
     static let keychainOpenAIAPIKeyAccount = "voxflow.openai.apiKey"
@@ -107,8 +105,6 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.privateAPIKeyConfigured = !(KeychainService.load(account: Self.keychainPrivateAPIKeyAccount) ?? "").isEmpty
         state.openAIBaseURL = defaults.string(forKey: openAIBaseURLKey) ?? "https://api.openai.com"
         state.openAISTTModel = defaults.string(forKey: openAISTTModelKey) ?? "whisper-1"
-        state.openAITTSModel = defaults.string(forKey: openAITTSModelKey) ?? "gpt-4o-mini-tts"
-        state.openAITTSVoice = defaults.string(forKey: openAITTSVoiceKey) ?? "alloy"
         state.translationModeEnabled = defaults.bool(forKey: translationModeEnabledKey)
         state.meetingModeEnabled = defaults.bool(forKey: meetingModeEnabledKey)
         state.promptModeEnabled = defaults.bool(forKey: promptModeEnabledKey)
@@ -198,29 +194,17 @@ final class SettingsCoordinator: SettingsCoordinating {
         restartBackendWithCurrentConfiguration(status: "Private API configuration updated")
     }
 
-    func updateOpenAIConfig(
-        baseURL: String,
-        apiKey: String,
-        sttModel: String,
-        ttsModel: String,
-        ttsVoice: String
-    ) {
+    func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String) {
         let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSTTModel = sttModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedTTSModel = ttsModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedTTSVoice = ttsVoice.trimmingCharacters(in: .whitespacesAndNewlines)
 
         state.openAIBaseURL = trimmedBaseURL.isEmpty ? "https://api.openai.com" : trimmedBaseURL
         state.openAISTTModel = trimmedSTTModel.isEmpty ? "whisper-1" : trimmedSTTModel
-        state.openAITTSModel = trimmedTTSModel.isEmpty ? "gpt-4o-mini-tts" : trimmedTTSModel
-        state.openAITTSVoice = trimmedTTSVoice.isEmpty ? "alloy" : trimmedTTSVoice
 
         UserDefaults.standard.set(state.openAIBaseURL, forKey: openAIBaseURLKey)
         KeychainService.save(account: Self.keychainOpenAIAPIKeyAccount, value: trimmedAPIKey)
         UserDefaults.standard.set(state.openAISTTModel, forKey: openAISTTModelKey)
-        UserDefaults.standard.set(state.openAITTSModel, forKey: openAITTSModelKey)
-        UserDefaults.standard.set(state.openAITTSVoice, forKey: openAITTSVoiceKey)
 
         restartBackendWithCurrentConfiguration(status: "OpenAI speech configuration updated")
     }
@@ -371,8 +355,6 @@ final class SettingsCoordinator: SettingsCoordinating {
             openAIBaseURL: state.openAIBaseURL,
             openAIAPIKey: KeychainService.load(account: Self.keychainOpenAIAPIKeyAccount) ?? "",
             openAISTTModel: state.openAISTTModel,
-            openAITTSModel: state.openAITTSModel,
-            openAITTSVoice: state.openAITTSVoice,
             providerKeys: providerKeysResolver()
         )
     }

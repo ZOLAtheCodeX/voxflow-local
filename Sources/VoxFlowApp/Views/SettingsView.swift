@@ -35,8 +35,6 @@ struct SettingsView: View {
     @State private var openAIBaseURLDraft = ""
     @State private var openAIAPIKeyDraft = ""
     @State private var openAISTTModelDraft = ""
-    @State private var openAITTSModelDraft = ""
-    @State private var openAITTSVoiceDraft = ""
     @State private var localWhisperModelDraft = ""
     @State private var ollamaStatus: OllamaModelsResponse?
     @State private var ollamaLoadError: String?
@@ -73,8 +71,6 @@ struct SettingsView: View {
             openAIBaseURLDraft = state.openAIBaseURL
             openAIAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainOpenAIAPIKeyAccount) ?? ""
             openAISTTModelDraft = state.openAISTTModel
-            openAITTSModelDraft = state.openAITTSModel
-            openAITTSVoiceDraft = state.openAITTSVoice
             localWhisperModelDraft = state.localWhisperModel
             notionToken = KeychainService.load(account: NotionKeychain.account) ?? ""
         }
@@ -316,18 +312,12 @@ struct SettingsView: View {
                             .textFieldStyle(.roundedBorder)
                         TextField("OpenAI STT Model", text: $openAISTTModelDraft)
                             .textFieldStyle(.roundedBorder)
-                        TextField("OpenAI TTS Model", text: $openAITTSModelDraft)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("OpenAI TTS Voice", text: $openAITTSVoiceDraft)
-                            .textFieldStyle(.roundedBorder)
 
                         Button("Apply OpenAI Speech Config") {
                             coordinator.updateOpenAIConfig(
                                 baseURL: openAIBaseURLDraft,
                                 apiKey: openAIAPIKeyDraft,
-                                sttModel: openAISTTModelDraft,
-                                ttsModel: openAITTSModelDraft,
-                                ttsVoice: openAITTSVoiceDraft
+                                sttModel: openAISTTModelDraft
                             )
                         }
                         .buttonStyle(.borderedProminent)

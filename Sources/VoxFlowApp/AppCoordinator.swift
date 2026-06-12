@@ -1062,8 +1062,8 @@ final class AppCoordinator: ObservableObject {
         settings.updatePrivateAPIConfig(baseURL: baseURL, model: model, apiKey: apiKey)
         scheduleRuntimeWarmupIfNeeded()
     }
-    func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String, ttsModel: String, ttsVoice: String) {
-        settings.updateOpenAIConfig(baseURL: baseURL, apiKey: apiKey, sttModel: sttModel, ttsModel: ttsModel, ttsVoice: ttsVoice)
+    func updateOpenAIConfig(baseURL: String, apiKey: String, sttModel: String) {
+        settings.updateOpenAIConfig(baseURL: baseURL, apiKey: apiKey, sttModel: sttModel)
         scheduleRuntimeWarmupIfNeeded()
     }
 
