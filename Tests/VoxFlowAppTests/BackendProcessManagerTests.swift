@@ -58,3 +58,26 @@ final class BackendProcessManagerTests: XCTestCase {
         XCTAssertEqual(manager.lastStartupFailureReason, "Backend crashed 3 times — restart manually in Settings")
     }
 }
+
+extension BackendProcessManagerTests {
+    /// R4.7: stale-backend verdict. Absent stamps are stale by definition
+    /// (pre-stamp backends); a manager-owned process is never foreign.
+    func testForeignBackendVerdict() {
+        XCTAssertTrue(BackendProcessManager.isForeignBackend(
+            reportedStamp: "", expectedStamp: "me", managerOwnsProcess: false))
+        XCTAssertTrue(BackendProcessManager.isForeignBackend(
+            reportedStamp: nil, expectedStamp: "me", managerOwnsProcess: false))
+        XCTAssertTrue(BackendProcessManager.isForeignBackend(
+            reportedStamp: "other", expectedStamp: "me", managerOwnsProcess: false))
+        XCTAssertFalse(BackendProcessManager.isForeignBackend(
+            reportedStamp: "me", expectedStamp: "me", managerOwnsProcess: false))
+        XCTAssertFalse(BackendProcessManager.isForeignBackend(
+            reportedStamp: "other", expectedStamp: "me", managerOwnsProcess: true))
+    }
+
+    func testInstanceStampIsStablePerManager() {
+        let manager = BackendProcessManager()
+        XCTAssertFalse(manager.instanceStamp.isEmpty)
+        XCTAssertEqual(manager.instanceStamp, manager.instanceStamp)
+    }
+}

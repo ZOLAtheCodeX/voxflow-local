@@ -97,6 +97,10 @@ def health() -> dict[str, str]:
     privacy_policy = provider_router.private_api_policy()
     return {
         "service_status": state.service_status,
+        # R4.7: echoes VOXFLOW_INSTANCE_STAMP from the launch environment so
+        # the app can detect a stale/foreign backend squatting on the port
+        # (a 2-week-old backend served the app undetected on 2026-06-12).
+        "instance_stamp": os.environ.get("VOXFLOW_INSTANCE_STAMP", ""),
         "model_loaded": str(state.model_loaded).lower(),
         "mps_available": str(state.mps_available).lower(),
         "offline_mode": str(state.offline_mode).lower(),

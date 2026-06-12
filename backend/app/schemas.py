@@ -265,6 +265,8 @@ class ReadyResponse(BaseModel):
     private_api_policy_version: str
     private_api_policy_ready: bool
     ollama_available: bool = False
+    # R4.7: launch-environment stamp echo for stale-backend detection.
+    instance_stamp: str = ""
     # BYOM (R3.4)
     polish_chain: list[str] = Field(default_factory=list)
     smart_action_chain: list[str] = Field(default_factory=list)

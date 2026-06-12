@@ -27,6 +27,42 @@ struct BackendLaunchConfiguration: Equatable, Sendable {
 
 final class BackendProcessManager: @unchecked Sendable {
     private static let defaultBackendPort = 8765
+
+    /// R4.7: per-app-launch stamp passed to the backend as
+    /// VOXFLOW_INSTANCE_STAMP and echoed on /v1/health + /v1/ready. A
+    /// healthy port answered WITHOUT this stamp is a stale or foreign
+    /// backend (the 2026-06-12 incident: a 2-week-old process served the
+    /// app undetected) and gets replaced.
+    let instanceStamp = UUID().uuidString
+
+    /// Pure verdict: a responder is foreign when this manager does NOT own
+    /// a running child and the echoed stamp differs (absent counts as
+    /// differing — pre-stamp backends are by definition stale).
+    static func isForeignBackend(reportedStamp: String?, expectedStamp: String, managerOwnsProcess: Bool) -> Bool {
+        guard !managerOwnsProcess else { return false }
+        return (reportedStamp ?? "") != expectedStamp
+    }
+
+    /// Terminate whatever is listening on the backend port (SIGTERM). Only
+    /// called after a foreign verdict; never signals our own process.
+    func terminateForeignListenerAsync(port: Int = BackendProcessManager.defaultBackendPort) {
+        workQueue.async {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            task.arguments = ["-nP", "-t", "-iTCP:\(port)", "-sTCP:LISTEN"]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            do { try task.run() } catch { return }
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let ownPid = ProcessInfo.processInfo.processIdentifier
+            for line in (String(data: data, encoding: .utf8) ?? "").split(separator: "\n") {
+                if let pid = Int32(line.trimmingCharacters(in: .whitespaces)), pid != ownPid {
+                    kill(pid, SIGTERM)
+                }
+            }
+        }
+    }
     private let workQueue = DispatchQueue(label: "local.voxflow.app.backend-process-manager")
     private let workQueueSpecificKey = DispatchSpecificKey<UInt8>()
     private let workQueueSpecificValue: UInt8 = 1
@@ -362,6 +398,7 @@ final class BackendProcessManager: @unchecked Sendable {
             environment["VOXFLOW_MODELS_DIR"] = modelsDir
         }
         environment["PYTHONUNBUFFERED"] = "1"
+        environment["VOXFLOW_INSTANCE_STAMP"] = instanceStamp
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment["VOXFLOW_OFFLINE"] = "1"
         environment["VOXFLOW_STT_BACKEND"] = configuration.sttBackend

@@ -524,3 +524,18 @@ class TestSTTFallbackChain:
         assert "cloud transcription" in resp.json()["text"]
         assert router.stt_fallback_active() is True
 
+
+
+class TestInstanceStamp:
+    """R4.7: the app launches the backend with VOXFLOW_INSTANCE_STAMP and
+    verifies the echo — a healthy-looking port answered by a stale or
+    foreign backend (the 2026-06-12 incident: a 2-week-old process) must
+    be detectable, never silently trusted."""
+
+    @pytest.mark.anyio
+    async def test_ready_and_health_echo_the_launch_stamp(self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("VOXFLOW_INSTANCE_STAMP", "stamp-abc-123")
+        ready = await client.get("/v1/ready")
+        assert ready.json()["instance_stamp"] == "stamp-abc-123"
+        health = await client.get("/v1/health")
+        assert health.json()["instance_stamp"] == "stamp-abc-123"

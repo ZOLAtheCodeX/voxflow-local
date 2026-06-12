@@ -344,6 +344,22 @@ final class AppCoordinator: ObservableObject {
 
         do {
             let readiness = try await BackendAPIClient.ready()
+            // R4.7: a healthy port answered by a backend we didn't launch is
+            // stale/foreign — replace it instead of silently trusting it.
+            if BackendProcessManager.isForeignBackend(
+                reportedStamp: readiness.instanceStamp,
+                expectedStamp: backendManager.instanceStamp,
+                managerOwnsProcess: backendManager.isRunning
+            ) {
+                log.warning("Foreign/stale backend on port 8765 (stamp mismatch) — terminating")
+                backendManager.terminateForeignListenerAsync()
+                state.backendReadiness.readyForDictation = false
+                state.backendReadiness.statusSummary = "Stale backend replaced — restarting"
+                if state.backendShouldRun {
+                    backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
+                }
+                return
+            }
             state.backendReadiness.readyForDictation = readiness.readyForDictation
             state.backendReadiness.warmupInProgress = false
             state.backendReadiness.readinessIssue = readiness.issues.first

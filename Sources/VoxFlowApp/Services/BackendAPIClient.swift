@@ -80,6 +80,7 @@ struct BackendReadinessResponse: Codable {
     let activePolishProvider: String
     let activePolishModel: String
     let polishChain: [String]
+    let instanceStamp: String
     let issues: [String]
 
     init(
@@ -102,6 +103,7 @@ struct BackendReadinessResponse: Codable {
         activePolishProvider: String = "",
         activePolishModel: String = "",
         polishChain: [String] = [],
+        instanceStamp: String = "",
         issues: [String]
     ) {
         self.serviceStatus = serviceStatus
@@ -123,6 +125,7 @@ struct BackendReadinessResponse: Codable {
         self.activePolishProvider = activePolishProvider
         self.activePolishModel = activePolishModel
         self.polishChain = polishChain
+        self.instanceStamp = instanceStamp
         self.issues = issues
     }
 
@@ -147,6 +150,7 @@ struct BackendReadinessResponse: Codable {
         activePolishProvider = try container.decodeIfPresent(String.self, forKey: .activePolishProvider) ?? ""
         activePolishModel = try container.decodeIfPresent(String.self, forKey: .activePolishModel) ?? ""
         polishChain = try container.decodeIfPresent([String].self, forKey: .polishChain) ?? []
+        instanceStamp = try container.decodeIfPresent(String.self, forKey: .instanceStamp) ?? ""
         issues = try container.decode([String].self, forKey: .issues)
     }
 }

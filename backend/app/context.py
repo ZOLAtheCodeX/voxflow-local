@@ -200,6 +200,7 @@ def readiness_snapshot() -> ReadyResponse:
         private_api_policy_version=privacy_policy.version or "unset",
         private_api_policy_ready=private_api_policy_ready,
         ollama_available=probe_ollama_available(),
+        instance_stamp=os.environ.get("VOXFLOW_INSTANCE_STAMP", ""),
         polish_chain=polish_chain,
         smart_action_chain=smart_chain,
         active_polish_provider=active_provider,
