@@ -56,12 +56,12 @@ let package = Package(
 
 **Step 2: Resolve dependencies**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift package resolve`
+Run: `cd <repo> && swift package resolve`
 Expected: Dependencies resolve successfully. `Package.resolved` updated.
 
 **Step 3: Build to verify compilation**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -5`
+Run: `cd <repo> && swift build 2>&1 | tail -5`
 Expected: Build succeeds. WhisperKit and swift-transformers compile.
 
 **Step 4: Commit**
@@ -165,7 +165,7 @@ final class HallucinationFilterTests: XCTestCase {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter HallucinationFilterTests 2>&1 | tail -5`
+Run: `cd <repo> && swift test --filter HallucinationFilterTests 2>&1 | tail -5`
 Expected: FAIL — `HallucinationFilter` type not found.
 
 **Step 3: Implement HallucinationFilter**
@@ -230,7 +230,7 @@ enum HallucinationFilter {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter HallucinationFilterTests 2>&1 | tail -5`
+Run: `cd <repo> && swift test --filter HallucinationFilterTests 2>&1 | tail -5`
 Expected: All tests PASS.
 
 **Step 5: Commit**
@@ -275,7 +275,7 @@ Add to `Tests/VoxFlowAppTests/AppModelTests.swift` after `testSTTBackendDisplayN
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter AppModelTests/testSTTBackendWhisperKitCodableRoundTrip 2>&1 | tail -5`
+Run: `cd <repo> && swift test --filter AppModelTests/testSTTBackendWhisperKitCodableRoundTrip 2>&1 | tail -5`
 Expected: FAIL — `whisperKit` case not found.
 
 **Step 3: Add the enum case and update views**
@@ -331,10 +331,10 @@ In `Sources/VoxFlowApp/State/AppState.swift`, after line 53 (`@Published var bac
 
 **Step 4: Build and run tests**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -5`
+Run: `cd <repo> && swift build 2>&1 | tail -5`
 Expected: Build succeeds.
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter AppModelTests 2>&1 | tail -10`
+Run: `cd <repo> && swift test --filter AppModelTests 2>&1 | tail -10`
 Expected: All tests PASS (existing `testSTTBackendDisplayNamesUnique` now checks 4 cases).
 
 **Step 5: Commit**
@@ -418,7 +418,7 @@ final class WhisperKitSTTServiceTests: XCTestCase {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter WhisperKitSTTServiceTests 2>&1 | tail -5`
+Run: `cd <repo> && swift test --filter WhisperKitSTTServiceTests 2>&1 | tail -5`
 Expected: FAIL — `WhisperKitSTTService` type not found.
 
 **Step 3: Implement WhisperKitSTTService**
@@ -550,7 +550,7 @@ enum WhisperKitSTTError: LocalizedError {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter WhisperKitSTTServiceTests 2>&1 | tail -10`
+Run: `cd <repo> && swift test --filter WhisperKitSTTServiceTests 2>&1 | tail -10`
 Expected: All tests PASS.
 
 **Step 5: Commit**
@@ -712,10 +712,10 @@ In `Sources/VoxFlowApp/Services/SettingsCoordinator.swift`, replace `selectSTTBa
 
 **Step 6: Build and run tests**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -5`
+Run: `cd <repo> && swift build 2>&1 | tail -5`
 Expected: Build succeeds.
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test 2>&1 | tail -10`
+Run: `cd <repo> && swift test 2>&1 | tail -10`
 Expected: All tests pass.
 
 **Step 7: Commit**
@@ -826,9 +826,9 @@ echo "Done. Set VOXFLOW_STT_BACKEND=whisperKit and restart VoxFlow."
 
 **Step 2: Make executable and test**
 
-Run: `chmod +x /Users/zola/Documents/CODING/voxflow-local/scripts/download_whisperkit_model.sh`
+Run: `chmod +x <repo>/scripts/download_whisperkit_model.sh`
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && bash scripts/download_whisperkit_model.sh --help 2>&1 || true`
+Run: `cd <repo> && bash scripts/download_whisperkit_model.sh --help 2>&1 || true`
 Expected: Shows usage or attempts download (won't fail fatally — the script guards for existing models).
 
 **Step 3: Commit**
@@ -854,7 +854,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 
 **Step 1: Run full test suite**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test 2>&1 | tail -10`
+Run: `cd <repo> && swift test 2>&1 | tail -10`
 Expected: All tests pass.
 
 **Step 2: Update CLAUDE.md**
@@ -912,12 +912,12 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 
 **Step 1: Download the WhisperKit CoreML model**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && ./scripts/download_whisperkit_model.sh`
+Run: `cd <repo> && ./scripts/download_whisperkit_model.sh`
 Expected: Model downloaded to `models/whisperkit-coreml__openai_whisper-small.en/`.
 
 **Step 2: Build app bundle**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build`
+Run: `cd <repo> && swift build`
 Expected: Build succeeds.
 
 **Step 3: Launch and test**

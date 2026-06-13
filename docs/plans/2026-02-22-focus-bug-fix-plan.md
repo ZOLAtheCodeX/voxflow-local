@@ -41,7 +41,7 @@ func testInsertTextAcceptsTargetApp() {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter testInsertTextAcceptsTargetApp 2>&1 | tail -20`
+Run: `cd <repo> && swift test --filter testInsertTextAcceptsTargetApp 2>&1 | tail -20`
 Expected: Compilation error — `insertText` doesn't accept `targetApp` parameter yet.
 
 **Step 3: Add targetApp parameter to AccessibilityInsertService**
@@ -103,7 +103,7 @@ func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplic
 
 **Step 5: Run test to verify it passes**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter TextInsertionCoordinator 2>&1 | tail -20`
+Run: `cd <repo> && swift test --filter TextInsertionCoordinator 2>&1 | tail -20`
 Expected: All TextInsertionCoordinator tests pass (existing tests use default `nil`).
 
 **Step 6: Commit**
@@ -202,7 +202,7 @@ Add `import Combine` at the top of AppCoordinator (if not already present).
 
 **Step 7: Run full test suite**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test 2>&1 | tail -30`
+Run: `cd <repo> && swift test 2>&1 | tail -30`
 Expected: All tests pass.
 
 **Step 8: Commit**
@@ -258,7 +258,7 @@ final class FocusContextMonitorTests: XCTestCase {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter FocusContextMonitorTests 2>&1 | tail -20`
+Run: `cd <repo> && swift test --filter FocusContextMonitorTests 2>&1 | tail -20`
 Expected: Compilation error — `freeze()`, `unfreeze()`, `isFrozen` don't exist.
 
 **Step 3: Add freeze/unfreeze to FocusContextMonitor**
@@ -298,7 +298,7 @@ private func poll() {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test --filter FocusContextMonitorTests 2>&1 | tail -20`
+Run: `cd <repo> && swift test --filter FocusContextMonitorTests 2>&1 | tail -20`
 Expected: PASS.
 
 **Step 5: Wire freeze/unfreeze in AppCoordinator**
@@ -323,7 +323,7 @@ state.$sessionState
 
 **Step 6: Run full test suite**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test 2>&1 | tail -30`
+Run: `cd <repo> && swift test 2>&1 | tail -30`
 Expected: All tests pass.
 
 **Step 7: Commit**
@@ -479,7 +479,7 @@ final class MenuBarPanelController {
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -20`
+Run: `cd <repo> && swift build 2>&1 | tail -20`
 Expected: Build succeeds (new file compiles but isn't wired yet).
 
 **Step 3: Commit**
@@ -591,12 +591,12 @@ The simplest approach: keep using `openWindow(id:)` from VoxFlowLocalApp for the
 
 **Step 4: Verify build compiles**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -30`
+Run: `cd <repo> && swift build 2>&1 | tail -30`
 Expected: Build succeeds.
 
 **Step 5: Run full test suite**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test 2>&1 | tail -30`
+Run: `cd <repo> && swift test 2>&1 | tail -30`
 Expected: All tests pass.
 
 **Step 6: Commit**
@@ -699,12 +699,12 @@ private func activateAndOpenWindow(id: String) {
 
 **Step 5: Verify build compiles**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -30`
+Run: `cd <repo> && swift build 2>&1 | tail -30`
 Expected: Build succeeds.
 
 **Step 6: Run full test suite**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift test 2>&1 | tail -30`
+Run: `cd <repo> && swift test 2>&1 | tail -30`
 Expected: All tests pass.
 
 **Step 7: Commit**
@@ -760,7 +760,7 @@ Rebuild and test the full flow:
 **Step 1: Build and launch**
 
 ```bash
-cd /Users/zola/Documents/CODING/voxflow-local
+cd <repo>
 ./scripts/build_app_bundle.sh
 ./scripts/install_app_bundle.sh
 ./scripts/launch_voxflow_dev.sh

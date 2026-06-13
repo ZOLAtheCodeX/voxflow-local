@@ -2203,7 +2203,7 @@ Verify:
 
 - [ ] **Step 3: Update CLAUDE.md**
 
-Append to the project state section in `/Users/zola/Documents/CODING/voxflow-local/CLAUDE.md`:
+Append to the project state section in `<repo>/CLAUDE.md`:
 
 ```markdown
 ## Cockpit (Layer 0)

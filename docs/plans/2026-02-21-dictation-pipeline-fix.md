@@ -79,7 +79,7 @@ Also add same logging in `insertCurrentText()` after line 42.
 
 **Step 3: Build to verify no compile errors**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -5`
+Run: `cd <repo> && swift build 2>&1 | tail -5`
 Expected: `Build complete!`
 
 **Step 4: Commit**
@@ -161,7 +161,7 @@ Replace the `simulatePaste` method (lines 86-92) with:
 
 **Step 3: Build to verify no compile errors**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -5`
+Run: `cd <repo> && swift build 2>&1 | tail -5`
 Expected: `Build complete!`
 
 **Step 4: Commit**
@@ -317,7 +317,7 @@ Key changes:
 
 **Step 2: Build to verify no compile errors**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -5`
+Run: `cd <repo> && swift build 2>&1 | tail -5`
 Expected: `Build complete!`
 
 **Step 3: Commit**
@@ -354,7 +354,7 @@ This only affects NEW users (no saved preference). Existing users keep their cho
 
 **Step 2: Build to verify**
 
-Run: `cd /Users/zola/Documents/CODING/voxflow-local && swift build 2>&1 | tail -5`
+Run: `cd <repo> && swift build 2>&1 | tail -5`
 Expected: `Build complete!`
 
 **Step 3: Reset the local UserDefaults key to test the new default**
@@ -391,7 +391,7 @@ pkill -f VoxFlowLocal 2>/dev/null; pkill -f "server.py" 2>/dev/null; sleep 1
 **Step 2: Build the app bundle**
 
 ```bash
-cd /Users/zola/Documents/CODING/voxflow-local && ./scripts/build_app_bundle.sh --menu-bar-only
+cd <repo> && ./scripts/build_app_bundle.sh --menu-bar-only
 ```
 
 Expected: `[bundle] done`
@@ -416,7 +416,7 @@ done
 **Step 5: API smoke test with golden clip at 16kHz**
 
 ```bash
-CLIP="/Users/zola/Documents/CODING/voxflow-local/backend/tests/fixtures/golden_clips/dashboard_phrase.wav"
+CLIP="<repo>/backend/tests/fixtures/golden_clips/dashboard_phrase.wav"
 PCM_B64=$(python3 -c "
 import base64
 with open('$CLIP', 'rb') as f:

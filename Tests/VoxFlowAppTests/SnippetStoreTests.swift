@@ -17,12 +17,12 @@ final class SnippetStoreTests: XCTestCase {
     func test_add_persists_and_reloads() {
         let url = tmpURL()
         let store = SnippetStore(fileURL: url, seedOnFirstRun: false)
-        XCTAssertTrue(store.add(keyword: "signoff", text: "Best regards, Zola", scope: .global))
+        XCTAssertTrue(store.add(keyword: "signoff", text: "Best regards, Pat", scope: .global))
 
         let reloaded = SnippetStore(fileURL: url, seedOnFirstRun: false)
         XCTAssertEqual(reloaded.snippets.count, 1)
         XCTAssertEqual(reloaded.snippets.first?.keyword, "signoff")
-        XCTAssertEqual(reloaded.snippets.first?.text, "Best regards, Zola")
+        XCTAssertEqual(reloaded.snippets.first?.text, "Best regards, Pat")
         XCTAssertEqual(reloaded.snippets.first?.scope, .global)
     }
 

@@ -22,8 +22,11 @@ final class SnippetStore: ObservableObject {
     }
 
     /// Single-word, non-reserved seeds. Each keyword already equals its normalizedKeyword.
+    /// Seeds must stay generic — users personalize in Settings ▸ Voice
+    /// Snippets. (Pre-launch sweep: the original signoff seed shipped the
+    /// author's real name into every fresh install.)
     static let seedSnippets: [(keyword: String, text: String, scope: SnippetScope)] = [
-        ("signoff", "Best regards,\nZola Valashiya", .global),
+        ("signoff", "Best regards,", .global),
         ("confidential", "CONFIDENTIAL — attorney work product. Do not distribute.", .global),
     ]
 
