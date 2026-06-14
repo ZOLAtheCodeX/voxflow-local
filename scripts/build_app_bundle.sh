@@ -132,10 +132,19 @@ ICON_PYTHON="${ROOT_DIR}/.venv/bin/python3"
 if [[ ! -x "${ICON_PYTHON}" ]]; then
   ICON_PYTHON="python3"
 fi
-"${ICON_PYTHON}" "${ROOT_DIR}/scripts/generate_app_icon.py" --output "${ICONSET_DIR}"
-if ! TMPDIR="${ICON_TMP_DIR}" iconutil -c icns "${ICONSET_DIR}" -o "${ICNS_PATH}"; then
+# Icon generation needs Pillow (backend/requirements-dev.txt). It must never
+# hard-fail the build: a forker without Pillow still gets a working, signed
+# app with the system icon. Both the render and iconutil steps fall back.
+ICON_OK=0
+if "${ICON_PYTHON}" "${ROOT_DIR}/scripts/generate_app_icon.py" --output "${ICONSET_DIR}" 2>/dev/null; then
+  if TMPDIR="${ICON_TMP_DIR}" iconutil -c icns "${ICONSET_DIR}" -o "${ICNS_PATH}"; then
+    ICON_OK=1
+  fi
+fi
+if [[ ${ICON_OK} -eq 0 ]]; then
   FALLBACK_ICON="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns"
-  echo "[bundle] warning: iconutil failed; falling back to system icon."
+  echo "[bundle] warning: icon generation unavailable (needs Pillow — install with"
+  echo "[bundle]          ./scripts/bootstrap_backend.sh or pip install pillow); using system icon."
   cp "${FALLBACK_ICON}" "${ICNS_PATH}"
 fi
 rm -rf "${ICONSET_DIR}"

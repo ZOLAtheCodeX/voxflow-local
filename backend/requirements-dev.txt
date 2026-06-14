@@ -7,3 +7,9 @@ pytest>=8.0
 pytest-asyncio>=1.0
 anyio>=4.0
 httpx>=0.27
+# Build-time only: scripts/generate_app_icon.py renders the Waveline app icon.
+# (Fresh-clone forkability test 2026-06-14: Pillow lived only as an ad-hoc
+# install in the author's venv, so build_app_bundle.sh failed for forkers
+# with "No module named 'PIL'". The build also now degrades to the system
+# icon if Pillow is absent, so this is for the real icon, not a hard gate.)
+pillow>=10.0

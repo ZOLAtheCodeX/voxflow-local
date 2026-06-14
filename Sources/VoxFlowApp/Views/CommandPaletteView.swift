@@ -213,7 +213,7 @@ struct CommandPaletteView: View {
                 case .dictation:
                     dictationReview
                 case .prompt:
-                    dictationReview // TODO: Task 5 — prompt-specific review if needed
+                    dictationReview // prompt mode reuses the dictation review surface for now
                 }
             }
 
