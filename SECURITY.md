@@ -17,9 +17,13 @@ VoxFlow Local is a local-first dictation app. The security-relevant surfaces:
   private-API keys), never in config files or UserDefaults. Keys transit to
   the backend as process environment variables at launch. Anything that
   causes a key to be written to disk or logged is in scope and high severity.
-- **Dictated text is sensitive by design.** Cloud-bound payloads pass PII
-  redaction first, and cloud calls sit behind explicit consent. Bypasses of
-  the privacy gate, the redaction pass, or the consent flow are in scope.
+- **Dictated text is sensitive by design.** Cloud providers are opt-in and
+  off by default. Cloud-bound text payloads pass PII redaction first; the
+  private-API mode adds an explicit per-request preview/consent step. Cloud
+  STT fallback is off by default and gated by `VOXFLOW_STT_ALLOW_FALLBACK`
+  (raw audio cannot be redacted, so it never leaves without opt-in). Bypasses
+  of the opt-in requirement, the redaction pass, or the private-API consent
+  flow are in scope.
 - **Accessibility insertion** types into whatever app holds focus. Anything
   that lets untrusted input drive an insertion (or fire a voice-triggered
   protocol) without the documented gates is in scope.

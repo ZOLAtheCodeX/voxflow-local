@@ -497,7 +497,10 @@ final class BackendProcessManager: @unchecked Sendable {
         environment["VOXFLOW_STT_BACKEND"] = configuration.sttBackend
         environment["VOXFLOW_STT_MODEL"] = configuration.sttModel
         environment["VOXFLOW_WHISPER_MODEL"] = configuration.whisperModel
-        environment["VOXFLOW_STT_ALLOW_FALLBACK"] = environment["VOXFLOW_STT_ALLOW_FALLBACK"] ?? "1"
+        // Cloud STT fallback ships OFF: raw audio cannot be PII-redacted, so it
+        // must never leave the Mac without explicit opt-in. Honor a shell-set
+        // value for power users / dev; default off otherwise.
+        environment["VOXFLOW_STT_ALLOW_FALLBACK"] = inherited["VOXFLOW_STT_ALLOW_FALLBACK"] ?? "0"
         environment["VOXFLOW_TRANSLATE_MODEL"] = configuration.translateModel
         environment["VOXFLOW_TRANSLATE_BACKEND"] = configuration.translateBackend
         environment["VOXFLOW_PRIVACY_POLICY_VERSION"] = "2026-02"

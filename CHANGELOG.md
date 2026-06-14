@@ -41,9 +41,11 @@ README's "Building from source"). Highlights of what ships:
   request, including the degraded regex-fallback state.
 
 ### Privacy
-- Local-first by default. Cloud calls sit behind an explicit privacy gate
-  with payload preview, bounded-use consent tokens, and Luhn-validated PII
-  redaction for cloud-bound text.
+- Local-first by default. Cloud providers are opt-in and off by default;
+  cloud-bound text is PII-redacted (Luhn-validated) before it leaves the
+  machine. The private-API mode adds an explicit per-request payload preview
+  and bounded-use consent tokens. Cloud STT fallback is off unless opted in
+  (raw audio cannot be redacted).
 
 ### Experimental (off by default)
 - Assistant handoff: pipe a transcript to a user-configured CLI with a

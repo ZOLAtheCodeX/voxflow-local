@@ -884,7 +884,7 @@ struct SettingsView: View {
     private var sttBackendNote: String {
         switch state.sttBackend {
         case .whisper:
-            return "Whisper local STT uses an open-source OpenAI Whisper model on-device."
+            return "Whisper local STT uses an open-source OpenAI Whisper model on-device. If it fails, audio stays local unless you enable the OpenAI fallback (off by default)."
         case .whisperKit:
             return "WhisperKit runs Whisper on Apple Neural Engine. Fastest local option. No network access."
         case .openAI:

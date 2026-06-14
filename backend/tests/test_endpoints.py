@@ -508,6 +508,7 @@ class TestSTTFallbackChain:
 
         router = ep.provider_router
         monkeypatch.setenv("VOXFLOW_STT_BACKEND", "whisper")
+        monkeypatch.setenv("VOXFLOW_STT_ALLOW_FALLBACK", "1")
         monkeypatch.setattr(router._whisper_engine, "transcribe", broken_whisper)
         monkeypatch.setattr(router._openai_audio_client, "transcribe", cloud_ok)
         monkeypatch.setattr(type(router._openai_audio_client), "configured", property(lambda self: True), raising=False)
@@ -523,6 +524,55 @@ class TestSTTFallbackChain:
         assert resp.status_code == 200
         assert "cloud transcription" in resp.json()["text"]
         assert router.stt_fallback_active() is True
+
+    @pytest.mark.anyio
+    async def test_whisper_does_not_fall_back_when_fallback_disabled(self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch):
+        """Privacy: raw audio must NOT reach the cloud on local failure unless
+        the user opted in via VOXFLOW_STT_ALLOW_FALLBACK. Default is off."""
+        import struct
+        import base64
+
+        from api import endpoints as ep
+        from engines.results import STTExecutionResult
+
+        def broken_whisper(pcm, sample_rate, language_hint):
+            return STTExecutionResult(
+                text="[transcription unavailable: local Whisper model failed to load]",
+                confidence=0.0,
+                stage_timings_ms={},
+                model_loaded_before_request=False,
+                model_loaded_after_request=False,
+                cold_start=False,
+            )
+
+        def cloud_stub(pcm, sample_rate, language_hint):
+            return STTExecutionResult(
+                text="cloud transcription result that must not appear",
+                confidence=0.8,
+                stage_timings_ms={},
+                model_loaded_before_request=True,
+                model_loaded_after_request=True,
+                cold_start=False,
+            )
+
+        router = ep.provider_router
+        monkeypatch.setenv("VOXFLOW_STT_BACKEND", "whisper")
+        monkeypatch.setenv("VOXFLOW_STT_ALLOW_FALLBACK", "0")
+        monkeypatch.setattr(router._whisper_engine, "transcribe", broken_whisper)
+        monkeypatch.setattr(router._openai_audio_client, "transcribe", cloud_stub)
+        monkeypatch.setattr(type(router._openai_audio_client), "configured", property(lambda self: True), raising=False)
+
+        loud = struct.pack("<" + "h" * 16000, *([8000, -8000] * 8000))
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "stt-no-fallback",
+            "audio_pcm16le": base64.b64encode(loud).decode(),
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        assert resp.status_code == 200
+        assert "cloud transcription" not in resp.json()["text"]
+        assert router.stt_fallback_active() is False
 
 
 

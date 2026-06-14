@@ -4,8 +4,7 @@
 
 Local-first dictation for macOS. Hold a key, speak, release: your words land
 in whatever app has focus, cleaned up and optionally polished by a local LLM.
-Speech never leaves your Mac unless you explicitly configure and approve a
-cloud provider.
+Speech never leaves your Mac unless you configure a cloud provider yourself.
 
 - **On-device speech-to-text** via WhisperKit (CoreML, Apple Neural Engine,
   zero network).
@@ -17,9 +16,10 @@ cloud provider.
   editable review, smart actions (memo, action items, MECE, steel-man,
   pyramid, disclaimer), voice commands, a personal dictionary that biases
   recognition toward your vocabulary, and reusable workflow chains.
-- **Privacy by architecture**: cloud calls sit behind an explicit consent
-  gate with payload preview and PII redaction; API keys live in the macOS
-  Keychain; every insertion writes an audit receipt to
+- **Privacy by architecture**: cloud providers are opt-in and off by
+  default; payloads sent to them are PII-redacted first, and the private-API
+  mode adds an explicit per-request preview-and-consent step; API keys live
+  in the macOS Keychain; every insertion writes an audit receipt to
   `~/Library/Logs/VoxFlow/insertions.jsonl`.
 
 ## Requirements
@@ -107,12 +107,14 @@ in Settings → Models:
 |---|---|---|
 | `ollama` | Ollama (default) | no |
 | `openai_compat` | LM Studio, llama.cpp server, vLLM, mlx_lm.server | no, if local URL |
-| `openai` | OpenAI API | yes, behind the consent gate + redaction |
-| `anthropic` | Anthropic API | yes, behind the consent gate + redaction |
+| `openai` | OpenAI API | yes, opt-in; PII-redacted first |
+| `anthropic` | Anthropic API | yes, opt-in; PII-redacted first |
 
 Chains fall through on provider failure and always bottom out at the local
-regex pipeline. API keys are stored in the Keychain and injected into the
-backend as environment variables at launch; they never touch a config file.
+regex pipeline. Cloud providers are off until you add one here, and their
+payloads are PII-redacted before they leave the machine. API keys are stored
+in the Keychain and injected into the backend as environment variables at
+launch; they never touch a config file.
 
 ## The pieces
 

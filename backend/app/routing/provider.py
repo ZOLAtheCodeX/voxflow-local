@@ -148,16 +148,27 @@ class ProviderRouter:
     def stt_fallback_active(self) -> bool:
         return self._stt_fallback_used
 
+    def stt_fallback_allowed(self) -> bool:
+        """Whether a dead local Whisper may fall back to cloud STT.
+
+        Sending raw microphone audio to a cloud endpoint cannot be PII-redacted
+        (unlike text), so this is an explicit opt-in: OFF unless the user sets
+        VOXFLOW_STT_ALLOW_FALLBACK. Fail closed — an unset flag never leaks audio.
+        """
+        return self._bool_from_env("VOXFLOW_STT_ALLOW_FALLBACK")
+
     def transcribe(self, pcm: bytes, sample_rate: int, language_hint: str) -> STTExecutionResult:
         backend = self.current_stt_backend()
         if backend == "whisper":
             result = self._whisper_engine.transcribe(pcm, sample_rate, language_hint)
             # R3.5: a dead local engine falls back to the configured cloud STT
-            # instead of returning a placeholder. The flag feeds /v1/ready so
-            # degradation is visible, never silent.
+            # instead of returning a placeholder. Gated on stt_fallback_allowed()
+            # (opt-in, default off) because raw audio cannot be redacted; the
+            # flag feeds /v1/ready so degradation is visible, never silent.
             if (
                 result.text.startswith("[transcription unavailable")
                 and self._openai_audio_client.configured
+                and self.stt_fallback_allowed()
             ):
                 logger.warning("Local Whisper unavailable — falling back to OpenAI STT")
                 self._stt_fallback_used = True
