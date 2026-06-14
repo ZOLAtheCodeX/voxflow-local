@@ -8,7 +8,7 @@ DEST_APP="${DEST_DIR}/VoxFlow.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 NESTED_APP="${DEST_APP}/VoxFlow.app"
 STAGED_APP="${DEST_DIR}/.VoxFlow.app.staging.$$"
-ENTITLEMENTS_FILE="${ROOT_DIR}/scripts/release/VoxFlow.entitlements"
+ENTITLEMENTS_FILE="${ROOT_DIR}/scripts/VoxFlow.entitlements"
 
 cleanup_staging() {
   rm -rf "${STAGED_APP}" 2>/dev/null || true
@@ -66,13 +66,29 @@ if [[ -z "${SIGN_IDENTITY}" ]]; then
 fi
 
 if [[ -z "${SIGN_IDENTITY}" ]]; then
-  echo "[install] error: no Apple Development signing identity found."
-  echo "[install] ad-hoc signing (--sign -) breaks Accessibility permission persistence."
-  echo "[install] install an Apple Development certificate or set VOXFLOW_SIGN_IDENTITY."
-  exit 1
+  if [[ "${VOXFLOW_ALLOW_ADHOC:-}" == "1" ]]; then
+    echo "[install] WARNING: no Apple Development certificate found — signing ad-hoc (--sign -)."
+    echo "[install] WARNING: with ad-hoc signing macOS resets the Accessibility grant on every"
+    echo "[install]          rebuild, so you re-approve VoxFlow in System Settings each time."
+    echo "[install]          A FREE Apple ID gives you an 'Apple Development' certificate via"
+    echo "[install]          Xcode that makes the grant persist — see README 'Building from source'."
+    SIGN_IDENTITY="-"
+  else
+    echo "[install] error: no Apple Development signing identity found. Two ways forward:"
+    echo "[install]   1. (recommended, free) Sign in to Xcode with any Apple ID to get an"
+    echo "[install]      'Apple Development' certificate; Accessibility permissions then persist."
+    echo "[install]   2. Install unsigned now: re-run with VOXFLOW_ALLOW_ADHOC=1 (the app works,"
+    echo "[install]      but you re-grant Accessibility after each rebuild)."
+    echo "[install] Or set VOXFLOW_SIGN_IDENTITY to a specific identity."
+    exit 1
+  fi
 fi
 
-echo "[install] signing with identity: ${SIGN_IDENTITY}"
+if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+  echo "[install] signing ad-hoc (Accessibility grant will not persist across rebuilds)"
+else
+  echo "[install] signing with identity: ${SIGN_IDENTITY}"
+fi
 if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
   if ! codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENTITLEMENTS_FILE}" "${STAGED_APP}"; then
     echo "[install] error: signing failed with identity: ${SIGN_IDENTITY}"

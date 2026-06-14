@@ -6,8 +6,9 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [0.1.0] — 2026-06-14
 
-First public release, built from source (a notarized DMG is a post-launch
-milestone). Highlights of what ships:
+First public release. VoxFlow Local is distributed as source you build
+yourself — no prebuilt binary or notarized installer by design (see the
+README's "Building from source"). Highlights of what ships:
 
 ### Dictation core
 - Hold-to-talk dictation (Fn by default, configurable) with WhisperKit

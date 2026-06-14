@@ -47,9 +47,9 @@ def _quad_bezier(p0, p1, p2, steps=80):
     return pts
 
 
-# Waveline design (2026-06-12, direction A from docs/design/2026-06-12-icon-directions.html):
-# one continuous monoline stroke — a voice waveform resolving into a written
-# baseline — ending in a teal cursor dot. Flat ink ground, no gloss, no glow.
+# Waveline design: one continuous monoline stroke — a voice waveform
+# resolving into a written baseline — ending in a teal cursor dot. Flat ink
+# ground, no gloss, no glow.
 INK_TOP = (35, 38, 46)       # #23262e
 INK_BOTTOM = (20, 22, 27)    # #14161b
 PAPER = (244, 242, 236, 255)  # #f4f2ec

@@ -167,7 +167,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Add hallucination-filter entries to only one side — keep `HallucinationFilter.swift` and `nlp/hallucination.py` in sync (parity test enforces).
 - `Thread.sleep` in the insertion stack — use cooperative `Task.sleep`.
 - Launch raw Mach-O for AX features — always `open ~/Applications/VoxFlow.app` so TCC sees a stable identity.
-- `codesign --sign -` (ad-hoc) for installed builds — use the auto-detected Apple Development cert.
+- `codesign --sign -` (ad-hoc) for installed builds *silently* — use the auto-detected Apple Development cert. Ad-hoc is allowed only as an explicit, loud opt-in (`VOXFLOW_ALLOW_ADHOC=1`) for forkers without an Apple ID; it does not persist the Accessibility grant across rebuilds.
 - Reintroduce raw `.font(.system(size:))` literals in views or `Color.gray.opacity(...)` anywhere in `Sources/VoxFlowApp/Views/` — go through `VFDesignTokens.swift`.
 - Skip `_RATE_LIMIT_LOCK` when touching `_rate_limit_timestamps` — short critical sections only.
 - Push smart actions onto the cockpit undo stack when they fail the guardrail or return the transcript unchanged — `SmartActionService` filters those before recording history.

@@ -26,3 +26,9 @@ backend/tests/fixtures/golden_clips/*.aiff
 /progress.txt
 /*.log
 /.cursorrules
+
+# Forker safety: never commit local secrets or generated provider config
+.env
+.env.*
+providers.json
+dist/release/

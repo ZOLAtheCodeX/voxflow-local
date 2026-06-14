@@ -27,7 +27,7 @@ cloud provider.
 | | Minimum | Notes |
 |---|---|---|
 | macOS | 14 (Sonoma) | Apple Silicon recommended (Neural Engine STT) |
-| Xcode / Swift | Swift 6.2 toolchain | build from source (no binary release yet) |
+| Xcode / Swift | Swift 6.2 toolchain | you build it yourself (see below) |
 | Python | 3.11+ | backend service on 127.0.0.1:8765 |
 | Disk for models | ~1 GB minimum | Whisper-Small STT |
 | RAM | 8 GB | see the model matrix below |
@@ -57,6 +57,8 @@ cd voxflow-local
 ./scripts/bootstrap_all.sh                  # venv + deps + first Swift build
 ./scripts/download_whisperkit_model.sh      # ~1 GB STT model
 ./scripts/reinstall_and_launch.sh           # build, sign, install, launch
+# No Apple ID? Prefix the line above with VOXFLOW_ALLOW_ADHOC=1
+# (see "Building from source" for the trade-off).
 
 # Optional, for LLM polish:
 ollama serve &
@@ -73,15 +75,28 @@ recording state; text inserts into the focused app.
 
 `./scripts/doctor.sh` diagnoses the usual environment problems.
 
-### Code signing
+## Building from source — the distribution model
 
-The install scripts sign with an Apple Development certificate detected from
-your keychain (override with `VOXFLOW_SIGN_IDENTITY`). Without any Apple
-developer certificate, builds fail closed rather than ad-hoc signing,
-because ad-hoc CDHashes change on every rebuild and macOS silently drops the
-Accessibility grant each time. A free Apple ID's development certificate is
-sufficient. `scripts/release_signed.sh` documents the full
-Developer-ID-plus-notarization path used for distributable artifacts.
+VoxFlow Local is not distributed as a prebuilt binary. There is no download,
+no DMG, no notarized installer. You clone the repo and build it yourself, on
+your own machine, signed under your own identity. Fork it, change it, run
+your own version — that is the intended way to use this project.
+
+The one wrinkle is macOS Accessibility, which VoxFlow needs to type into
+other apps. macOS ties the Accessibility grant to the app's code signature,
+so how you sign determines whether that grant survives a rebuild:
+
+| Signing | How | Accessibility grant | Cost |
+|---|---|---|---|
+| **Apple Development cert** (recommended) | Sign in to Xcode with any Apple ID (Settings → Accounts). The free personal team gives you an "Apple Development" certificate the build auto-detects. | Persists across rebuilds | **Free** — no paid Developer Program needed |
+| **Ad-hoc** | Re-run the build/install with `VOXFLOW_ALLOW_ADHOC=1` | Resets on every rebuild (you re-approve in System Settings each time) | Free, no Apple account at all |
+
+The build refuses to ad-hoc sign *silently* — that quietly-resetting grant
+caused real debugging pain, so ad-hoc is opt-in and loud. Set
+`VOXFLOW_SIGN_IDENTITY` to pin a specific identity. A paid Apple Developer
+Program membership is **not** required for any of this; it would only matter
+if you wanted to notarize a build for distribution to other people's Macs,
+which this project intentionally does not do.
 
 ## Bring your own model
 

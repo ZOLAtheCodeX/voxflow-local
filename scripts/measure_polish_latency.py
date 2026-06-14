@@ -16,9 +16,8 @@ Usage::
     # 2. Run the benchmark:
     ./.venv/bin/python scripts/measure_polish_latency.py
 
-    # 3. Paste the printed table into the Phase 3 PR description and
-    #    into docs/plans/2026-05-25-stabilization-modernization-roadmap.md
-    #    § Phase 3 § "Performance expectation" (replace the estimates).
+    # 3. Use the printed table to compare polish-model latency across tiers
+    #    when tuning the Ollama model recommendation.
 
 The benchmark runs each golden case through both models, discards the
 first call per model as the cold-start sample, and reports p50 / p95

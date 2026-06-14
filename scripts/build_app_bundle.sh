@@ -17,7 +17,7 @@ ALLOW_SYSTEM_PYTHON=0
 MENU_BAR_ONLY=0
 MODULE_CACHE_DIR="${ROOT_DIR}/.build/module-cache"
 ICON_TMP_DIR="${DIST_DIR}/.icon-tmp"
-ENTITLEMENTS_FILE="${ROOT_DIR}/scripts/release/VoxFlow.entitlements"
+ENTITLEMENTS_FILE="${ROOT_DIR}/scripts/VoxFlow.entitlements"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -210,13 +210,29 @@ if [[ -z "${SIGN_IDENTITY}" ]]; then
 fi
 
 if [[ -z "${SIGN_IDENTITY}" ]]; then
-  echo "[bundle] error: no Apple Development signing identity found."
-  echo "[bundle] ad-hoc signing (--sign -) breaks Accessibility permission persistence."
-  echo "[bundle] install an Apple Development certificate or set VOXFLOW_SIGN_IDENTITY."
-  exit 1
+  if [[ "${VOXFLOW_ALLOW_ADHOC:-}" == "1" ]]; then
+    echo "[bundle] WARNING: no Apple Development certificate found — signing ad-hoc (--sign -)."
+    echo "[bundle] WARNING: with ad-hoc signing macOS resets the Accessibility grant on every"
+    echo "[bundle]          rebuild, so you re-approve VoxFlow in System Settings each time."
+    echo "[bundle]          A FREE Apple ID gives you an 'Apple Development' certificate via"
+    echo "[bundle]          Xcode that makes the grant persist — see README 'Building from source'."
+    SIGN_IDENTITY="-"
+  else
+    echo "[bundle] error: no Apple Development signing identity found. Two ways forward:"
+    echo "[bundle]   1. (recommended, free) Sign in to Xcode with any Apple ID to get an"
+    echo "[bundle]      'Apple Development' certificate; Accessibility permissions then persist."
+    echo "[bundle]   2. Build unsigned now: re-run with VOXFLOW_ALLOW_ADHOC=1 (the app works,"
+    echo "[bundle]      but you re-grant Accessibility after each rebuild)."
+    echo "[bundle] Or set VOXFLOW_SIGN_IDENTITY to a specific identity."
+    exit 1
+  fi
 fi
 
-echo "[bundle] signing with identity: ${SIGN_IDENTITY}"
+if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+  echo "[bundle] signing ad-hoc (Accessibility grant will not persist across rebuilds)"
+else
+  echo "[bundle] signing with identity: ${SIGN_IDENTITY}"
+fi
 if [[ -f "${ENTITLEMENTS_FILE}" ]]; then
   if ! codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENTITLEMENTS_FILE}" "${APP_DIR}"; then
     echo "[bundle] error: signing failed with identity: ${SIGN_IDENTITY}"
