@@ -4,9 +4,10 @@ All notable changes to VoxFlow Local are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/) once past 1.0.
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-06-14
 
-First public release. Highlights of what ships:
+First public release, built from source (a notarized DMG is a post-launch
+milestone). Highlights of what ships:
 
 ### Dictation core
 - Hold-to-talk dictation (Fn by default, configurable) with WhisperKit
