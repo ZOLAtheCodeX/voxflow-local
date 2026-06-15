@@ -6,5 +6,5 @@ transformers==4.56.0
 torch==2.10.0
 torchaudio==2.10.0
 huggingface-hub==0.34.4
-sentencepiece==0.2.0
+sentencepiece==0.2.1
 protobuf>=4.25.0
