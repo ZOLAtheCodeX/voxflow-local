@@ -99,7 +99,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - Non-activating menu bar panel via `NSPanel(.nonactivatingPanel, .floating)` in `MenuBarPanelController`.
 - Dynamic activation policy: `activateForWindow()` toggles `.regular`/`.accessory`. `LSUIElement = true` in Info.plist.
 - WhisperKit native STT via `WhisperKitSTTService` with `WhisperKitConfig(modelFolder:, download: false)` — zero network.
-- Swift-native cleanup + prompt framing (`TextCleanupService`, `PromptFramingService`) bypass the backend on the WhisperKit path.
+- WhisperKit dictation polish routes through the backend Gemma chain when the backend is warm and falls back to Swift-native `TextCleanupService` cleanup when it is cold or the insert behavior is raw. `backendShouldRun` includes non-raw local dictation via `localDictationWantsBackendCleanup`, gated on the GLOBAL insert behavior (NOT the focused app — decoupling it from focus is deliberate; the spawn trigger only re-fires at launch/settings-change). Auto-insert resolves only the inserted mode via the backend; review/private-API resolve both. Prompt framing (`PromptFramingService`) stays fully in-app.
 - All typography, colors, motion presets, and material surfaces flow through `VFDesignTokens.swift` (`VF.*Font`, `VF.color*`, `VF.animation*`, `VF.cardBackground` / `VF.elevatedBackground` / `VF.panelMaterial`). Phase 4 eliminated raw `.font(.system(size:))` literals and `Color.gray.opacity(...)` from `SetupWizardView`, `SettingsView`, `DashboardWindowView`, and the `Views/` tree.
 - Keychain for secrets (`KeychainService`); never UserDefaults.
 

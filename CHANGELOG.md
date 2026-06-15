@@ -4,6 +4,31 @@ All notable changes to VoxFlow Local are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/) once past 1.0.
 
+## [Unreleased]
+
+### Changed
+- Dictation polish now runs through the local Gemma LLM (via Ollama) on the
+  default WhisperKit path instead of the deterministic regex pipeline. The
+  regex pipeline remains the fallback whenever the backend is still warming up
+  or unreachable, so dictation never hard-depends on Ollama. Auto-insert
+  resolves only the mode it actually inserts (one backend call instead of two),
+  so text lands faster.
+- Chrome's default per-app profile is now Gemma polish (was raw insertion), so
+  dictation into the browser is cleaned up out of the box. Slack and Xcode keep
+  their raw defaults.
+- The backend now stays warm based on your global insert behavior rather than
+  the app you happen to be focused on, so the local model is ready regardless of
+  focus.
+
+### Fixed
+- The local model could appear "not connected" after launching while focused on
+  a raw-profile app and then switching to a normal one — the backend now warms
+  independently of focus.
+- Empty captures with weak microphone input now show a "very low mic level —
+  check your input" hint instead of a generic "no speech detected"; every
+  transcript rejection records the audio level to the JSONL audit log, and a
+  fully silent capture is logged where before it left no trace.
+
 ## [0.1.0] — 2026-06-14
 
 First public release. VoxFlow Local is distributed as source you build
