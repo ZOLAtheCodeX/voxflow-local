@@ -69,14 +69,29 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
-    func testFocusedRawAppProfileKeepsWhisperKitBackendIdle() {
+    func testGlobalRawInsertKeepsWhisperKitBackendIdle() {
+        let state = AppState()
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.workflowMode = .dictation
+        // The global insert behavior is the gate: raw = no cleanup wanted.
+        state.insertBehavior = .autoInsertRaw
+
+        XCTAssertFalse(state.localDictationWantsBackendCleanup)
+        XCTAssertFalse(state.backendShouldRun)
+    }
+
+    @MainActor
+    func testBackendLifecycleIsDecoupledFromFocusedAppProfile() {
         let state = AppState()
         state.sttBackend = .whisperKit
         state.providerMode = .localOnly
         state.workflowMode = .dictation
         state.insertBehavior = .autoInsertLight
-        // Slack ships a raw-insert default profile (Chrome now defaults to
-        // Gemma polish), so a focused Slack window keeps the backend idle.
+        // Focused on Slack, which ships a raw-insert default profile. The
+        // backend lifecycle must NOT key off the focused app — only the global
+        // insert behavior decides whether it stays warm, so this still wants
+        // the backend. (Slack's raw profile still skips cleanup at insertion.)
         state.focusTarget = FocusTargetSnapshot(
             hasFocusedTextInput: true,
             hasInsertionCursor: true,
@@ -86,9 +101,8 @@ final class AppModelTests: XCTestCase {
             processIdentifier: nil
         )
 
-        XCTAssertEqual(state.effectiveInsertBehaviorForCurrentFocus, .autoInsertRaw)
-        XCTAssertFalse(state.localDictationWantsBackendCleanup)
-        XCTAssertFalse(state.backendShouldRun)
+        XCTAssertTrue(state.localDictationWantsBackendCleanup)
+        XCTAssertTrue(state.backendShouldRun)
     }
 
     func testDictationHotkeyPresetDisplayNamesUnique() {

@@ -167,18 +167,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    var effectiveInsertBehaviorForCurrentFocus: InsertBehavior {
-        let bundleID = focusTarget.bundleID ?? ""
-        return appProfiles[bundleID]?.insertBehavior
-            ?? SettingsCoordinator.defaultAppProfiles[bundleID]?.insertBehavior
-            ?? insertBehavior
-    }
-
     var localDictationWantsBackendCleanup: Bool {
+        // Deliberately gated on the GLOBAL insert behavior, not the focused
+        // app's profile. The backend lifecycle must not flip with focus: the
+        // spawn trigger (warmup) only re-fires at launch and on settings
+        // changes, so a focus-dependent condition would leave the backend idle
+        // after launching into a raw-profile app (Slack/Xcode) and never warm
+        // when you then switch to a normal app. Keeping it warm whenever the
+        // global default wants cleanup costs only a light server process (the
+        // 7 GB model loads lazily on first use). Per-app raw profiles still
+        // skip the cleanup call at insertion time.
         providerMode == .localOnly
             && sttBackend == .whisperKit
             && workflowMode == .dictation
-            && effectiveInsertBehaviorForCurrentFocus != .autoInsertRaw
+            && insertBehavior != .autoInsertRaw
     }
 
     var backendShouldRun: Bool {
