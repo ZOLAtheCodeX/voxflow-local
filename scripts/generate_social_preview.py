@@ -119,17 +119,17 @@ def build_card() -> Image.Image:
 
     # Mark, centered horizontally near the top.
     box = 300 * SS
-    _draw_mark(draw, (w - box) / 2, 48 * SS, box)
+    _draw_mark(draw, (w - box) / 2, 20 * SS, box)
 
     cx = w / 2
     title_font, tf = _load_font(96 * SS, bold=True)
     tag_font, _ = _load_font(40 * SS, bold=False)
     foot_font, _ = _load_font(28 * SS, bold=False)
 
-    draw.text((cx, 392 * SS), "VoxFlow Local", font=title_font, fill=PAPER, anchor="mm")
-    draw.text((cx, 480 * SS), "Local-first dictation for macOS",
+    draw.text((cx, 364 * SS), "VoxFlow Local", font=title_font, fill=PAPER, anchor="mm")
+    draw.text((cx, 452 * SS), "Local-first dictation for macOS",
               font=tag_font, fill=blend(PAPER, INK_BOTTOM, 0.28), anchor="mm")
-    draw.text((cx, 556 * SS), "Privacy by architecture  ·  Build from source",
+    draw.text((cx, 528 * SS), "Privacy by architecture  ·  Build from source",
               font=foot_font, fill=TEAL, anchor="mm")
 
     print(f"font: {tf}")
