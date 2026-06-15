@@ -1,10 +1,23 @@
+<div align="center">
+
 # VoxFlow Local
 
-[![CI](https://github.com/ZOLAtheCodeX/voxflow-local/actions/workflows/ci.yml/badge.svg)](https://github.com/ZOLAtheCodeX/voxflow-local/actions/workflows/ci.yml)
+**Local-first dictation for macOS. Hold a key, speak, release.**
 
-Local-first dictation for macOS. Hold a key, speak, release: your words land
-in whatever app has focus, cleaned up and optionally polished by a local LLM.
-Speech never leaves your Mac unless you configure a cloud provider yourself.
+[![CI](https://github.com/ZOLAtheCodeX/voxflow-local/actions/workflows/ci.yml/badge.svg)](https://github.com/ZOLAtheCodeX/voxflow-local/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple&logoColor=white)](#requirements)
+![distribution: build from source](https://img.shields.io/badge/distribution-build%20from%20source-2fd4c5)
+
+<!-- Demo clip slots in here once recorded — replace this comment with:
+<img src="docs/assets/demo.gif" alt="VoxFlow Local: hold to talk, cleaned text lands in the focused app, then a cockpit smart action" width="820">
+-->
+
+</div>
+
+Your words land in whatever app has focus, cleaned up and optionally polished
+by a local LLM. Speech never leaves your Mac unless you configure a cloud
+provider yourself.
 
 - **On-device speech-to-text** via WhisperKit (CoreML, Apple Neural Engine,
   zero network).
