@@ -67,8 +67,21 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             return
         }
 
-        // Local cleanup for WhisperKit — no backend needed
+        // WhisperKit handles STT in-app, but local model polish still lives in
+        // the backend provider chain. Use it when warm, then fall back to the
+        // Swift cleanup pipeline so dictation never hard-depends on Ollama.
         if request.providerMode == .localOnly && request.sttBackend == .whisperKit {
+            if state.backendReadiness.readyForDictation {
+                do {
+                    try await processBackendCleanup(request, recordStage: recordStage)
+                    return
+                } catch {
+                    let fallbackStarted = ContinuousClock.now
+                    recordStage("cleanup_api_fallback", fallbackStarted, error.localizedDescription)
+                    state.statusLine = "Local model cleanup unavailable — using in-app cleanup"
+                }
+            }
+
             let lightStarted = ContinuousClock.now
             let lightText = TextCleanupService.cleanup(request.rawText, mode: .light, tone: request.toneStyle)
             recordStage("cleanup_light_local", lightStarted, "tone=\(request.toneStyle.rawValue)")
@@ -93,29 +106,39 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             return
         }
 
-        let lightStarted = ContinuousClock.now
-        let lightText = try await BackendAPIClient.cleanup(
-            sessionID: request.sessionID,
-            mode: .light,
-            inputText: request.rawText,
-            toneStyle: request.toneStyle,
-            providerMode: request.providerMode,
-            consentToken: request.consentToken,
-            allowRaw: request.allowRaw
-        ).outputText
-        recordStage("cleanup_light_api", lightStarted, "tone=\(request.toneStyle.rawValue), provider=\(request.providerMode.rawValue)")
-        let polishStarted = ContinuousClock.now
-        let polishText = try await BackendAPIClient.cleanup(
-            sessionID: request.sessionID,
-            mode: .polish,
-            inputText: request.rawText,
-            toneStyle: request.toneStyle,
-            providerMode: request.providerMode,
-            consentToken: request.consentToken,
-            allowRaw: request.allowRaw
-        ).outputText
-        recordStage("cleanup_polish_api", polishStarted, "tone=\(request.toneStyle.rawValue), provider=\(request.providerMode.rawValue)")
-        
+        try await processBackendCleanup(request, recordStage: recordStage)
+    }
+
+    private func processBackendCleanup(
+        _ request: DictationWorkflowRequest,
+        recordStage: WorkflowStageRecorder
+    ) async throws {
+        // Auto-insert only ever inserts ONE mode, so only that mode needs the
+        // (slow) backend LLM round-trip. Resolve just that one through the
+        // backend and fill the other candidate field with the cheap local
+        // pipeline — halving the latency the user waits on before text lands.
+        // Review and private-API still resolve both modes via the backend:
+        // the user toggles between them, so both must be real LLM output.
+        let autoMode = request.providerMode == .localOnly ? request.insertBehavior.cleanupMode : nil
+
+        let lightText: String
+        let polishText: String
+
+        if let autoMode {
+            let served = try await backendCleanup(request, mode: autoMode, recordStage: recordStage)
+            switch autoMode {
+            case .polish:
+                polishText = served
+                lightText = TextCleanupService.cleanup(request.rawText, mode: .light, tone: request.toneStyle)
+            default: // .light — .raw never reaches the backend path
+                lightText = served
+                polishText = TextCleanupService.cleanup(request.rawText, mode: .polish, tone: request.toneStyle)
+            }
+        } else {
+            lightText = try await backendCleanup(request, mode: .light, recordStage: recordStage)
+            polishText = try await backendCleanup(request, mode: .polish, recordStage: recordStage)
+        }
+
         // Private-API: default to .light so the redacted/cleaned version
         // is shown first — .raw would expose the unredacted original.
         let defaultMode: CleanupMode = request.providerMode == .privateAPI ? .light : .raw
@@ -133,6 +156,27 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
         if request.providerMode == .localOnly { pushToSessionMemory(candidate) }
 
         await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage)
+    }
+
+    /// One backend cleanup round-trip, timed and recorded under the existing
+    /// `cleanup_<mode>_api` stage name so traces stay comparable.
+    private func backendCleanup(
+        _ request: DictationWorkflowRequest,
+        mode: CleanupMode,
+        recordStage: WorkflowStageRecorder
+    ) async throws -> String {
+        let started = ContinuousClock.now
+        let output = try await BackendAPIClient.cleanup(
+            sessionID: request.sessionID,
+            mode: mode,
+            inputText: request.rawText,
+            toneStyle: request.toneStyle,
+            providerMode: request.providerMode,
+            consentToken: request.consentToken,
+            allowRaw: request.allowRaw
+        ).outputText
+        recordStage("cleanup_\(mode.rawValue)_api", started, "tone=\(request.toneStyle.rawValue), provider=\(request.providerMode.rawValue)")
+        return output
     }
 
     private func autoInsertOrReview(

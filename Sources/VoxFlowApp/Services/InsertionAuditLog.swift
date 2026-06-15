@@ -43,8 +43,8 @@ final class InsertionAuditLog {
         append(entry)
     }
 
-    func recordRejection(text: String, reason: String, confidence: Double, durationSeconds: Double, source: String) {
-        append([
+    func recordRejection(text: String, reason: String, confidence: Double, durationSeconds: Double, source: String, rmsEnergy: Double? = nil) {
+        var entry: [String: Any] = [
             "event": "reject",
             "ts": iso.string(from: Date()),
             "text": text,
@@ -52,7 +52,12 @@ final class InsertionAuditLog {
             "confidence": confidence,
             "audio_seconds": durationSeconds,
             "source": source,
-        ])
+        ]
+        // RMS distinguishes "you were silent" (near 0) from "your mic is too
+        // quiet to decode" (above the silence floor but below speech level) —
+        // the difference between the two empty-capture failure modes.
+        if let rmsEnergy { entry["rms"] = rmsEnergy }
+        append(entry)
     }
 
     private func append(_ entry: [String: Any]) {

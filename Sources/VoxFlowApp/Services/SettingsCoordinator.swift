@@ -59,7 +59,7 @@ final class SettingsCoordinator: SettingsCoordinating {
         "com.tinyspeck.slackmacgap": AppProfile(tone: .concise, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
         "com.apple.mail": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
         "com.microsoft.Outlook": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
-        "com.google.Chrome": AppProfile(tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
+        "com.google.Chrome": AppProfile(tone: .neutral, cleanupMode: .polish, insertBehavior: .autoInsertPolish),
         "com.apple.dt.Xcode": AppProfile(tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
     ]
 
@@ -222,7 +222,7 @@ final class SettingsCoordinator: SettingsCoordinating {
         guard state.insertBehavior != behavior else { return }
         state.insertBehavior = behavior
         UserDefaults.standard.set(behavior.rawValue, forKey: insertBehaviorKey)
-        state.statusLine = "Insert behavior: \(behavior.displayName)"
+        restartBackendWithCurrentConfiguration(status: "Insert behavior: \(behavior.displayName)")
     }
 
     func updateAppProfile(bundleID: String, profile: AppProfile?) {
@@ -234,6 +234,7 @@ final class SettingsCoordinator: SettingsCoordinating {
         if let data = try? JSONEncoder().encode(state.appProfiles) {
             UserDefaults.standard.set(data, forKey: appToneOverridesKey)
         }
+        restartBackendWithCurrentConfiguration(status: "App profile updated")
     }
 
     func selectTranslationProfile(_ profile: TranslationProfile) {

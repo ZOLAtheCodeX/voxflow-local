@@ -55,6 +55,42 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(STTBackend.whisperKit.displayName, "WhisperKit (Local, Neural Engine)")
     }
 
+    @MainActor
+    func testWhisperKitLocalLightDictationWantsBackendCleanupWithoutRequiringIt() {
+        let state = AppState()
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.workflowMode = .dictation
+        state.insertBehavior = .autoInsertLight
+
+        XCTAssertTrue(state.localDictationWantsBackendCleanup)
+        XCTAssertTrue(state.backendShouldRun)
+        XCTAssertFalse(state.workflowNeedsBackend)
+    }
+
+    @MainActor
+    func testFocusedRawAppProfileKeepsWhisperKitBackendIdle() {
+        let state = AppState()
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.workflowMode = .dictation
+        state.insertBehavior = .autoInsertLight
+        // Slack ships a raw-insert default profile (Chrome now defaults to
+        // Gemma polish), so a focused Slack window keeps the backend idle.
+        state.focusTarget = FocusTargetSnapshot(
+            hasFocusedTextInput: true,
+            hasInsertionCursor: true,
+            appName: "Slack",
+            bundleID: "com.tinyspeck.slackmacgap",
+            role: "AXTextArea",
+            processIdentifier: nil
+        )
+
+        XCTAssertEqual(state.effectiveInsertBehaviorForCurrentFocus, .autoInsertRaw)
+        XCTAssertFalse(state.localDictationWantsBackendCleanup)
+        XCTAssertFalse(state.backendShouldRun)
+    }
+
     func testDictationHotkeyPresetDisplayNamesUnique() {
         let labels = Set(DictationHotkeyPreset.allCases.map(\.displayName))
         XCTAssertEqual(labels.count, DictationHotkeyPreset.allCases.count)

@@ -167,10 +167,24 @@ final class AppState: ObservableObject {
         }
     }
 
+    var effectiveInsertBehaviorForCurrentFocus: InsertBehavior {
+        let bundleID = focusTarget.bundleID ?? ""
+        return appProfiles[bundleID]?.insertBehavior
+            ?? SettingsCoordinator.defaultAppProfiles[bundleID]?.insertBehavior
+            ?? insertBehavior
+    }
+
+    var localDictationWantsBackendCleanup: Bool {
+        providerMode == .localOnly
+            && sttBackend == .whisperKit
+            && workflowMode == .dictation
+            && effectiveInsertBehaviorForCurrentFocus != .autoInsertRaw
+    }
+
     var backendShouldRun: Bool {
         // An open cockpit needs the backend for smart actions even when the
         // active workflow runs fully in-app (WhisperKit dictation/prompt).
-        isBenchmarkRunning || workflowNeedsBackend || cockpitVisible
+        isBenchmarkRunning || workflowNeedsBackend || cockpitVisible || localDictationWantsBackendCleanup
     }
 
     var backendStatusColorName: String {

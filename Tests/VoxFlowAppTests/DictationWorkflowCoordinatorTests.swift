@@ -157,7 +157,112 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         XCTAssertTrue(recordedStages.contains("cleanup_polish_local"))
     }
 
+    @MainActor func testLocalDictationWhisperKitAutoInsertUsesSingleBackendCall() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = true
+
+        let polishResponse = """
+        {
+            "output_text": "hello world polished by ollama",
+            "mode_applied": "polish",
+            "guardrail_triggered": false
+        }
+        """.data(using: .utf8)!
+
+        var requestCount = 0
+        DictationMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/cleanup")
+            XCTAssertEqual(request.httpMethod, "POST")
+            requestCount += 1
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            // Auto-insert polish needs only the polish round-trip.
+            return (response, polishResponse)
+        }
+
+        var recordedStages: [String] = []
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-whisperkit-backend",
+            rawText: "hello world clean me",
+            providerMode: .localOnly,
+            consentToken: nil,
+            allowRaw: false,
+            toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish,
+            sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9,
+            targetApp: nil
+        )
+
+        try await sut.processDictation(request) { name, _, _ in
+            recordedStages.append(name)
+        }
+
+        // Only the inserted mode (polish) hits the slow backend; the unused
+        // light field is filled cheaply in-app.
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(state.transcriptCandidate?.rawText, "hello world clean me")
+        XCTAssertEqual(state.transcriptCandidate?.polishText, "hello world polished by ollama")
+        XCTAssertNotEqual(state.transcriptCandidate?.lightText, "hello world polished by ollama")
+        XCTAssertFalse((state.transcriptCandidate?.lightText ?? "").isEmpty)
+        XCTAssertEqual(textInsertion.insertCallCount, 1)
+        XCTAssertEqual(textInsertion.insertedText, "hello world polished by ollama")
+        XCTAssertTrue(recordedStages.contains("cleanup_polish_api"))
+        XCTAssertFalse(recordedStages.contains("cleanup_light_api"))
+    }
+
     @MainActor func testRemoteDictationAutoInsertPolish() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+
+        let polishResponse = """
+        {
+            "output_text": "hello world polished text",
+            "mode_applied": "polish",
+            "guardrail_triggered": false
+        }
+        """.data(using: .utf8)!
+
+        var requestCount = 0
+        DictationMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/cleanup")
+            XCTAssertEqual(request.httpMethod, "POST")
+            requestCount += 1
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, polishResponse)
+        }
+
+        var recordedStages: [String] = []
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-3",
+            rawText: "hello world raw input",
+            providerMode: .localOnly, // auto-insert requires localOnly in remote path
+            consentToken: nil,
+            allowRaw: false,
+            toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish,
+            sttBackend: .whisper, // Whisper uses API backend
+            lastTranscriptionConfidence: 0.92,
+            targetApp: nil
+        )
+
+        try await sut.processDictation(request) { name, _, _ in
+            recordedStages.append(name)
+        }
+
+        // Auto-insert polish makes a single backend call; the unused light
+        // field is filled locally and never round-trips.
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(state.transcriptCandidate?.rawText, "hello world raw input")
+        XCTAssertEqual(state.transcriptCandidate?.polishText, "hello world polished text")
+        XCTAssertEqual(textInsertion.insertCallCount, 1)
+        XCTAssertEqual(textInsertion.insertedText, "hello world polished text")
+        XCTAssertEqual(state.sessionState, .idle)
+        XCTAssertTrue(recordedStages.contains("cleanup_polish_api"))
+        XCTAssertFalse(recordedStages.contains("cleanup_light_api"))
+    }
+
+    /// Review mode (no auto-insert mode) still resolves BOTH light and polish
+    /// through the backend so the review toggle shows real LLM output for each.
+    @MainActor func testReviewDictationResolvesBothModesViaBackend() async throws {
         let (sut, state, textInsertion, _) = makeSUT()
 
         let lightResponse = """
@@ -179,27 +284,22 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         var requestCount = 0
         DictationMockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/v1/cleanup")
-            XCTAssertEqual(request.httpMethod, "POST")
             requestCount += 1
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            if requestCount == 1 {
-                return (response, lightResponse)
-            } else {
-                return (response, polishResponse)
-            }
+            return requestCount == 1 ? (response, lightResponse) : (response, polishResponse)
         }
 
         var recordedStages: [String] = []
         let request = DictationWorkflowRequest(
-            sessionID: "dictation-3",
+            sessionID: "dictation-review",
             rawText: "hello world raw input",
-            providerMode: .localOnly, // auto-insert requires localOnly in remote path
+            providerMode: .localOnly,
             consentToken: nil,
             allowRaw: false,
             toneStyle: .neutral,
-            insertBehavior: .autoInsertPolish,
-            sttBackend: .whisper, // Whisper uses API backend
-            lastTranscriptionConfidence: 0.92,
+            insertBehavior: .alwaysReview,
+            sttBackend: .whisper,
+            lastTranscriptionConfidence: 0.9,
             targetApp: nil
         )
 
@@ -207,12 +307,11 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
             recordedStages.append(name)
         }
 
-        XCTAssertEqual(state.transcriptCandidate?.rawText, "hello world raw input")
+        XCTAssertEqual(requestCount, 2)
         XCTAssertEqual(state.transcriptCandidate?.lightText, "hello world light cleaned")
         XCTAssertEqual(state.transcriptCandidate?.polishText, "hello world polished text")
-        XCTAssertEqual(textInsertion.insertCallCount, 1)
-        XCTAssertEqual(textInsertion.insertedText, "hello world polished text")
-        XCTAssertEqual(state.sessionState, .idle)
+        XCTAssertEqual(textInsertion.insertCallCount, 0)
+        XCTAssertEqual(state.sessionState, .review)
         XCTAssertTrue(recordedStages.contains("cleanup_light_api"))
         XCTAssertTrue(recordedStages.contains("cleanup_polish_api"))
     }

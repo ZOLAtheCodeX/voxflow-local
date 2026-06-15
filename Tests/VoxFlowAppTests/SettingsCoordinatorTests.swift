@@ -223,6 +223,10 @@ final class SettingsCoordinatorTests: XCTestCase {
         state.workflowMode = .dictation
         state.sttBackend = .whisperKit
         state.providerMode = .localOnly
+        // Raw insertion isolates the cockpit as the only thing that could keep
+        // the backend up — non-raw dictation now wants it for local-model
+        // cleanup (see localDictationWantsBackendCleanup).
+        state.insertBehavior = .autoInsertRaw
 
         state.cockpitVisible = false
 
@@ -230,11 +234,13 @@ final class SettingsCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testRestartBackendWithLocalWhisperKitLeavesBackendIdle() {
+    func testRestartBackendWithRawWhisperKitDictationLeavesBackendIdle() {
         let (sut, state, _) = makeSUT()
         state.workflowMode = .dictation
         state.sttBackend = .whisperKit
         state.providerMode = .localOnly
+        // Raw insertion skips cleanup entirely, so it stays fully in-app.
+        state.insertBehavior = .autoInsertRaw
 
         sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
 
@@ -244,6 +250,26 @@ final class SettingsCoordinatorTests: XCTestCase {
         XCTAssertNil(state.backendReadiness.readinessIssue)
         XCTAssertEqual(state.backendReadiness.statusSummary, "Backend idle — current workflow runs in app")
         XCTAssertEqual(state.backendReadiness.activeSTTModel, "whisperkit (in-app)")
+        XCTAssertEqual(state.statusLine, "Dictation mode active")
+    }
+
+    @MainActor
+    func testRestartBackendWithLightWhisperKitDictationMarksBackendWarmup() {
+        let (sut, state, _) = makeSUT()
+        state.workflowMode = .dictation
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        // Non-raw dictation routes cleanup through the local-model backend
+        // provider chain, so the backend must warm up even though STT is in-app.
+        state.insertBehavior = .autoInsertLight
+
+        sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
+
+        XCTAssertTrue(state.backendReadiness.processRunning)
+        XCTAssertTrue(state.backendReadiness.warmupInProgress)
+        XCTAssertFalse(state.backendReadiness.readyForDictation)
+        XCTAssertNil(state.backendReadiness.readinessIssue)
+        XCTAssertEqual(state.backendReadiness.statusSummary, "Backend starting — waiting for warmup")
         XCTAssertEqual(state.statusLine, "Dictation mode active")
     }
 

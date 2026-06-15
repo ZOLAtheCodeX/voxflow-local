@@ -681,7 +681,7 @@ final class AppCoordinator: ObservableObject {
     ) async {
         do {
             let captureFinalizeStarted = ContinuousClock.now
-            guard let capturedAudio = try stopAndValidateAudio() else {
+            guard let capturedAudio = try stopAndValidateAudio(commandLane: commandLane) else {
                 trace.recordStage("capture_finalize", startedAt: captureFinalizeStarted, detail: state.statusLine)
                 finalizeCaptureTrace(trace)
                 return
@@ -740,8 +740,10 @@ final class AppCoordinator: ObservableObject {
         state.statusLine = commandLane ? "Interpreting command..." : "Transcribing..."
     }
 
-    private func stopAndValidateAudio() throws -> CapturedAudio? {
+    private func stopAndValidateAudio(commandLane: Bool) throws -> CapturedAudio? {
         let capturedAudio = try audioCapture.stopCapture()
+        let source = commandLane ? "command_lane" : "quick_dictation"
+        let durationSec = Double(capturedAudio.pcm.count) / (capturedAudio.sampleRate * Double(MemoryLayout<Int16>.size))
         // Guard: discard very short captures that cause Whisper hallucination
         let minBytes = Int(capturedAudio.sampleRate * TranscriptGate.minAudioSeconds) * MemoryLayout<Int16>.size
 
@@ -754,7 +756,18 @@ final class AppCoordinator: ObservableObject {
         }
 
         if capturedAudio.isSilent {
-            log.info("Audio is silence (RMS \(String(format: "%.4f", capturedAudio.rmsEnergy))) — discarding")
+            let rms = capturedAudio.rmsEnergy
+            log.info("Audio is silence (RMS \(String(format: "%.4f", rms))) — discarding")
+            // Record it: a fully dead mic (RMS ~0) otherwise leaves no trace,
+            // so "I spoke and nothing happened" becomes diagnosable from the log.
+            insertionAudit.recordRejection(
+                text: "",
+                reason: "silence",
+                confidence: 0,
+                durationSeconds: durationSec,
+                source: source,
+                rmsEnergy: rms
+            )
             state.sessionState = .idle
             state.statusLine = "No speech detected — try again"
             state.recordingDuration = 0
@@ -806,16 +819,18 @@ final class AppCoordinator: ObservableObject {
             confidence: transcription.confidenceEstimate,
             audioDurationSeconds: audioDurationSec
         ) {
-            log.info("TranscriptGate rejected transcript (\(reason), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s) — discarding")
+            let rms = capturedAudio.rmsEnergy
+            log.info("TranscriptGate rejected transcript (\(reason), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s, rms=\(String(format: "%.4f", rms))) — discarding")
             insertionAudit.recordRejection(
                 text: rawText,
                 reason: reason,
                 confidence: transcription.confidenceEstimate,
                 durationSeconds: audioDurationSec,
-                source: commandLane ? "command_lane" : "quick_dictation"
+                source: commandLane ? "command_lane" : "quick_dictation",
+                rmsEnergy: rms
             )
             state.sessionState = .idle
-            state.statusLine = "No speech detected — try again"
+            state.statusLine = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)
             state.recordingDuration = 0
             return
         }
@@ -1010,8 +1025,9 @@ final class AppCoordinator: ObservableObject {
         selectToneStyleTask = Task { @MainActor in
             do {
                 try Task.checkCancellation()
-                // Local retone for WhisperKit
-                if self.state.sttBackend == .whisperKit {
+                // WhisperKit STT can still use backend-backed local model
+                // cleanup. Only retone in Swift when the backend is idle.
+                if self.state.sttBackend == .whisperKit && !self.state.backendReadiness.readyForDictation {
                     let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: tone)
                     let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: tone)
                     try Task.checkCancellation()
