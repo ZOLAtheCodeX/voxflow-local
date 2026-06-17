@@ -94,54 +94,51 @@ class SmartActionEngine:
                 error=f"unknown action: {action_id}",
             )
 
-        # Fail closed when the LLM backend is unreachable. PolishEngine has a
-        # regex fallback (apply_tone(light_cleanup())) that is fine for polish
-        # but structurally wrong for smart actions — returning grammar-cleaned
-        # text to a user who asked for MECE / steel-man / disclaimer is
-        # misleading. Callers surface ``error == "ollama_unavailable"`` as a
-        # user-visible "Ollama required" message rather than inserting the
-        # fallback. Backends that don't expose ``is_available`` (test stubs)
-        # are treated as available — only the production OllamaBackend can
-        # actually fail closed here.
-        availability_check = getattr(self._polish_backend, "is_available", None)
-        if callable(availability_check):
-            try:
-                available = bool(availability_check())
-            except Exception as exc:  # pragma: no cover - defensive only
-                logger.warning("SmartActionEngine availability probe raised: %s", exc)
-                available = False
-            if not available:
-                logger.warning(
-                    "SmartActionEngine: backend unavailable — refusing action %r",
-                    action_id,
-                )
-                return SmartActionResult(
-                    action_id=action_id,
-                    output=transcript,
-                    guardrail_triggered=False,
-                    error="ollama_unavailable",
-                )
-
         system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(action_description=description)
+        # Let the WHOLE provider chain attempt the transformation. Availability
+        # is decided by EXECUTION, not a preflight on the chain head: a
+        # head-only ``is_available()`` probe would refuse the action even when a
+        # healthy fallback provider could serve it.
+        #
         # Chain engines expose run() with provenance (R3.4); legacy/stub
         # backends only expose polish() — fall back to the 3-tuple.
         run = getattr(self._polish_backend, "run", None)
         if callable(run):
-            try:
-                from engines.polish import PolishOutcome
+            from engines.polish import PolishOutcome
 
+            try:
                 outcome = run(transcript, "neutral", system_prompt=system_prompt)
-                if isinstance(outcome, PolishOutcome):
+            except TypeError:
+                outcome = None
+            if isinstance(outcome, PolishOutcome):
+                # Fail closed when NO real provider served and the chain fell to
+                # the regex floor (served_by == "regex"). PolishEngine's floor
+                # (apply_tone(light_cleanup())) is fine for polish but
+                # structurally wrong for smart actions — returning grammar-cleaned
+                # text to a user who asked for MECE / steel-man / disclaimer is
+                # misleading. Surface ``ollama_unavailable`` + the verbatim
+                # transcript so the Swift client shows "Ollama required" rather
+                # than inserting the floor output.
+                if outcome.served_by == "regex":
+                    logger.warning(
+                        "SmartActionEngine: chain served only the regex floor — "
+                        "refusing action %r",
+                        action_id,
+                    )
                     return SmartActionResult(
                         action_id=action_id,
-                        output=outcome.text,
-                        guardrail_triggered=outcome.guardrail_triggered,
-                        served_by=outcome.served_by,
-                        model_id=outcome.model_id,
-                        degraded_reason=outcome.degraded_reason,
+                        output=transcript,
+                        guardrail_triggered=False,
+                        error="ollama_unavailable",
                     )
-            except TypeError:
-                pass
+                return SmartActionResult(
+                    action_id=action_id,
+                    output=outcome.text,
+                    guardrail_triggered=outcome.guardrail_triggered,
+                    served_by=outcome.served_by,
+                    model_id=outcome.model_id,
+                    degraded_reason=outcome.degraded_reason,
+                )
         output, guardrail, reason = self._polish_backend.polish(
             text=transcript,
             system_prompt=system_prompt,

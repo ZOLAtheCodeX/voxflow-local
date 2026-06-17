@@ -48,8 +48,6 @@ from nlp import (
     coerce_task_owners,
 )
 
-from privacy import redact_sensitive_text
-
 from routing import (
     coerce_string_list,
 )
@@ -336,13 +334,14 @@ async def smart_action(payload: SmartActionRequest) -> SmartActionResponse:
     if sem.locked():
         raise HTTPException(status_code=503, detail="Server busy: maximum concurrent model evaluations reached")
 
-    safe_transcript = redact_sensitive_text(payload.transcript)
-
     async with sem:
         result = await run_blocking(
             smart_action_engine.apply,
             action_id=payload.action_id,
-            transcript=safe_transcript,
+            # Raw transcript: PolishEngine redacts per provider inside run()
+            # (cloud only). Pre-redacting here fed local Ollama smart actions
+            # [EMAIL]/[PHONE] placeholders and degraded their output.
+            transcript=payload.transcript,
         )
 
     return SmartActionResponse(
