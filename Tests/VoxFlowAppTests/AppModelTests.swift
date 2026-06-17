@@ -126,6 +126,54 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(state.backendShouldRun)
     }
 
+    @MainActor
+    func testFreshWhisperKitDictationWantsRuntimeWarmup() {
+        let state = AppState()
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.workflowMode = .dictation
+        state.insertBehavior = .autoInsertLight
+        // Fresh launch: backend is wanted AND the WhisperKit model isn't loaded
+        // yet — the launch handler must warm up rather than wait for the app to
+        // become active (which never happens for a menu-bar app at cold launch).
+        XCTAssertTrue(state.wantsRuntimeWarmup)
+    }
+
+    @MainActor
+    func testWhisperKitNotReadyWantsWarmupEvenWhenBackendIdle() {
+        let state = AppState()
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.workflowMode = .dictation
+        state.insertBehavior = .autoInsertRaw
+        for bundleID in SettingsCoordinator.defaultAppProfiles.keys {
+            state.appProfiles[bundleID] = AppProfile(
+                tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw)
+        }
+        state.backendReadiness.whisperKitReady = false
+
+        XCTAssertFalse(state.backendShouldRun)        // backend not wanted...
+        XCTAssertTrue(state.wantsRuntimeWarmup)        // ...but WhisperKit still needs loading
+    }
+
+    @MainActor
+    func testNoWarmupWantedWhenWhisperKitReadyAndBackendIdle() {
+        let state = AppState()
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.workflowMode = .dictation
+        state.insertBehavior = .autoInsertRaw
+        for bundleID in SettingsCoordinator.defaultAppProfiles.keys {
+            state.appProfiles[bundleID] = AppProfile(
+                tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw)
+        }
+        state.backendReadiness.whisperKitReady = true
+        state.backendReadiness.warmupInProgress = false
+
+        XCTAssertFalse(state.backendShouldRun)
+        XCTAssertFalse(state.wantsRuntimeWarmup)
+    }
+
     func testDictationHotkeyPresetDisplayNamesUnique() {
         let labels = Set(DictationHotkeyPreset.allCases.map(\.displayName))
         XCTAssertEqual(labels.count, DictationHotkeyPreset.allCases.count)

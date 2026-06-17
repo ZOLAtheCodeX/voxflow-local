@@ -209,6 +209,17 @@ final class AppState: ObservableObject {
         isBenchmarkRunning || workflowNeedsBackend || cockpitVisible || localDictationWantsBackendCleanup
     }
 
+    /// Whether the app should kick off a runtime warmup at launch / on demand:
+    /// a backend is wanted, a warmup is already in flight, or the WhisperKit
+    /// model still needs loading. Read by the launch handler so the backend
+    /// warms at cold start instead of waiting for the app to "become active"
+    /// (which never fires for a menu-bar / `.accessory` app without a window).
+    var wantsRuntimeWarmup: Bool {
+        backendShouldRun
+            || backendReadiness.warmupInProgress
+            || (sttBackend == .whisperKit && !backendReadiness.whisperKitReady)
+    }
+
     var backendStatusColorName: String {
         if !backendShouldRun && !backendReadiness.processRunning && !backendReadiness.warmupInProgress {
             return "secondary"

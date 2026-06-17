@@ -262,16 +262,11 @@ final class AppCoordinator: ObservableObject {
     }
 
     func warmup() async {
-        if state.sttBackend == .whisperKit {
-            await loadWhisperKitModel()
-        }
-
-        let shouldPollBackend = state.backendShouldRun || state.backendReadiness.warmupInProgress
-        guard shouldPollBackend else {
-            await refreshBackendReadiness()
-            return
-        }
-
+        // Spawn the backend FIRST — it is independent of WhisperKit STT, and the
+        // model load below can take tens of seconds; gating the spawn on it
+        // leaves the backend cold (first dictation on the regex floor) for the
+        // whole load. startIfNeededAsync is fire-and-forget, so it survives this
+        // task being cancelled and restarted by a later warmup trigger.
         if state.backendShouldRun && !backendManager.isRunning {
             state.backendReadiness.processRunning = true
             state.backendReadiness.warmupInProgress = true
@@ -280,6 +275,16 @@ final class AppCoordinator: ObservableObject {
             state.backendReadiness.statusSummary = "Backend starting — waiting for warmup"
             state.backendReadiness.activeSTTModel = ""
             backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
+        }
+
+        if state.sttBackend == .whisperKit {
+            await loadWhisperKitModel()
+        }
+
+        let shouldPollBackend = state.backendShouldRun || state.backendReadiness.warmupInProgress
+        guard shouldPollBackend else {
+            await refreshBackendReadiness()
+            return
         }
 
         for attempt in 0..<24 {
@@ -357,9 +362,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func scheduleRuntimeWarmupIfNeeded() {
-        guard state.backendShouldRun || state.backendReadiness.warmupInProgress || (state.sttBackend == .whisperKit && !state.backendReadiness.whisperKitReady) else {
-            return
-        }
+        guard state.wantsRuntimeWarmup else { return }
         beginWarmupMonitoring()
     }
 
