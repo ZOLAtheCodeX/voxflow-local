@@ -100,7 +100,7 @@ final class CockpitCaptureCoordinator {
             // Same ingress gate as quick dictation — this path previously
             // bypassed the confidence rules entirely, so every 5 s flush of
             // ambient noise was a ghost-text opportunity (audit cause #5).
-            let durationSeconds = Double(audio.pcm.count) / (audio.sampleRate * 2.0)
+            let durationSeconds = audio.durationSeconds
             if case .rejected(let reason) = TranscriptGate.evaluate(
                 text: text,
                 confidence: response.confidenceEstimate,

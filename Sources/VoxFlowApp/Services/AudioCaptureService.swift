@@ -35,6 +35,14 @@ struct CapturedAudio {
     var isSilent: Bool {
         rmsEnergy < CapturedAudio.silenceFloor
     }
+
+    /// Duration of the captured PCM16 buffer in seconds. Single source of truth
+    /// for capture length. Guards a non-positive sample rate so it never yields
+    /// a non-finite value (which would poison the JSONL audit log).
+    var durationSeconds: Double {
+        guard sampleRate > 0 else { return 0 }
+        return Double(pcm.count) / (sampleRate * Double(MemoryLayout<Int16>.size))
+    }
 }
 
 enum AudioCaptureError: Error {

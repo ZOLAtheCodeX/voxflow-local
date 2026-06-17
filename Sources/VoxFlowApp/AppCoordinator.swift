@@ -38,7 +38,7 @@ private final class CapturePipelineTraceBuilder {
     }
 
     func setAudioDuration(from audio: CapturedAudio) {
-        audioDurationMs = Int((Double(audio.pcm.count) / (audio.sampleRate * 2.0)) * 1000.0)
+        audioDurationMs = Int(audio.durationSeconds * 1000.0)
     }
 
     func recordStage(_ name: String, startedAt: ContinuousClock.Instant, detail: String? = nil) {
@@ -743,10 +743,16 @@ final class AppCoordinator: ObservableObject {
         state.statusLine = commandLane ? "Interpreting command..." : "Transcribing..."
     }
 
+    /// Audit-log source label for the quick-capture lanes. Single source of
+    /// truth so the silence and gate-rejection receipts can't drift apart.
+    private static func captureSourceLabel(commandLane: Bool) -> String {
+        commandLane ? "command_lane" : "quick_dictation"
+    }
+
     private func stopAndValidateAudio(commandLane: Bool) throws -> CapturedAudio? {
         let capturedAudio = try audioCapture.stopCapture()
-        let source = commandLane ? "command_lane" : "quick_dictation"
-        let durationSec = Double(capturedAudio.pcm.count) / (capturedAudio.sampleRate * Double(MemoryLayout<Int16>.size))
+        let source = Self.captureSourceLabel(commandLane: commandLane)
+        let durationSec = capturedAudio.durationSeconds
         // Guard: discard very short captures that cause Whisper hallucination
         let minBytes = Int(capturedAudio.sampleRate * TranscriptGate.minAudioSeconds) * MemoryLayout<Int16>.size
 
@@ -814,7 +820,7 @@ final class AppCoordinator: ObservableObject {
         log.info("Transcription: \(rawText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
         #endif
 
-        let audioDurationSec = Double(capturedAudio.pcm.count) / (capturedAudio.sampleRate * Double(MemoryLayout<Int16>.size))
+        let audioDurationSec = capturedAudio.durationSeconds
 
         // Single ingress gate: empty/placeholder, hallucination filter, and the
         // low-confidence rules live in TranscriptGate so every transcript path
@@ -831,7 +837,7 @@ final class AppCoordinator: ObservableObject {
                 reason: reason.rawValue,
                 confidence: transcription.confidenceEstimate,
                 durationSeconds: audioDurationSec,
-                source: commandLane ? "command_lane" : "quick_dictation",
+                source: Self.captureSourceLabel(commandLane: commandLane),
                 rmsEnergy: rms
             )
             state.sessionState = .idle

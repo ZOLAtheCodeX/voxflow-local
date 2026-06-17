@@ -93,7 +93,7 @@ final class WhisperKitSTTService: ChunkTranscribing {
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         let latencyMs = started.elapsedMilliseconds()
 
-        let audioDurationS = Double(audio.pcm.count) / (audio.sampleRate * 2.0) // 2 bytes per Int16 sample
+        let audioDurationS = audio.durationSeconds
 
         // Coverage-based confidence across ALL segments of ALL results — the
         // old exp(avgLogprob)-of-first-segment estimate scored multi-word
