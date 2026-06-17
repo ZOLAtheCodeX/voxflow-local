@@ -82,8 +82,27 @@ final class CockpitCoordinator: ObservableObject {
 
     // MARK: - Smart-action dispatch
 
+    /// User-facing message for a smart-action soft error. Provider-neutral so it
+    /// stays accurate whatever the configured chain (Ollama, LM Studio, cloud).
+    static func smartActionErrorMessage(_ action: SmartActionId, error: String) -> String {
+        switch error {
+        case "provider_unavailable":
+            return "\(action.label): no LLM provider is ready — configure one in Settings"
+        default:
+            return "\(action.label) failed: \(error)"
+        }
+    }
+
     func applyAction(_ action: SmartActionId, to transcript: String) async throws -> SmartActionResult {
         let result = try await actionService.apply(action, to: transcript)
+        // A soft error (e.g. provider_unavailable) means no real transform
+        // happened. Surface it instead of silently leaving the transcript
+        // unchanged — the direct chip/voice path used to discard it, unlike
+        // ChainExecutor. Don't count it as an invocation or record history.
+        if let error = result.error {
+            state.statusLine = Self.smartActionErrorMessage(action, error: error)
+            return result
+        }
         state.chipInvocationCounts[action, default: 0] += 1
         state.persistChipInvocationCounts()
         promoteIfNeeded(action)

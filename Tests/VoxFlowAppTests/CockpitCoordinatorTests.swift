@@ -83,6 +83,22 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 0)
     }
 
+    func test_applyAction_surfaces_provider_unavailable_error() async throws {
+        let (state, coord, _, _) = makeCoordinator(backend: ErroringSmartActionBackend())
+
+        let result = try await coord.applyAction(.memo, to: "raw transcript")
+
+        // The soft error must reach the user (the direct chip/voice path
+        // previously discarded it, unlike ChainExecutor).
+        XCTAssertEqual(result.error, "provider_unavailable")
+        XCTAssertTrue(
+            state.statusLine.lowercased().contains("provider")
+                || state.statusLine.lowercased().contains("configure"),
+            "provider_unavailable must be surfaced on the status line, got: \(state.statusLine)")
+        // An errored action did nothing — it must not count as an invocation.
+        XCTAssertEqual(state.chipInvocationCounts[.memo, default: 0], 0)
+    }
+
     // MARK: - MRU promotion
 
     func test_chip_promoted_after_three_invocations() async throws {
@@ -277,6 +293,13 @@ private final class StubSmartActionBackend: SmartActionBackend, @unchecked Senda
             guardrailTriggered: false,
             error: nil
         )
+    }
+}
+
+private final class ErroringSmartActionBackend: SmartActionBackend, @unchecked Sendable {
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        // The fail-closed shape: error set, output == transcript (no real transform).
+        SmartActionResult(actionId: action, output: transcript, guardrailTriggered: false, error: "provider_unavailable")
     }
 }
 

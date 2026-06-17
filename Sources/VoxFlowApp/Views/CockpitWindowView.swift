@@ -169,8 +169,10 @@ struct CockpitWindowView: View {
             guard let transcript = sessionService.currentSession?.transcript,
                   !transcript.isEmpty else { return }
             do {
-                _ = try await coordinator.applyAction(action, to: transcript)
-                lastError = nil
+                let result = try await coordinator.applyAction(action, to: transcript)
+                // A soft error (e.g. provider_unavailable) is returned, not
+                // thrown — surface it rather than treating it as success.
+                lastError = result.error.map { CockpitCoordinator.smartActionErrorMessage(action, error: $0) }
             } catch {
                 lastError = "\(action.label) failed: \(error.localizedDescription)"
             }
