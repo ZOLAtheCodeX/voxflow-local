@@ -16,10 +16,10 @@ jobs:
     # Swift 6.2 toolchain (Xcode 26) — needs a macOS 26 image.
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .build
@@ -37,9 +37,9 @@ jobs:
     name: Python tests
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         id: py
         with:
           python-version: "3.11"
