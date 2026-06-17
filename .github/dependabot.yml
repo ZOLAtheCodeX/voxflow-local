@@ -1,0 +1,24 @@
+# Dependabot version updates.
+#
+# Scoped to GitHub Actions only: the workflow pins actions to immutable
+# commit SHAs (with `# vX.Y.Z` comments), which never update themselves.
+# Dependabot watches for new action releases and opens a PR bumping both
+# the SHA and the comment, so the pins stay immutable AND current.
+#
+# The Python (pip) ecosystem is intentionally NOT managed here — keeping
+# dependency-update PR noise off per the project's current posture.
+# Security *alerts* remain enabled separately in repo settings.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    # Collapse all action bumps into a single weekly PR instead of one
+    # PR per action.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
