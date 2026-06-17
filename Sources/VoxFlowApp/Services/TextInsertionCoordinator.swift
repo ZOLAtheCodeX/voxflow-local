@@ -69,6 +69,15 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             }
             state.statusLine = "Inserted"
             state.lastInsertedText = state.displayText
+            // Receipt for the ghost-text forensics log — the review-mode insert
+            // was the one insertion path that previously left no trace, breaking
+            // the "every insertion is logged" contract.
+            audit.recordInsertion(
+                text: state.displayText,
+                targetApp: targetApp?.localizedName ?? appName,
+                source: "review",
+                confidence: state.transcriptCandidate?.confidence
+            )
             state.sessionState = .idle
         } else {
             state.failedInsertCount += 1
