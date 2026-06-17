@@ -159,4 +159,72 @@ extension BackendProcessManagerTests {
             listenerResponded: true, reportedStamp: "other",
             expectedStamp: "me", adoptForeignOverride: true))
     }
+
+    private static func portParityTestConfig() -> BackendLaunchConfiguration {
+        BackendLaunchConfiguration(
+            sttBackend: "whisper",
+            sttModel: "tiny",
+            whisperModel: "tiny",
+            translateModel: "none",
+            translateBackend: "none",
+            privateAPIBaseURL: "",
+            privateAPIModel: "",
+            privateAPIKey: "",
+            openAIBaseURL: "",
+            openAIAPIKey: "",
+            openAISTTModel: "",
+        )
+    }
+
+    /// Points VOXFLOW_BACKEND_PATH at a real (empty) entrypoint so the managed
+    /// spawn reaches the runner seam deterministically, and sets the backend URL.
+    private func withSpawnEnvironment(
+        backendURL: String,
+        _ body: (BackendProcessRunnerFake, BackendProcessManager) -> Void
+    ) {
+        let entry = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voxflow-test-server-\(UUID().uuidString).py")
+        try? Data().write(to: entry)
+        setenv("VOXFLOW_BACKEND_PATH", entry.path, 1)
+        setenv("VOXFLOW_BACKEND_URL", backendURL, 1)
+        defer {
+            unsetenv("VOXFLOW_BACKEND_PATH")
+            unsetenv("VOXFLOW_BACKEND_URL")
+            try? FileManager.default.removeItem(at: entry)
+        }
+        let runner = BackendProcessRunnerFake()
+        let manager = BackendProcessManager(runner: runner)
+        body(runner, manager)
+    }
+
+    func testSpawnEnvironmentCarriesResolvedCustomBackendPort() {
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:9000") { runner, manager in
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertEqual(runner.ranProcesses.count, 1, "managed spawn should launch through the runner seam")
+            let env = runner.ranProcesses.first?.environment ?? [:]
+            // The spawned uvicorn must bind the SAME host/port the client uses.
+            XCTAssertEqual(env["VOXFLOW_BACKEND_HOST"], "127.0.0.1")
+            XCTAssertEqual(env["VOXFLOW_BACKEND_PORT"], "9000")
+        }
+    }
+
+    func testRefusesToSpawnManagedBackendOnNonLoopbackHost() {
+        withSpawnEnvironment(backendURL: "http://192.168.1.50:8765") { runner, manager in
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            // The loopback guard must refuse BEFORE the runner is touched — the
+            // entrypoint exists, so a missing guard WOULD have launched a process
+            // bound to a routable interface.
+            XCTAssertEqual(runner.ranProcesses.count, 0, "managed spawn must refuse a non-loopback host")
+        }
+    }
+
+    func testRefusesToSpawnManagedBackendOverHTTPS() {
+        withSpawnEnvironment(backendURL: "https://127.0.0.1:9000") { runner, manager in
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            // Managed spawn runs a PLAIN-HTTP uvicorn; an https URL (even on
+            // loopback) would leave the client talking TLS to a plaintext socket.
+            // Refuse it — https is valid only for a manually-run backend.
+            XCTAssertEqual(runner.ranProcesses.count, 0, "managed spawn must refuse an https URL")
+        }
+    }
 }

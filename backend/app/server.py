@@ -9,8 +9,11 @@ that the 360+ existing tests continue to work without modification.
 
 from __future__ import annotations
 
+import os
 import time
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -222,7 +225,35 @@ async def rate_limit_middleware(
 
 app.include_router(api_router)
 
+
+def resolve_bind_host_port(env: Mapping[str, str] | None = None) -> tuple[str, int]:
+    """Resolve the uvicorn bind host/port.
+
+    Explicit ``VOXFLOW_BACKEND_HOST`` / ``VOXFLOW_BACKEND_PORT`` (set by the Swift
+    launcher from the resolved BackendEndpoint) win; otherwise derive from
+    ``VOXFLOW_BACKEND_URL``; otherwise default to ``127.0.0.1:8765``. Keeping the
+    bound socket in lockstep with the client URL is what makes a custom
+    ``VOXFLOW_BACKEND_URL`` actually work end to end.
+    """
+    env = os.environ if env is None else env
+    host = env.get("VOXFLOW_BACKEND_HOST")
+    port_raw = env.get("VOXFLOW_BACKEND_PORT")
+    if host and port_raw:
+        try:
+            return host, int(port_raw)
+        except ValueError:
+            pass
+    url = env.get("VOXFLOW_BACKEND_URL")
+    if url:
+        parsed = urlparse(url)
+        if parsed.hostname:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            return parsed.hostname, port
+    return "127.0.0.1", 8765
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("server:app", host="127.0.0.1", port=8765, reload=False)
+    bind_host, bind_port = resolve_bind_host_port()
+    uvicorn.run("server:app", host=bind_host, port=bind_port, reload=False)

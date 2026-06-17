@@ -191,16 +191,7 @@ enum NotionKeychain {
 
 enum BackendAPIClient {
 #if DEBUG
-    nonisolated(unsafe) static var baseURL: URL = {
-        if let override = ProcessInfo.processInfo.environment["VOXFLOW_BACKEND_URL"],
-           let url = URL(string: override) {
-            return url
-        }
-        guard let url = URL(string: "http://127.0.0.1:8765") else {
-            fatalError("Failed to create default backend URL")
-        }
-        return url
-    }()
+    nonisolated(unsafe) static var baseURL: URL = BackendEndpoint.resolved().url
 
     nonisolated(unsafe) static var session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -209,16 +200,7 @@ enum BackendAPIClient {
         return URLSession(configuration: config)
     }()
 #else
-    private static let baseURL: URL = {
-        if let override = ProcessInfo.processInfo.environment["VOXFLOW_BACKEND_URL"],
-           let url = URL(string: override) {
-            return url
-        }
-        guard let url = URL(string: "http://127.0.0.1:8765") else {
-            fatalError("Failed to create default backend URL")
-        }
-        return url
-    }()
+    private static let baseURL: URL = BackendEndpoint.resolved().url
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default

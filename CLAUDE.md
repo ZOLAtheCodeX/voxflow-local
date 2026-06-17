@@ -79,7 +79,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | Variable | Purpose | Default |
 |---|---|---|
 | `VOXFLOW_MODELS_DIR` | Pre-downloaded model cache | `./models` |
-| `VOXFLOW_BACKEND_URL` | Backend URL override (Swift) | `http://127.0.0.1:8765` |
+| `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself). | `http://127.0.0.1:8765` |
 | `VOXFLOW_STT_BACKEND` | `whisper` / `whisperKit` / `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model id | `openai/whisper-small` |
 | `VOXFLOW_OLLAMA_URL` | Ollama base URL | `http://localhost:11434` |

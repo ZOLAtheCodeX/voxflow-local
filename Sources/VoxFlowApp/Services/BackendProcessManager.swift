@@ -262,7 +262,22 @@ final class BackendProcessManager: @unchecked Sendable {
             return
         }
 
-        let backendPort = resolveBackendPort()
+        let endpoint = BackendEndpoint.resolved()
+        // A managed spawn launches a plain-HTTP uvicorn bound to loopback.
+        // Refuse anything else: a non-loopback host (LAN exposure) or an https
+        // URL (the child has no TLS, so the client would talk TLS to a plaintext
+        // socket). Either means "talk to a backend I run myself" — run it
+        // manually (adopt-foreign) instead.
+        guard endpoint.isManagedSpawnEligible else {
+            let issue = "Refusing to spawn a managed backend for \(endpoint.url.absoluteString) — managed spawn supports only a plain-HTTP loopback URL; run the backend yourself for a custom host or TLS"
+            log.error("\(issue)")
+            _lastStartupFailureReason = issue
+            process = nil
+            activeConfiguration = nil
+            clearPipeHandlers()
+            return
+        }
+        let backendPort = endpoint.port
         guard ensureBackendPortAvailable(backendPort) else {
             let issue = "Unable to free backend port \(backendPort)"
             log.error("\(issue)")
@@ -494,6 +509,12 @@ final class BackendProcessManager: @unchecked Sendable {
         environment["VOXFLOW_INSTANCE_STAMP"] = instanceStamp
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment["VOXFLOW_OFFLINE"] = "1"
+        // Tell the spawned uvicorn exactly where to bind so the client URL, the
+        // stale-listener port checks, and the process all agree (loopback host
+        // is guaranteed by the spawn-time isLoopback guard).
+        let endpoint = BackendEndpoint.resolved()
+        environment["VOXFLOW_BACKEND_HOST"] = endpoint.host
+        environment["VOXFLOW_BACKEND_PORT"] = String(endpoint.port)
         environment["VOXFLOW_STT_BACKEND"] = configuration.sttBackend
         environment["VOXFLOW_STT_MODEL"] = configuration.sttModel
         environment["VOXFLOW_WHISPER_MODEL"] = configuration.whisperModel
@@ -572,15 +593,7 @@ final class BackendProcessManager: @unchecked Sendable {
     }
 
     private func resolveBackendPort() -> Int {
-        let raw = ProcessInfo.processInfo.environment["VOXFLOW_BACKEND_URL"] ?? "http://127.0.0.1:\(Self.defaultBackendPort)"
-        guard let url = URL(string: raw) else { return Self.defaultBackendPort }
-        if let port = url.port {
-            return port
-        }
-        if let scheme = url.scheme?.lowercased(), scheme == "https" {
-            return 443
-        }
-        return 80
+        BackendEndpoint.resolved().port
     }
 
     private func ensureBackendPortAvailable(_ port: Int) -> Bool {
