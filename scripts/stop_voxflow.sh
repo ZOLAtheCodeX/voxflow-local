@@ -38,10 +38,28 @@ else
   echo "[voxflow] app not running"
 fi
 
+# Only kill listeners that are actually a VoxFlow backend (dev uvicorn
+# `server:app` or the bundled `backend/app/server.py`) — never some unrelated
+# service that happens to hold the port.
+is_voxflow_backend_pid() {
+  local cmd
+  cmd="$(ps -p "$1" -o command= 2>/dev/null || true)"
+  [[ "${cmd}" == *"server:app"* || "${cmd}" == *"backend/app/server.py"* ]]
+}
+
 BACKEND_PIDS="$(lsof -t -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN || true)"
-if [[ -n "${BACKEND_PIDS}" ]]; then
-  echo "[voxflow] stopping backend: ${BACKEND_PIDS}"
-  kill ${BACKEND_PIDS}
+VOXFLOW_BACKEND_PIDS=""
+for pid in ${BACKEND_PIDS}; do
+  if is_voxflow_backend_pid "${pid}"; then
+    VOXFLOW_BACKEND_PIDS="${VOXFLOW_BACKEND_PIDS} ${pid}"
+  else
+    echo "[voxflow] :${BACKEND_PORT} held by non-VoxFlow pid ${pid} — leaving it alone"
+  fi
+done
+VOXFLOW_BACKEND_PIDS="${VOXFLOW_BACKEND_PIDS# }"
+if [[ -n "${VOXFLOW_BACKEND_PIDS}" ]]; then
+  echo "[voxflow] stopping backend: ${VOXFLOW_BACKEND_PIDS}"
+  kill ${VOXFLOW_BACKEND_PIDS}
 else
   echo "[voxflow] backend not running on :${BACKEND_PORT}"
 fi

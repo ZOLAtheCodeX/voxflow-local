@@ -55,6 +55,15 @@ export VOXFLOW_STT_ALLOW_FALLBACK="${VOXFLOW_STT_ALLOW_FALLBACK:-0}"
 export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/tmp/voxflow-pycache}"
 
+# A PID is a VoxFlow backend if its command line is the dev uvicorn
+# (`server:app`) or the bundled entrypoint (`backend/app/server.py`). Never kill
+# anything else that happens to hold the port.
+is_voxflow_backend_pid() {
+  local cmd
+  cmd="$(ps -p "$1" -o command= 2>/dev/null || true)"
+  [[ "${cmd}" == *"server:app"* || "${cmd}" == *"backend/app/server.py"* ]]
+}
+
 if lsof -nP -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
   if "${ROOT_DIR}/scripts/check_runtime_readiness.sh" >/dev/null 2>&1; then
     echo "[backend] already running and ready at ${READINESS_URL}"
@@ -62,14 +71,22 @@ if lsof -nP -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
   fi
   echo "[backend] port ${BACKEND_PORT} is in use but runtime readiness failed: ${READINESS_URL}"
   mapfile -t CONFLICT_PIDS < <(lsof -ti "tcp:${BACKEND_PORT}" || true)
-  if [[ ${#CONFLICT_PIDS[@]} -gt 0 ]]; then
-    echo "[backend] attempting to stop conflicting process(es): ${CONFLICT_PIDS[*]}"
-    kill "${CONFLICT_PIDS[@]}" >/dev/null 2>&1 || true
-    sleep 1
+  VOXFLOW_PIDS=()
+  FOREIGN_PIDS=()
+  for pid in "${CONFLICT_PIDS[@]}"; do
+    if is_voxflow_backend_pid "${pid}"; then VOXFLOW_PIDS+=("${pid}"); else FOREIGN_PIDS+=("${pid}"); fi
+  done
+  if [[ ${#FOREIGN_PIDS[@]} -gt 0 ]]; then
+    echo "[backend] port ${BACKEND_PORT} is held by a NON-VoxFlow process: ${FOREIGN_PIDS[*]}"
+    echo "[backend] refusing to kill it — stop the conflicting process yourself and run again."
+    exit 1
   fi
-  if lsof -nP -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-    if [[ ${#CONFLICT_PIDS[@]} -gt 0 ]]; then
-      kill -9 "${CONFLICT_PIDS[@]}" >/dev/null 2>&1 || true
+  if [[ ${#VOXFLOW_PIDS[@]} -gt 0 ]]; then
+    echo "[backend] stopping stale VoxFlow backend(s): ${VOXFLOW_PIDS[*]}"
+    kill "${VOXFLOW_PIDS[@]}" >/dev/null 2>&1 || true
+    sleep 1
+    if lsof -nP -iTCP:"${BACKEND_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+      kill -9 "${VOXFLOW_PIDS[@]}" >/dev/null 2>&1 || true
       sleep 1
     fi
   fi
