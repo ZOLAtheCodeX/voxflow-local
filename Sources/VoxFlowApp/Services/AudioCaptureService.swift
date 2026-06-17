@@ -7,6 +7,17 @@ struct CapturedAudio {
     let pcm: Data
     let sampleRate: Double
 
+    /// Wall-clock ms from capture start to the first audio buffer the OS
+    /// delivered — the cold-start latency the empty-capture investigation needs
+    /// to correlate against. nil when not measured (tests, backend STT path).
+    let firstBufferLatencyMs: Int?
+
+    init(pcm: Data, sampleRate: Double, firstBufferLatencyMs: Int? = nil) {
+        self.pcm = pcm
+        self.sampleRate = sampleRate
+        self.firstBufferLatencyMs = firstBufferLatencyMs
+    }
+
     /// Below this RMS the capture is treated as dead-air silence (no usable
     /// signal). Conservative — catches dead/muted mics without rejecting quiet
     /// speakers.
@@ -43,6 +54,28 @@ struct CapturedAudio {
         guard sampleRate > 0 else { return 0 }
         return Double(pcm.count) / (sampleRate * Double(MemoryLayout<Int16>.size))
     }
+
+    /// Seconds of leading dead-air before the first sample at or above the
+    /// silence floor. Elevated leading silence on an empty/low-coverage capture
+    /// points at cold-start front-clip (the engine was not yet capturing when
+    /// the user began speaking) rather than low gain — the distinction the
+    /// empty-capture investigation hinges on. Returns the full duration when the
+    /// whole clip is below the floor.
+    var leadingSilenceSeconds: Double {
+        guard sampleRate > 0 else { return 0 }
+        let sampleCount = pcm.count / MemoryLayout<Int16>.size
+        guard sampleCount > 0 else { return 0 }
+        let threshold = CapturedAudio.silenceFloor
+        let firstVoiced: Int? = pcm.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            for i in 0..<sampleCount where abs(Double(samples[i]) / Double(Int16.max)) >= threshold {
+                return i
+            }
+            return nil
+        }
+        guard let firstVoiced else { return durationSeconds }
+        return Double(firstVoiced) / sampleRate
+    }
 }
 
 enum AudioCaptureError: Error {
@@ -62,6 +95,11 @@ final class AudioCaptureService: AudioCapturing {
     private struct State: Sendable {
         var pcmBuffer = Data()
         var bufferLimitReached = false
+        // Cold-start instrumentation: when capture armed, and how long until the
+        // first OS audio buffer arrived. Kept under the same lock as pcmBuffer
+        // because the tap callback runs on the audio thread.
+        var captureStartedAt: ContinuousClock.Instant?
+        var firstBufferLatencyMs: Int?
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -110,6 +148,8 @@ final class AudioCaptureService: AudioCapturing {
         state.withLock {
             $0.pcmBuffer.removeAll(keepingCapacity: true)
             $0.bufferLimitReached = false
+            $0.captureStartedAt = nil
+            $0.firstBufferLatencyMs = nil
         }
 
         let inputNode = engine.inputNode
@@ -189,6 +229,9 @@ final class AudioCaptureService: AudioCapturing {
             let chunk = int16Samples.withUnsafeBufferPointer { Data(buffer: $0) }
 
             self.state.withLock { state in
+                if state.firstBufferLatencyMs == nil, let start = state.captureStartedAt {
+                    state.firstBufferLatencyMs = start.elapsedMilliseconds()
+                }
                 guard state.pcmBuffer.count < AudioCaptureService.maxBufferBytes else {
                     state.bufferLimitReached = true
                     return
@@ -198,6 +241,7 @@ final class AudioCaptureService: AudioCapturing {
         }
 
         engine.prepare()
+        state.withLock { $0.captureStartedAt = ContinuousClock.now }
         do {
             try engine.start()
         } catch {
@@ -218,8 +262,12 @@ final class AudioCaptureService: AudioCapturing {
         engine.stop()
         isCapturing = false
 
-        let captured = state.withLock { $0.pcmBuffer }
+        let (captured, firstBufferLatencyMs) = state.withLock { ($0.pcmBuffer, $0.firstBufferLatencyMs) }
 
-        return CapturedAudio(pcm: captured, sampleRate: Self.targetSampleRate)
+        return CapturedAudio(
+            pcm: captured,
+            sampleRate: Self.targetSampleRate,
+            firstBufferLatencyMs: firstBufferLatencyMs
+        )
     }
 }

@@ -412,6 +412,14 @@ struct TranscriptCandidate: Identifiable {
     /// instead of whatever is frontmost at click time (audit S7).
     var targetProcessIdentifier: Int32? = nil
 
+    /// Per-mode cleanup provenance (e.g. "gemma4:e2b-mlx", "regex fallback",
+    /// "in-app cleanup"). Carried so a LATER review-mode insert — where the user
+    /// toggles light/polish then clicks Insert — can stamp the audit receipt
+    /// with what actually produced the selected mode's text. nil = unknown
+    /// (raw mode, or a candidate built before provenance was available).
+    var lightProvenance: String? = nil
+    var polishProvenance: String? = nil
+
     func text(for mode: CleanupMode) -> String {
         switch mode {
         case .raw:
@@ -420,6 +428,19 @@ struct TranscriptCandidate: Identifiable {
             return lightText
         case .polish:
             return polishText
+        }
+    }
+
+    /// Cleanup provenance for a mode. Raw is verbatim transcription — no
+    /// cleanup ran, so it has no provenance.
+    func provenance(for mode: CleanupMode) -> String? {
+        switch mode {
+        case .raw:
+            return nil
+        case .light:
+            return lightProvenance
+        case .polish:
+            return polishProvenance
         }
     }
 }

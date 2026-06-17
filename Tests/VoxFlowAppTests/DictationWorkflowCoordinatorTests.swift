@@ -465,4 +465,112 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         XCTAssertEqual(textInsertion.insertCallCount, 1)
         XCTAssertNotNil(state.transcriptCandidate)
     }
+
+    /// Provenance: when the backend serves real model output, the insert status
+    /// suffix (which becomes the audit `source`) must name the model so the
+    /// receipt proves Gemma ran.
+    @MainActor func testAutoInsertSuffixCarriesModelProvenance() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = true
+
+        let polishResponse = """
+        {"output_text": "polished by gemma", "mode_applied": "polish", "guardrail_triggered": false, "served_by": "ollama", "model_id": "gemma4:e2b-mlx"}
+        """.data(using: .utf8)!
+        DictationMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, polishResponse)
+        }
+
+        let request = DictationWorkflowRequest(
+            sessionID: "prov-gemma", rawText: "clean me", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9, targetApp: nil)
+
+        try await sut.processDictation(request) { _, _, _ in }
+
+        XCTAssertEqual(textInsertion.insertCallCount, 1)
+        XCTAssertEqual(textInsertion.statusSuffix?.contains("gemma4:e2b-mlx"), true,
+                       "suffix was \(textInsertion.statusSuffix ?? "nil")")
+    }
+
+    /// Provenance: when Ollama is down the backend serves the regex floor
+    /// (served_by == "regex"); the suffix/audit must say so, not look identical
+    /// to a real Gemma run.
+    @MainActor func testAutoInsertSuffixShowsRegexFallbackWhenServedByRegex() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = true
+
+        let regexResponse = """
+        {"output_text": "regex floored", "mode_applied": "polish", "guardrail_triggered": false, "served_by": "regex", "degraded_reason": "backend_unavailable"}
+        """.data(using: .utf8)!
+        DictationMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, regexResponse)
+        }
+
+        let request = DictationWorkflowRequest(
+            sessionID: "prov-regex", rawText: "clean me", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9, targetApp: nil)
+
+        try await sut.processDictation(request) { _, _, _ in }
+
+        XCTAssertEqual(textInsertion.insertCallCount, 1)
+        XCTAssertEqual(textInsertion.statusSuffix?.contains("regex fallback"), true,
+                       "suffix was \(textInsertion.statusSuffix ?? "nil")")
+    }
+
+    /// Provenance (review mode): always-review resolves BOTH modes via the
+    /// backend, so the candidate must carry per-mode provenance for the LATER
+    /// review insert to stamp the receipt correctly.
+    @MainActor func testReviewModeCandidateCarriesPerModeProvenance() async throws {
+        let (sut, state, _, _) = makeSUT()
+
+        let lightResponse = """
+        {"output_text": "l", "mode_applied": "light", "guardrail_triggered": false, "served_by": "rules"}
+        """.data(using: .utf8)!
+        let polishResponse = """
+        {"output_text": "p", "mode_applied": "polish", "guardrail_triggered": false, "served_by": "ollama", "model_id": "gemma4:e2b-mlx"}
+        """.data(using: .utf8)!
+
+        var requestCount = 0
+        DictationMockURLProtocol.requestHandler = { request in
+            requestCount += 1
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return requestCount == 1 ? (response, lightResponse) : (response, polishResponse)
+        }
+
+        let request = DictationWorkflowRequest(
+            sessionID: "prov-review", rawText: "clean me", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .alwaysReview, sttBackend: .whisper,
+            lastTranscriptionConfidence: 0.9, targetApp: nil)
+
+        try await sut.processDictation(request) { _, _, _ in }
+
+        XCTAssertEqual(state.transcriptCandidate?.lightProvenance, "rules")
+        XCTAssertEqual(state.transcriptCandidate?.polishProvenance, "gemma4:e2b-mlx")
+    }
+
+    /// Provenance: when the backend is cold the in-app Swift cleanup path runs;
+    /// the suffix must mark it so the receipt is distinguishable from a backend
+    /// regex floor (the two degraded paths used to look identical).
+    @MainActor func testInAppCleanupSuffixMarkedInApp() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = false // backend cold → in-app path
+
+        let request = DictationWorkflowRequest(
+            sessionID: "prov-inapp", rawText: "clean me locally", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9, targetApp: nil)
+
+        try await sut.processDictation(request) { _, _, _ in }
+
+        XCTAssertEqual(textInsertion.insertCallCount, 1)
+        XCTAssertEqual(textInsertion.statusSuffix?.contains("in-app"), true,
+                       "suffix was \(textInsertion.statusSuffix ?? "nil")")
+    }
 }

@@ -31,6 +31,34 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         return (sut, state)
     }
 
+    /// Review-mode insert (user toggled to polish, then clicked Insert) must
+    /// stamp the audit receipt with the selected mode's provenance — previously
+    /// it hardcoded source "review", so review receipts couldn't tell Gemma from
+    /// the regex floor (the auto-insert path's observability fix was incomplete).
+    @MainActor
+    func testReviewInsertRecordsSelectedModeProvenance() async throws {
+        let state = AppState()
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
+        let sut = TextInsertionCoordinator(
+            state: state, insertService: ScriptedInsertService(),
+            audit: InsertionAuditLog(fileURL: auditURL))
+
+        state.transcriptCandidate = TranscriptCandidate(
+            rawText: "raw", lightText: "light", polishText: "polished",
+            selectedMode: .polish, polishProvenance: "gemma4:e2b-mlx")
+        state.selectedMode = .polish
+
+        await sut.insertCurrentText()
+
+        let line = try String(contentsOf: auditURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(
+            with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["event"] as? String, "insert")
+        XCTAssertEqual((obj?["source"] as? String)?.contains("gemma4:e2b-mlx"), true,
+                       "source was \(obj?["source"] as? String ?? "nil")")
+    }
+
     @MainActor
     func testInsertBlockedWhenPrivacyPreviewActive() async {
         let (sut, state) = makeSUT()

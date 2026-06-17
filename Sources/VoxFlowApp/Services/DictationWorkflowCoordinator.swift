@@ -108,7 +108,10 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 selectedMode: .raw,
                 confidence: request.lastTranscriptionConfidence,
                 timestamp: Date(),
-                targetProcessIdentifier: request.targetApp?.processIdentifier
+                targetProcessIdentifier: request.targetApp?.processIdentifier,
+                // Both modes came from the in-app TextCleanupService (backend cold).
+                lightProvenance: PolishProvenance.inApp,
+                polishProvenance: PolishProvenance.inApp
             )
             state.transcriptCandidate = candidate
             state.selectedMode = .raw
@@ -135,16 +138,29 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
 
         let lightText: String
         let polishText: String
+        // Per-mode provenance, stored on the candidate so BOTH auto-insert AND a
+        // later review-mode insert (user toggles light/polish, clicks Insert) can
+        // prove whether Gemma ran, the regex floor did, or the in-app pipeline.
+        var lightProvenance: String?
+        var polishProvenance: String?
 
         if let autoMode {
-            let served = try await backendCleanup(request, mode: autoMode, recordStage: recordStage)
+            // Only the auto-inserted mode round-trips the backend; the other mode
+            // is filled by the cheap in-app pipeline (so it is "in-app cleanup").
+            let response = try await backendCleanup(request, mode: autoMode, recordStage: recordStage)
+            let served = response.outputText
+            let servedProvenance = PolishProvenance.label(servedBy: response.servedBy, modelId: response.modelId)
             switch autoMode {
             case .polish:
                 polishText = served
+                polishProvenance = servedProvenance
                 lightText = TextCleanupService.cleanup(request.rawText, mode: .light, tone: request.toneStyle)
+                lightProvenance = PolishProvenance.inApp
             case .light:
                 lightText = served
+                lightProvenance = servedProvenance
                 polishText = TextCleanupService.cleanup(request.rawText, mode: .polish, tone: request.toneStyle)
+                polishProvenance = PolishProvenance.inApp
             case .raw:
                 // Unreachable: .autoInsertRaw + localOnly is intercepted in
                 // processDictation (early raw insert), and privateAPI yields
@@ -153,10 +169,18 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 assertionFailure("raw cleanup mode must not reach the backend path")
                 lightText = served
                 polishText = served
+                lightProvenance = servedProvenance
+                polishProvenance = servedProvenance
             }
         } else {
-            lightText = try await backendCleanup(request, mode: .light, recordStage: recordStage)
-            polishText = try await backendCleanup(request, mode: .polish, recordStage: recordStage)
+            // Review / private-API: both modes are real backend output, so each
+            // carries its own provenance for whichever the user ends up inserting.
+            let lightResponse = try await backendCleanup(request, mode: .light, recordStage: recordStage)
+            let polishResponse = try await backendCleanup(request, mode: .polish, recordStage: recordStage)
+            lightText = lightResponse.outputText
+            polishText = polishResponse.outputText
+            lightProvenance = PolishProvenance.label(servedBy: lightResponse.servedBy, modelId: lightResponse.modelId)
+            polishProvenance = PolishProvenance.label(servedBy: polishResponse.servedBy, modelId: polishResponse.modelId)
         }
 
         // Private-API: default to .light so the redacted/cleaned version
@@ -169,7 +193,9 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             selectedMode: defaultMode,
             confidence: request.lastTranscriptionConfidence,
             timestamp: Date(),
-            targetProcessIdentifier: request.targetApp?.processIdentifier
+            targetProcessIdentifier: request.targetApp?.processIdentifier,
+            lightProvenance: lightProvenance,
+            polishProvenance: polishProvenance
         )
         state.transcriptCandidate = candidate
         state.selectedMode = defaultMode
@@ -179,14 +205,16 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
     }
 
     /// One backend cleanup round-trip, timed and recorded under the existing
-    /// `cleanup_<mode>_api` stage name so traces stay comparable.
+    /// `cleanup_<mode>_api` stage name so traces stay comparable. Returns the
+    /// full response so callers can read provenance (served_by/model_id), not
+    /// just the cleaned text.
     private func backendCleanup(
         _ request: DictationWorkflowRequest,
         mode: CleanupMode,
         recordStage: WorkflowStageRecorder
-    ) async throws -> String {
+    ) async throws -> CleanupResponse {
         let started = ContinuousClock.now
-        let output = try await BackendAPIClient.cleanup(
+        let response = try await BackendAPIClient.cleanup(
             sessionID: request.sessionID,
             mode: mode,
             inputText: request.rawText,
@@ -194,9 +222,9 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             providerMode: request.providerMode,
             consentToken: request.consentToken,
             allowRaw: request.allowRaw
-        ).outputText
+        )
         recordStage("cleanup_\(mode.rawValue)_api", started, "tone=\(request.toneStyle.rawValue), provider=\(request.providerMode.rawValue)")
-        return output
+        return response
     }
 
     private func autoInsertOrReview(
@@ -209,8 +237,13 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             let text = candidate.text(for: autoMode)
             let toneLabel = request.toneStyle != state.toneStyle ? ", \(request.toneStyle.displayName)" : ""
             let appLabel = state.focusTarget.appName ?? "app"
+            // " · <provenance>" so the audit `source` proves Gemma vs regex vs
+            // in-app cleanup; read from the candidate (single source of truth,
+            // shared with the review-insert path) and omitted when unknown.
+            let provenance = candidate.provenance(for: autoMode)
+            let provenanceTag = (provenance.map { $0.isEmpty ? "" : " · \($0)" }) ?? ""
             let insertStarted = ContinuousClock.now
-            if await textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel) — \(appLabel))", targetApp: request.targetApp) {
+            if await textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel)\(provenanceTag) — \(appLabel))", targetApp: request.targetApp) {
                 recordStage("insert", insertStarted, "mode=\(autoMode.rawValue)")
                 state.sessionState = .idle
             } else {

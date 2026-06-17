@@ -64,6 +64,13 @@ done
 PRODUCT_BIN="${ROOT_DIR}/.build/${BUILD_CONFIGURATION}/VoxFlowLocal"
 
 mkdir -p "${DIST_DIR}"
+# Spotlight exclusion: the staging bundle dist/VoxFlow.app lives under
+# ~/Documents, which Spotlight indexes by default — so without this marker it
+# appears as a SECOND "VoxFlow" in Spotlight next to the installed copy, and
+# LaunchServices can resolve `open -b local.voxflow.app` / voxflow:// deep links
+# to the stale staging bundle. `.metadata_never_index` de-indexes the whole
+# dist/ tree. (.gitignore is unrelated to Spotlight; this is the actual fix.)
+touch "${DIST_DIR}/.metadata_never_index"
 mkdir -p "${MODULE_CACHE_DIR}"
 mkdir -p "${ICON_TMP_DIR}"
 

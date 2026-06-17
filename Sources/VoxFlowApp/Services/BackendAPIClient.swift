@@ -16,6 +16,15 @@ struct CleanupResponse: Codable {
     let outputText: String
     let modeApplied: String
     let guardrailTriggered: Bool
+    // Provenance (R-followup): which provider actually served this cleanup, so
+    // the audit log can distinguish a real Gemma/Ollama run from the regex
+    // fallback floor. Optional — a lean/older backend response omits them.
+    // "rules" = deterministic regex (raw/light modes); "regex" = polish floor;
+    // a provider id (e.g. "ollama") = real model output (see `modelId`).
+    let servedBy: String?
+    let modelId: String?
+    let degradedReason: String?
+    let fallbackDepth: Int?
 }
 
 struct TranslateResponse: Codable {

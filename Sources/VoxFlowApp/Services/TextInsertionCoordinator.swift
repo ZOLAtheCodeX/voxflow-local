@@ -31,6 +31,22 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         await insertCurrentText(targetApp: nil)
     }
 
+    /// Audit `source` for a review-mode insert. For dictation it includes the
+    /// selected mode + its cleanup provenance (Gemma model / "regex fallback" /
+    /// "in-app cleanup"), so review receipts are as diagnosable as auto-insert
+    /// ones. Translate / meeting / prompt review-inserts (which don't render
+    /// `transcriptCandidate`) have no cleanup provenance and stay plain "review".
+    private func reviewAuditSource() -> String {
+        let nonDictation: [WorkflowMode] = [.translateEnToDe, .meeting, .prompt]
+        guard !nonDictation.contains(state.workflowMode),
+              let candidate = state.transcriptCandidate,
+              let provenance = candidate.provenance(for: state.selectedMode),
+              !provenance.isEmpty else {
+            return "review"
+        }
+        return "review (\(state.selectedMode.rawValue) · \(provenance))"
+    }
+
     func insertCurrentText(targetApp: NSRunningApplication?) async {
         guard !state.displayText.isEmpty else { return }
 
@@ -75,7 +91,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             audit.recordInsertion(
                 text: state.displayText,
                 targetApp: targetApp?.localizedName ?? appName,
-                source: "review",
+                source: reviewAuditSource(),
                 confidence: state.transcriptCandidate?.confidence
             )
             state.sessionState = .idle

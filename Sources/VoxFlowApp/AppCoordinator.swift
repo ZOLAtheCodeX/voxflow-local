@@ -775,7 +775,9 @@ final class AppCoordinator: ObservableObject {
                 confidence: 0,
                 durationSeconds: durationSec,
                 source: source,
-                rmsEnergy: rms
+                rmsEnergy: rms,
+                leadingSilenceSeconds: capturedAudio.leadingSilenceSeconds,
+                firstBufferLatencyMs: capturedAudio.firstBufferLatencyMs
             )
             state.sessionState = .idle
             // Dead-air silence is the strongest "check your input" case — give the
@@ -838,7 +840,9 @@ final class AppCoordinator: ObservableObject {
                 confidence: transcription.confidenceEstimate,
                 durationSeconds: audioDurationSec,
                 source: Self.captureSourceLabel(commandLane: commandLane),
-                rmsEnergy: rms
+                rmsEnergy: rms,
+                leadingSilenceSeconds: capturedAudio.leadingSilenceSeconds,
+                firstBufferLatencyMs: capturedAudio.firstBufferLatencyMs
             )
             state.sessionState = .idle
             state.statusLine = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)

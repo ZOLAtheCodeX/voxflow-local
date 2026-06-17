@@ -43,7 +43,16 @@ final class InsertionAuditLog {
         append(entry)
     }
 
-    func recordRejection(text: String, reason: String, confidence: Double, durationSeconds: Double, source: String, rmsEnergy: Double? = nil) {
+    func recordRejection(
+        text: String,
+        reason: String,
+        confidence: Double,
+        durationSeconds: Double,
+        source: String,
+        rmsEnergy: Double? = nil,
+        leadingSilenceSeconds: Double? = nil,
+        firstBufferLatencyMs: Int? = nil
+    ) {
         var entry: [String: Any] = [
             "event": "reject",
             "ts": iso.string(from: Date()),
@@ -57,6 +66,11 @@ final class InsertionAuditLog {
         // quiet to decode" (above the silence floor but below speech level) —
         // the difference between the two empty-capture failure modes.
         if let rmsEnergy { entry["rms"] = rmsEnergy }
+        // Cold-start instrumentation for the empty-capture investigation:
+        // elevated leading silence / first-buffer latency on empties points at
+        // front-clip (engine not yet armed), not low gain.
+        if let leadingSilenceSeconds { entry["leading_silence_seconds"] = leadingSilenceSeconds }
+        if let firstBufferLatencyMs { entry["first_buffer_latency_ms"] = firstBufferLatencyMs }
         append(entry)
     }
 

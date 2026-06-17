@@ -56,6 +56,24 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertEqual(obj?["reason"] as? String, "silence")
     }
 
+    /// Empty-capture investigation: rejections must carry the capture
+    /// instrumentation (leading silence + first-buffer latency) so the cold-start
+    /// front-clip hypothesis is testable from the receipts, not guessed.
+    func testRejectionRecordsCaptureInstrumentation() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordRejection(
+            text: "", reason: "empty", confidence: 0, durationSeconds: 9.3,
+            source: "quick_dictation", rmsEnergy: 0.03,
+            leadingSilenceSeconds: 1.4, firstBufferLatencyMs: 120)
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(
+            with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["reason"] as? String, "empty")
+        XCTAssertEqual(obj?["rms"] as? Double, 0.03)
+        XCTAssertEqual(obj?["leading_silence_seconds"] as? Double, 1.4)
+        XCTAssertEqual(obj?["first_buffer_latency_ms"] as? Int, 120)
+    }
+
     func testRotatesWhenOversized() throws {
         let log = InsertionAuditLog(fileURL: tempURL, maxBytes: 400)
         for i in 0..<20 {

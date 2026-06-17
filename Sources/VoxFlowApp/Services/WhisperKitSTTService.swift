@@ -111,29 +111,14 @@ final class WhisperKitSTTService: ChunkTranscribing {
             audioDurationSeconds: audioDurationS
         )
 
-        // Apply hallucination filter
-        let isShort = audioDurationS < 3.0
-        if HallucinationFilter.isLikelyHallucination(text, shortAudio: isShort) {
-            #if DEBUG
-            log.info("Filtered hallucination (\(String(format: "%.1f", audioDurationS))s, short=\(isShort)): '\(text.prefix(60))'")
-            #else
-            log.info("Filtered hallucination (\(String(format: "%.1f", audioDurationS))s, short=\(isShort)): \(text.count) chars")
-            #endif
-            return TranscribeResponse(
-                text: "",
-                isFinal: true,
-                latencyMs: latencyMs,
-                confidenceEstimate: 0.0,
-                processingTimeMs: latencyMs,
-                stageTimingsMs: [
-                    "pcm_to_float": conversionLatencyMs,
-                    "stt_inference": inferenceLatencyMs,
-                ],
-                modelLoadedBeforeRequest: true,
-                modelLoadedAfterRequest: true,
-                coldStart: false
-            )
-        }
+        // NOTE: hallucination filtering is intentionally NOT done here. The
+        // single ingress `TranscriptGate.evaluate` applies the identical
+        // `HallucinationFilter` (and the confidence rules) for EVERY transcript
+        // path (quick dictation, cockpit chunks, command lane). Blanking the
+        // text here used to pre-empt that gate, so a filtered hallucination
+        // reached the audit log mislabeled as `reason:"empty"` instead of
+        // `hallucination_filter` — making the two failure modes indistinguishable
+        // in the forensics log. Return the real text and let the gate classify.
 
         #if DEBUG
         log.info("Transcribed in \(latencyMs)ms: '\(text.prefix(80))' (confidence=\(String(format: "%.2f", confidence)))")

@@ -10,8 +10,14 @@ echo "[voxflow] building bundle..."
 echo "[voxflow] installing bundle..."
 "${ROOT_DIR}/scripts/install_app_bundle.sh"
 
-echo "[voxflow] creating desktop launcher..."
-"${ROOT_DIR}/scripts/create_desktop_launcher.sh"
+# Desktop launcher is opt-in: for a persistently-running menu-bar (LSUIElement)
+# app it is redundant with Spotlight/double-click, and dropping a .command on the
+# Desktop on every reinstall is surprise clutter. Set VOXFLOW_DESKTOP_LAUNCHER=1
+# to recreate it, or run scripts/create_desktop_launcher.sh manually.
+if [[ "${VOXFLOW_DESKTOP_LAUNCHER:-0}" == "1" ]]; then
+  echo "[voxflow] creating desktop launcher (VOXFLOW_DESKTOP_LAUNCHER=1)..."
+  "${ROOT_DIR}/scripts/create_desktop_launcher.sh"
+fi
 
 echo "[voxflow] relaunching (quit running instance first — open alone only activates it)..."
 osascript -e 'tell application "VoxFlow" to quit' >/dev/null 2>&1 || true

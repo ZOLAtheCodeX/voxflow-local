@@ -73,6 +73,56 @@ final class BackendAPIClientTests: XCTestCase {
         XCTAssertEqual(result, expectedDictionary)
     }
 
+    /// The backend returns provenance (served_by / model_id / degraded_reason /
+    /// fallback_depth) on every cleanup. Swift must decode it so the audit log
+    /// can tell Gemma output from the regex fallback floor.
+    func testCleanupDecodesProvenanceFields() async throws {
+        let body = """
+        {
+            "output_text": "polished",
+            "mode_applied": "polish",
+            "guardrail_triggered": false,
+            "served_by": "ollama",
+            "model_id": "gemma4:e2b-mlx",
+            "degraded_reason": null,
+            "fallback_depth": 0
+        }
+        """
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/cleanup")
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data(body.utf8))
+        }
+
+        let result = try await BackendAPIClient.cleanup(
+            sessionID: "s", mode: .polish, inputText: "x", toneStyle: .neutral)
+
+        XCTAssertEqual(result.outputText, "polished")
+        XCTAssertEqual(result.servedBy, "ollama")
+        XCTAssertEqual(result.modelId, "gemma4:e2b-mlx")
+        XCTAssertNil(result.degradedReason)
+        XCTAssertEqual(result.fallbackDepth, 0)
+    }
+
+    /// A response WITHOUT the provenance fields (older/lean backend) must still
+    /// decode — the new fields are optional, not required.
+    func testCleanupDecodesWithoutProvenanceFields() async throws {
+        let body = """
+        {"output_text": "x", "mode_applied": "light", "guardrail_triggered": false}
+        """
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data(body.utf8))
+        }
+
+        let result = try await BackendAPIClient.cleanup(
+            sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+
+        XCTAssertEqual(result.outputText, "x")
+        XCTAssertNil(result.servedBy)
+        XCTAssertNil(result.modelId)
+    }
+
     func testTranscribe_Success() async throws {
         // Arrange
         let mockResponse = """
