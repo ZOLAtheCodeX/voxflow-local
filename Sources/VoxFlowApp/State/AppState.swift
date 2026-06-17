@@ -168,19 +168,39 @@ final class AppState: ObservableObject {
     }
 
     var localDictationWantsBackendCleanup: Bool {
-        // Deliberately gated on the GLOBAL insert behavior, not the focused
-        // app's profile. The backend lifecycle must not flip with focus: the
-        // spawn trigger (warmup) only re-fires at launch and on settings
-        // changes, so a focus-dependent condition would leave the backend idle
-        // after launching into a raw-profile app (Slack/Xcode) and never warm
-        // when you then switch to a normal app. Keeping it warm whenever the
-        // global default wants cleanup costs only a light server process (the
-        // 7 GB model loads lazily on first use). Per-app raw profiles still
-        // skip the cleanup call at insertion time.
-        providerMode == .localOnly
-            && sttBackend == .whisperKit
-            && workflowMode == .dictation
-            && insertBehavior != .autoInsertRaw
+        // Focus-INDEPENDENT by design: the backend lifecycle must not flip with
+        // which app is focused, because the spawn trigger (warmup) only re-fires
+        // at launch and on settings changes. A focus-dependent condition would
+        // leave the backend idle after launching into a raw-profile app
+        // (Slack/Xcode) and never warm when you switch to a normal app.
+        guard providerMode == .localOnly,
+              sttBackend == .whisperKit,
+              workflowMode == .dictation else {
+            return false
+        }
+        // The global default wanting cleanup is sufficient...
+        if insertBehavior != .autoInsertRaw { return true }
+        // ...but a non-raw PER-APP profile (e.g. the shipped Chrome polish
+        // default) also needs the backend warm, or dictation into that app
+        // silently degrades to regex cleanup. We ask "does any app the user
+        // might focus want cleanup", not "which app is focused now", so this
+        // stays focus-independent. Keeping it warm costs only a light server
+        // process (the 7 GB model loads lazily on first use); per-app raw
+        // profiles still skip the cleanup call at insertion time.
+        return anyEffectiveProfileWantsCleanup
+    }
+
+    /// Whether any app — a user override layered over the shipped default —
+    /// wants non-raw cleanup. Read by `localDictationWantsBackendCleanup` to keep
+    /// the backend warm for per-app cleanup profiles even when the global default
+    /// is raw. Mirrors `resolveEffectiveProfile`'s override-over-default precedence.
+    private var anyEffectiveProfileWantsCleanup: Bool {
+        let bundleIDs = Set(appProfiles.keys)
+            .union(SettingsCoordinator.defaultAppProfiles.keys)
+        return bundleIDs.contains { bundleID in
+            let effective = appProfiles[bundleID] ?? SettingsCoordinator.defaultAppProfiles[bundleID]
+            return effective.map { $0.insertBehavior != .autoInsertRaw } ?? false
+        }
     }
 
     var backendShouldRun: Bool {

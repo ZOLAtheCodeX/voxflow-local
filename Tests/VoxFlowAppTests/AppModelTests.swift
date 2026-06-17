@@ -69,13 +69,34 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
-    func testGlobalRawInsertKeepsWhisperKitBackendIdle() {
+    func testGlobalRawButShippedCleanupProfileStillWarmsBackend() {
         let state = AppState()
         state.sttBackend = .whisperKit
         state.providerMode = .localOnly
         state.workflowMode = .dictation
-        // The global insert behavior is the gate: raw = no cleanup wanted.
+        // Fresh-install posture: global default is raw and the user has set no
+        // per-app overrides (appProfiles empty). The SHIPPED Chrome profile is
+        // autoInsertPolish, so the backend must still warm — otherwise Chrome
+        // dictation silently degrades to regex cleanup instead of Gemma.
         state.insertBehavior = .autoInsertRaw
+
+        XCTAssertTrue(state.localDictationWantsBackendCleanup)
+        XCTAssertTrue(state.backendShouldRun)
+    }
+
+    @MainActor
+    func testGlobalRawWithEveryProfileOptedOutKeepsBackendIdle() {
+        let state = AppState()
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.workflowMode = .dictation
+        state.insertBehavior = .autoInsertRaw
+        // Opt fully out of cleanup: override every shipped default to raw so no
+        // app wants the backend. Only then does the optimization keep it idle.
+        for bundleID in SettingsCoordinator.defaultAppProfiles.keys {
+            state.appProfiles[bundleID] = AppProfile(
+                tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw)
+        }
 
         XCTAssertFalse(state.localDictationWantsBackendCleanup)
         XCTAssertFalse(state.backendShouldRun)

@@ -76,6 +76,18 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                     try await processBackendCleanup(request, recordStage: recordStage)
                     return
                 } catch {
+                    // A cancelled capture (the user dismissed it, or a newer
+                    // capture superseded this one) surfaces here as
+                    // CancellationError or URLError.cancelled. Do NOT fall
+                    // through to local cleanup — that would insert text the user
+                    // cancelled (the ghost-insertion class). Propagate the
+                    // cancellation so the pipeline aborts cleanly.
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                        throw CancellationError()
+                    }
+                    // A genuine backend failure (Ollama down / timeout / 5xx):
+                    // fall back to the in-app cleanup pipeline so dictation still
+                    // completes.
                     let fallbackStarted = ContinuousClock.now
                     recordStage("cleanup_api_fallback", fallbackStarted, error.localizedDescription)
                     state.statusLine = "Local model cleanup unavailable — using in-app cleanup"

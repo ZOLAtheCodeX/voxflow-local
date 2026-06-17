@@ -340,4 +340,75 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
             NSRunningApplication.current.processIdentifier
         )
     }
+
+    /// A cancelled in-flight backend cleanup (the user dismissed the capture, or
+    /// a newer capture superseded this one) must abort — NOT fall through to the
+    /// local cleanup pipeline and insert text the user cancelled. URLSession
+    /// surfaces task cancellation as `URLError.cancelled`.
+    @MainActor func testWhisperKitBackendCancellationRethrowsAndDoesNotInsert() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = true
+
+        DictationMockURLProtocol.requestHandler = { _ in
+            throw URLError(.cancelled)
+        }
+
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-cancelled",
+            rawText: "hello world clean me",
+            providerMode: .localOnly,
+            consentToken: nil,
+            allowRaw: false,
+            toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish,
+            sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9,
+            targetApp: nil
+        )
+
+        do {
+            try await sut.processDictation(request) { _, _, _ in }
+            XCTFail("Cancellation must propagate, not be swallowed into a local insert")
+        } catch is CancellationError {
+            // expected
+        }
+
+        XCTAssertEqual(textInsertion.insertCallCount, 0)
+        XCTAssertNil(state.transcriptCandidate)
+    }
+
+    /// A genuine backend failure (Ollama down / timeout / 5xx) is NOT a
+    /// cancellation: dictation still completes via the in-app cleanup fallback
+    /// and inserts. This guards that the cancellation discrimination doesn't
+    /// regress the legitimate fallback.
+    @MainActor func testWhisperKitBackendGenuineErrorFallsBackToLocalAndInserts() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = true
+
+        DictationMockURLProtocol.requestHandler = { _ in
+            throw URLError(.timedOut)
+        }
+
+        var recordedStages: [String] = []
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-backend-down",
+            rawText: "hello world clean me",
+            providerMode: .localOnly,
+            consentToken: nil,
+            allowRaw: false,
+            toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish,
+            sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9,
+            targetApp: nil
+        )
+
+        try await sut.processDictation(request) { name, _, _ in
+            recordedStages.append(name)
+        }
+
+        XCTAssertTrue(recordedStages.contains("cleanup_api_fallback"))
+        XCTAssertEqual(textInsertion.insertCallCount, 1)
+        XCTAssertNotNil(state.transcriptCandidate)
+    }
 }

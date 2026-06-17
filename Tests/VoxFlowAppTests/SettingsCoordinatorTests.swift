@@ -223,10 +223,15 @@ final class SettingsCoordinatorTests: XCTestCase {
         state.workflowMode = .dictation
         state.sttBackend = .whisperKit
         state.providerMode = .localOnly
-        // Raw insertion isolates the cockpit as the only thing that could keep
-        // the backend up — non-raw dictation now wants it for local-model
-        // cleanup (see localDictationWantsBackendCleanup).
+        // Opt fully out of cleanup (global raw AND every shipped profile raw) so
+        // the cockpit is the only thing that could keep the backend up — non-raw
+        // dictation, including the shipped Chrome polish default, now wants it
+        // for local-model cleanup (see localDictationWantsBackendCleanup).
         state.insertBehavior = .autoInsertRaw
+        for bundleID in SettingsCoordinator.defaultAppProfiles.keys {
+            state.appProfiles[bundleID] = AppProfile(
+                tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw)
+        }
 
         state.cockpitVisible = false
 
@@ -239,8 +244,13 @@ final class SettingsCoordinatorTests: XCTestCase {
         state.workflowMode = .dictation
         state.sttBackend = .whisperKit
         state.providerMode = .localOnly
-        // Raw insertion skips cleanup entirely, so it stays fully in-app.
+        // Fully opted out of cleanup (global raw AND every shipped profile raw),
+        // so dictation stays in-app and the backend stays idle.
         state.insertBehavior = .autoInsertRaw
+        for bundleID in SettingsCoordinator.defaultAppProfiles.keys {
+            state.appProfiles[bundleID] = AppProfile(
+                tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw)
+        }
 
         sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
 
