@@ -106,11 +106,11 @@ final class CockpitCaptureCoordinator {
                 confidence: response.confidenceEstimate,
                 audioDurationSeconds: durationSeconds
             ) {
-                if reason != "empty" {
-                    log.info("TranscriptGate rejected cockpit chunk (\(reason))")
+                if reason != .empty {
+                    log.info("TranscriptGate rejected cockpit chunk (\(reason.rawValue))")
                     audit?.recordRejection(
                         text: text,
-                        reason: reason,
+                        reason: reason.rawValue,
                         confidence: response.confidenceEstimate,
                         durationSeconds: durationSeconds,
                         source: "cockpit_chunk"

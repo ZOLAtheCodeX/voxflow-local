@@ -765,14 +765,16 @@ final class AppCoordinator: ObservableObject {
             // so "I spoke and nothing happened" becomes diagnosable from the log.
             insertionAudit.recordRejection(
                 text: "",
-                reason: "silence",
+                reason: TranscriptGate.Rejection.silence.rawValue,
                 confidence: 0,
                 durationSeconds: durationSec,
                 source: source,
                 rmsEnergy: rms
             )
             state.sessionState = .idle
-            state.statusLine = "No speech detected — try again"
+            // Dead-air silence is the strongest "check your input" case — give the
+            // actionable mic hint, not the generic "no speech" message.
+            state.statusLine = CaptureFeedback.rejectionStatus(reason: .silence, rmsEnergy: rms)
             state.recordingDuration = 0
             return nil
         }
@@ -823,10 +825,10 @@ final class AppCoordinator: ObservableObject {
             audioDurationSeconds: audioDurationSec
         ) {
             let rms = capturedAudio.rmsEnergy
-            log.info("TranscriptGate rejected transcript (\(reason), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s, rms=\(String(format: "%.4f", rms))) — discarding")
+            log.info("TranscriptGate rejected transcript (\(reason.rawValue), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s, rms=\(String(format: "%.4f", rms))) — discarding")
             insertionAudit.recordRejection(
                 text: rawText,
-                reason: reason,
+                reason: reason.rawValue,
                 confidence: transcription.confidenceEstimate,
                 durationSeconds: audioDurationSec,
                 source: commandLane ? "command_lane" : "quick_dictation",

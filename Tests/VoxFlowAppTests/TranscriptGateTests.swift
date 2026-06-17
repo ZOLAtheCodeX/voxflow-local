@@ -10,21 +10,21 @@ final class TranscriptGateTests: XCTestCase {
     func testEmptyTextRejected() {
         XCTAssertEqual(
             TranscriptGate.evaluate(text: "   ", confidence: 0.9, audioDurationSeconds: 2.0),
-            .rejected(reason: "empty")
+            .rejected(reason: .empty)
         )
     }
 
     func testPlaceholderRejected() {
         XCTAssertEqual(
             TranscriptGate.evaluate(text: "[transcription unavailable: no audio captured]", confidence: 0.9, audioDurationSeconds: 2.0),
-            .rejected(reason: "placeholder")
+            .rejected(reason: .placeholder)
         )
     }
 
     func testHallucinationFilterApplies() {
         XCTAssertEqual(
             TranscriptGate.evaluate(text: "Hello.", confidence: 0.9, audioDurationSeconds: 1.0),
-            .rejected(reason: "hallucination_filter")
+            .rejected(reason: .hallucinationFilter)
         )
     }
 
@@ -32,7 +32,7 @@ final class TranscriptGateTests: XCTestCase {
         // "thank you" is short-only filtered: rejected under 3s, accepted at 3s+.
         XCTAssertEqual(
             TranscriptGate.evaluate(text: "thank you", confidence: 0.9, audioDurationSeconds: 2.9),
-            .rejected(reason: "hallucination_filter")
+            .rejected(reason: .hallucinationFilter)
         )
         XCTAssertEqual(
             TranscriptGate.evaluate(text: "thank you", confidence: 0.9, audioDurationSeconds: 3.1),
@@ -43,7 +43,7 @@ final class TranscriptGateTests: XCTestCase {
     func testLoneWordLowConfidenceRejected() {
         XCTAssertEqual(
             TranscriptGate.evaluate(text: "world", confidence: 0.1, audioDurationSeconds: 5.0),
-            .rejected(reason: "low_confidence")
+            .rejected(reason: .lowConfidence)
         )
     }
 
@@ -53,7 +53,7 @@ final class TranscriptGateTests: XCTestCase {
         // (it only gated 1-word results on long audio).
         XCTAssertEqual(
             TranscriptGate.evaluate(text: "hello world", confidence: 0.1, audioDurationSeconds: 5.0),
-            .rejected(reason: "low_confidence")
+            .rejected(reason: .lowConfidence)
         )
     }
 

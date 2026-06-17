@@ -7,8 +7,16 @@ struct CapturedAudio {
     let pcm: Data
     let sampleRate: Double
 
+    /// Below this RMS the capture is treated as dead-air silence (no usable
+    /// signal). Conservative — catches dead/muted mics without rejecting quiet
+    /// speakers.
+    static let silenceFloor = 0.003
+    /// Normal speech sits above this RMS. Between `silenceFloor` and this is the
+    /// "present but too weak to decode" band — the actionable mic-hint case.
+    static let speechFloor = 0.02
+
     /// RMS energy of the PCM16 buffer, normalized to 0.0–1.0.
-    /// Silence is typically < 0.005; speech is > 0.02.
+    /// Silence is < `silenceFloor`; speech is > `speechFloor`.
     var rmsEnergy: Double {
         let sampleCount = pcm.count / MemoryLayout<Int16>.size
         guard sampleCount > 0 else { return 0 }
@@ -23,10 +31,9 @@ struct CapturedAudio {
         }
     }
 
-    /// True if the audio is below the silence threshold (RMS < 0.003).
-    /// Conservative: catches dead-air silence without rejecting quiet speakers.
+    /// True if the audio is below the silence floor — dead-air / dead mic.
     var isSilent: Bool {
-        rmsEnergy < 0.003
+        rmsEnergy < CapturedAudio.silenceFloor
     }
 }
 
