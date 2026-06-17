@@ -43,12 +43,15 @@ final class FnHoldHotkeyServiceTests: XCTestCase {
             keyCode: 63
         )!
 
-        // Wait 0.01s (less than activationDelay)
-        try await Task.sleep(nanoseconds: 10_000_000)
+        // Release BACK-TO-BACK with the press (no inter-event sleep): the
+        // release cancels the pending activation work item ~50 ms before its
+        // deadline, deterministically. The old version slept 10 ms before
+        // releasing — under load that sleep could overrun the 50 ms
+        // activationDelay and fire the press, flaking on the CI runner.
         service.handleFlagsChanged(releaseEvent)
 
-        // Wait another 0.06s (total 0.07s)
-        try await Task.sleep(nanoseconds: 60_000_000)
+        // Confirm nothing fired, well past the activation delay.
+        try await Task.sleep(nanoseconds: 150_000_000)
 
         XCTAssertEqual(pressCount, 0, "Press should not trigger since it was released before activationDelay")
         XCTAssertEqual(releaseCount, 0)
