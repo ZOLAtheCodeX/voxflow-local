@@ -284,6 +284,75 @@ final class SettingsCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingBetweenNonRawInsertBehaviorsKeepsWarmBackendReady() {
+        let (sut, state, _) = makeSUT()
+        state.workflowMode = .dictation
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.insertBehavior = .autoInsertLight
+
+        // Warm the backend once, then simulate warmup completing.
+        sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
+        state.backendReadiness.readyForDictation = true
+        state.backendReadiness.warmupInProgress = false
+
+        // Switch to another NON-RAW behavior. The launch configuration is
+        // identical (insert behavior isn't part of it), so the warm backend must
+        // not be bounced back to "warming" and strand dictation on the regex
+        // floor until the next readiness poll.
+        sut.selectInsertBehavior(.autoInsertPolish)
+
+        XCTAssertTrue(state.backendReadiness.readyForDictation)
+        XCTAssertFalse(state.backendReadiness.warmupInProgress)
+        XCTAssertTrue(state.backendReadiness.processRunning)
+        XCTAssertEqual(state.statusLine, "Insert behavior: Auto-Insert Polish")
+    }
+
+    @MainActor
+    func testUpdatingAppProfileKeepsWarmBackendReady() {
+        let (sut, state, _) = makeSUT()
+        state.workflowMode = .dictation
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.insertBehavior = .autoInsertLight
+
+        sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
+        state.backendReadiness.readyForDictation = true
+        state.backendReadiness.warmupInProgress = false
+
+        // Editing a per-app profile doesn't touch the backend launch config, so
+        // the warm backend must stay ready (no spurious "reloading" window).
+        sut.updateAppProfile(
+            bundleID: "com.example.app",
+            profile: AppProfile(tone: .neutral, cleanupMode: .polish, insertBehavior: .autoInsertPolish))
+
+        XCTAssertTrue(state.backendReadiness.readyForDictation)
+        XCTAssertFalse(state.backendReadiness.warmupInProgress)
+    }
+
+    @MainActor
+    func testRealLaunchConfigChangeReloadsAndDropsReadiness() {
+        let (sut, state, _) = makeSUT()
+        state.workflowMode = .dictation
+        state.sttBackend = .whisperKit
+        state.providerMode = .localOnly
+        state.insertBehavior = .autoInsertLight
+
+        sut.restartBackendWithCurrentConfiguration(status: "Dictation mode active")
+        state.backendReadiness.readyForDictation = true
+        state.backendReadiness.warmupInProgress = false
+
+        // The Whisper model IS part of the launch configuration, so changing it
+        // must reload the backend and drop readiness until the next warmup.
+        state.localWhisperModel = "openai/whisper-medium"
+        sut.restartBackendWithCurrentConfiguration(status: "Model changed")
+
+        XCTAssertFalse(state.backendReadiness.readyForDictation)
+        XCTAssertTrue(state.backendReadiness.warmupInProgress)
+        XCTAssertEqual(state.backendReadiness.statusSummary, "Backend reloading — applying new configuration")
+    }
+
+    @MainActor
     func testRestartBackendWithMeetingWorkflowMarksBackendWarmup() {
         let (sut, state, _) = makeSUT()
         state.workflowMode = .meeting

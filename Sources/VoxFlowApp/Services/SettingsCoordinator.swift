@@ -30,6 +30,13 @@ final class SettingsCoordinator: SettingsCoordinating {
     private let state: AppState
     private let backendManager: BackendProcessManager
 
+    /// The launch configuration we last asked the backend manager to run. Used
+    /// to tell a real reconfiguration (STT model, provider keys, …) apart from a
+    /// settings edit the backend doesn't consume (app-profile tweak, non-raw →
+    /// non-raw insert-behavior switch) so the latter doesn't bounce a warm
+    /// backend back to "warming". Nil whenever the backend is stopped/idle.
+    private var lastAppliedLaunchConfiguration: BackendLaunchConfiguration?
+
     let onboardingKey = "voxflow.onboarding.complete"
     private let translationProfileKey = "voxflow.translation.profile"
     private let translationModeEnabledKey = "voxflow.translation.modeEnabled"
@@ -343,26 +350,46 @@ final class SettingsCoordinator: SettingsCoordinating {
 
     func restartBackendWithCurrentConfiguration(status: String) {
         let launchConfiguration = currentBackendLaunchConfiguration()
-        if state.backendShouldRun {
-            state.backendReadiness.processRunning = true
-            state.backendReadiness.warmupInProgress = true
-            state.backendReadiness.readyForDictation = false
-            state.backendReadiness.readinessIssue = nil
-            state.backendReadiness.statusSummary = backendManager.isRunning
-                ? "Backend reloading — applying new configuration"
-                : "Backend starting — waiting for warmup"
-            state.backendReadiness.activeSTTModel = ""
-            backendManager.startIfNeededAsync(configuration: launchConfiguration)
-        } else {
+
+        // Backend no longer needed: stop and mark idle.
+        guard state.backendShouldRun else {
             backendManager.stopAsync()
+            lastAppliedLaunchConfiguration = nil
             state.backendReadiness.processRunning = false
             state.backendReadiness.warmupInProgress = false
             state.backendReadiness.readyForDictation = false
             state.backendReadiness.readinessIssue = nil
             state.backendReadiness.statusSummary = "Backend idle — current workflow runs in app"
             state.backendReadiness.activeSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
+            state.statusLine = status
+            return
         }
 
+        // Backend is wanted but the launch configuration is unchanged AND a
+        // backend is already up: this call changed something the backend doesn't
+        // consume (an app-profile edit, or a non-raw → non-raw insert-behavior
+        // switch). Leave readiness untouched — flipping a warm backend back to
+        // "warming" would strand dictation on the regex floor until the next
+        // /v1/ready poll, for a reload that never actually happens (the manager
+        // compares the same configuration internally and no-ops).
+        if lastAppliedLaunchConfiguration == launchConfiguration,
+           state.backendReadiness.processRunning {
+            state.statusLine = status
+            return
+        }
+
+        // Config changed, or no backend is up yet: (re)start and warm up.
+        let reloading = state.backendReadiness.processRunning
+        state.backendReadiness.processRunning = true
+        state.backendReadiness.warmupInProgress = true
+        state.backendReadiness.readyForDictation = false
+        state.backendReadiness.readinessIssue = nil
+        state.backendReadiness.statusSummary = reloading
+            ? "Backend reloading — applying new configuration"
+            : "Backend starting — waiting for warmup"
+        state.backendReadiness.activeSTTModel = ""
+        backendManager.startIfNeededAsync(configuration: launchConfiguration)
+        lastAppliedLaunchConfiguration = launchConfiguration
         state.statusLine = status
     }
 
