@@ -1025,50 +1025,40 @@ final class AppCoordinator: ObservableObject {
         selectToneStyleTask = Task { @MainActor in
             do {
                 try Task.checkCancellation()
-                // WhisperKit STT can still use backend-backed local model
-                // cleanup. Only retone in Swift when the backend is idle.
-                if self.state.sttBackend == .whisperKit && !self.state.backendReadiness.readyForDictation {
-                    let lightText = TextCleanupService.cleanup(rawText, mode: .light, tone: tone)
-                    let polishText = TextCleanupService.cleanup(rawText, mode: .polish, tone: tone)
-                    try Task.checkCancellation()
-                    state.transcriptCandidate = TranscriptCandidate(
-                        rawText: rawText, lightText: lightText,
-                        polishText: polishText, selectedMode: state.selectedMode,
-                        confidence: state.transcriptCandidate?.confidence ?? 0.0
-                    )
-                    state.statusLine = "Tone: \(tone.displayName)"
-                    return
+                // WhisperKit STT can still use backend-backed local-model cleanup;
+                // only retone purely in Swift when the backend is idle. On a
+                // genuine backend failure RetoneResolver degrades to the in-app
+                // cleanup pipeline (matching the dictation path); only
+                // cancellation propagates.
+                let useBackend = !(self.state.sttBackend == .whisperKit
+                    && !self.state.backendReadiness.readyForDictation)
+                let retoned = try await RetoneResolver.resolve(
+                    rawText: rawText, tone: tone, useBackend: useBackend
+                ) { mode in
+                    try await BackendAPIClient.cleanup(
+                        sessionID: "retone-\(self.sessionCounter)",
+                        mode: mode,
+                        inputText: rawText,
+                        toneStyle: tone,
+                        providerMode: .localOnly
+                    ).outputText
                 }
-
-                let lightText = try await BackendAPIClient.cleanup(
-                    sessionID: "retone-\(sessionCounter)",
-                    mode: .light,
-                    inputText: rawText,
-                    toneStyle: tone,
-                    providerMode: .localOnly
-                ).outputText
-                try Task.checkCancellation()
-
-                let polishText = try await BackendAPIClient.cleanup(
-                    sessionID: "retone-\(sessionCounter)",
-                    mode: .polish,
-                    inputText: rawText,
-                    toneStyle: tone,
-                    providerMode: .localOnly
-                ).outputText
                 try Task.checkCancellation()
 
                 state.transcriptCandidate = TranscriptCandidate(
                     rawText: rawText,
-                    lightText: lightText,
-                    polishText: polishText,
+                    lightText: retoned.light,
+                    polishText: retoned.polish,
                     selectedMode: state.selectedMode,
                     confidence: state.transcriptCandidate?.confidence ?? 0.0
                 )
                 state.statusLine = "Tone: \(tone.displayName)"
             } catch {
-                guard !Task.isCancelled else { return }
-                state.errorMessage = "Unable to apply tone: \(error.localizedDescription)"
+                // Only cancellation reaches here — RetoneResolver rethrows just
+                // that and falls back internally on genuine failures. A
+                // superseded retone aborts silently rather than overwriting the
+                // newer selection.
+                return
             }
         }
     }
