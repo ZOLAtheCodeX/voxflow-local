@@ -407,7 +407,7 @@ final class AppCoordinator: ObservableObject {
             expectedStamp: backendManager.instanceStamp,
             adoptForeignOverride: Self.adoptForeignBackendOverride
         ) else { return false }
-        log.warning("Stale backend on port 8765 (missing/foreign stamp, idle mode) — terminating")
+        log.warning("Stale backend on port \(BackendEndpoint.resolved().port) (missing/foreign stamp, idle mode) — terminating")
         backendManager.terminateForeignListenerAsync()
         return true
     }
@@ -423,7 +423,7 @@ final class AppCoordinator: ObservableObject {
             state.backendReadiness.readinessIssue = nil
             state.backendReadiness.activeSTTModel = state.sttBackend == .whisperKit ? "whisperkit (in-app)" : ""
             state.backendReadiness.statusSummary = reaped
-                ? "Stale backend on port 8765 removed — backend idle"
+                ? "Stale backend on port \(BackendEndpoint.resolved().port) removed — backend idle"
                 : "Backend idle — current workflow runs in app"
             return
         }
@@ -438,7 +438,7 @@ final class AppCoordinator: ObservableObject {
                 expectedStamp: backendManager.instanceStamp,
                 managerOwnsProcess: backendManager.isRunning
             ) {
-                log.warning("Foreign/stale backend on port 8765 (stamp mismatch) — terminating")
+                log.warning("Foreign/stale backend on port \(BackendEndpoint.resolved().port) (stamp mismatch) — terminating")
                 backendManager.terminateForeignListenerAsync()
                 state.backendReadiness.readyForDictation = false
                 state.backendReadiness.statusSummary = "Stale backend replaced — restarting"

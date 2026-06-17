@@ -98,7 +98,11 @@ struct NoopBackendProcessRunner: BackendProcessRunning {
 }
 
 final class BackendProcessManager: @unchecked Sendable {
-    private static let defaultBackendPort = 8765
+    // Resolve from the SAME endpoint the spawn + readiness use, so stale/foreign
+    // listener cleanup honors a custom VOXFLOW_BACKEND_URL port. Was hardcoded
+    // 8765: on a custom port the reaper queried/killed the wrong port (failing to
+    // reap the real stray, and able to SIGTERM an unrelated process on 8765).
+    private static var defaultBackendPort: Int { BackendEndpoint.resolved().port }
 
     /// R4.7: per-app-launch stamp passed to the backend as
     /// VOXFLOW_INSTANCE_STAMP and echoed on /v1/health + /v1/ready. A

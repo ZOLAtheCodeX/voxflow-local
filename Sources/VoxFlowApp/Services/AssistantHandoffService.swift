@@ -56,9 +56,37 @@ final class AssistantHandoffService {
             process.standardOutput = stdout
             process.standardError = stderr
 
+            // Drain stdout/stderr CONCURRENTLY with execution. Reading them only
+            // after exit deadlocks any command whose output exceeds the ~64 KB OS
+            // pipe buffer: the child blocks on its write forever, never exits, and
+            // is killed at the timeout. readabilityHandler delivers chunks as they
+            // arrive (off-thread) so the buffer never backs up; an empty chunk is
+            // EOF (the child closed the pipe on exit/terminate).
+            let outBox = DataBox(), errBox = DataBox()
+            let readersDone = AtomicCounter()
+            stdout.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if chunk.isEmpty { handle.readabilityHandler = nil; readersDone.increment() }
+                else { outBox.append(chunk) }
+            }
+            stderr.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if chunk.isEmpty { handle.readabilityHandler = nil; readersDone.increment() }
+                else { errBox.append(chunk) }
+            }
+            // After exit/terminate the pipes close and both handlers see EOF. Poll
+            // (bounded) for that rather than DispatchGroup.wait, which is
+            // unavailable in this async Task context.
+            func awaitDrain() {
+                let deadline = Date().addingTimeInterval(2)
+                while readersDone.value < 2 && Date() < deadline { usleep(20_000) }
+            }
+
             do {
                 try process.run()
             } catch {
+                stdout.fileHandleForReading.readabilityHandler = nil
+                stderr.fileHandleForReading.readabilityHandler = nil
                 return .failure(.launchFailed(error.localizedDescription))
             }
 
@@ -70,16 +98,35 @@ final class AssistantHandoffService {
                 usleep(100_000)
             }
             if process.isRunning {
-                process.terminate()
+                process.terminate()   // closes the pipes → the readers hit EOF
+                awaitDrain()
                 return .failure(.timedOut)
             }
 
-            let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let errText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            // Process exited; wait for the readers to consume the final bytes.
+            awaitDrain()
+            let output = String(data: outBox.data, encoding: .utf8) ?? ""
+            let errText = String(data: errBox.data, encoding: .utf8) ?? ""
             guard process.terminationStatus == 0 else {
                 return .failure(.commandFailed(exitCode: process.terminationStatus, stderr: String(errText.prefix(500))))
             }
             return .success(output)
         }.value
     }
+}
+
+/// Thread-safe accumulator for a pipe's bytes drained off the readability queue.
+private final class DataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes = Data()
+    func append(_ data: Data) { lock.lock(); bytes.append(data); lock.unlock() }
+    var data: Data { lock.lock(); defer { lock.unlock() }; return bytes }
+}
+
+/// Thread-safe counter for "how many pipe readers have hit EOF".
+private final class AtomicCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func increment() { lock.lock(); n += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return n }
 }

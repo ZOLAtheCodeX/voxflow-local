@@ -59,4 +59,20 @@ final class AssistantHandoffServiceTests: XCTestCase {
             XCTFail("non-zero exit must surface as commandFailed")
         }
     }
+
+    /// Pipe-buffer deadlock regression: a command whose stdout exceeds the OS
+    /// pipe buffer (~64 KB) must not hang. The old code read stdout only AFTER
+    /// the process exited, so a chatty CLI blocked on its write forever and the
+    /// service killed it at the timeout. Concurrent draining fixes it.
+    func testLargeStdoutDoesNotDeadlock() async {
+        let service = AssistantHandoffService(
+            isEnabled: { true },
+            command: { "yes | head -n 100000" },   // ~200 KB of "y\n"
+            timeoutSeconds: 15)
+        let result = await service.run(transcript: "ignored")
+        guard case .success(let output) = result else {
+            return XCTFail("chatty command deadlocked/failed: \(result)")
+        }
+        XCTAssertGreaterThanOrEqual(output.count, 200_000, "full stdout must drain without deadlock")
+    }
 }

@@ -9,10 +9,11 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
     var ranProcesses: [Process] = []
     var terminations: [(pids: [pid_t], signal: Int32)] = []
     var listeners: [pid_t] = []
+    var queriedPorts: [Int] = []
     var pidFile: pid_t?
 
     func run(_ process: Process) throws { ranProcesses.append(process) }
-    func listeningPIDs(onPort port: Int) -> [pid_t] { listeners }
+    func listeningPIDs(onPort port: Int) -> [pid_t] { queriedPorts.append(port); return listeners }
     func terminate(_ pids: [pid_t], signal: Int32) { terminations.append((pids, signal)) }
     func writePIDFile(_ pid: pid_t) { pidFile = pid }
     func readPIDFile() -> pid_t? { pidFile }
@@ -20,6 +21,42 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
 }
 
 final class BackendProcessManagerTests: XCTestCase {
+
+    /// Wait for terminateForeignListenerAsync's serial-workQueue dispatch to land.
+    private func waitForTermination(_ fake: BackendProcessRunnerFake, timeout: TimeInterval = 2) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while fake.terminations.isEmpty && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+    }
+
+    /// Custom-port parity: stale/foreign-listener cleanup must target the SAME
+    /// port the spawn + readiness use (resolved from VOXFLOW_BACKEND_URL), not a
+    /// hardcoded 8765 — otherwise on a custom port it fails to reap the real
+    /// stray AND could SIGTERM an unrelated process on 8765.
+    func testForeignListenerTerminationHonorsCustomBackendPort() {
+        setenv("VOXFLOW_BACKEND_URL", "http://127.0.0.1:9123", 1)
+        defer { unsetenv("VOXFLOW_BACKEND_URL") }
+        let fake = BackendProcessRunnerFake()
+        fake.listeners = [4242]
+        let manager = BackendProcessManager(runner: fake)
+
+        manager.terminateForeignListenerAsync()
+        waitForTermination(fake)
+
+        XCTAssertEqual(fake.queriedPorts, [9123])
+    }
+
+    func testForeignListenerTerminationDefaultsTo8765WithoutOverride() {
+        unsetenv("VOXFLOW_BACKEND_URL")
+        let fake = BackendProcessRunnerFake()
+        let manager = BackendProcessManager(runner: fake)
+
+        manager.terminateForeignListenerAsync()
+        waitForTermination(fake)
+
+        XCTAssertEqual(fake.queriedPorts, [8765])
+    }
 
     func testCrashRestartRelaunchesThroughRunnerSeamOnly() {
         let runner = BackendProcessRunnerFake()
