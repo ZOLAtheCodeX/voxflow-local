@@ -142,9 +142,17 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             case .polish:
                 polishText = served
                 lightText = TextCleanupService.cleanup(request.rawText, mode: .light, tone: request.toneStyle)
-            default: // .light — .raw never reaches the backend path
+            case .light:
                 lightText = served
                 polishText = TextCleanupService.cleanup(request.rawText, mode: .polish, tone: request.toneStyle)
+            case .raw:
+                // Unreachable: .autoInsertRaw + localOnly is intercepted in
+                // processDictation (early raw insert), and privateAPI yields
+                // autoMode == nil. Fail loudly in debug rather than silently
+                // POSTing raw mode to the backend if that guard ever regresses.
+                assertionFailure("raw cleanup mode must not reach the backend path")
+                lightText = served
+                polishText = served
             }
         } else {
             lightText = try await backendCleanup(request, mode: .light, recordStage: recordStage)
