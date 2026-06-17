@@ -192,6 +192,23 @@ def test_rms_energy_silence_and_speech():
     assert WhisperEngine._rms_energy(b"") == 0.0
 
 
+def test_rms_energy_pure_python_fallback_when_audioop_unavailable(monkeypatch):
+    """Python 3.13 removed `audioop`. The strided pure-Python fallback must be
+    exercised on ImportError and match the C path within tolerance — not crash."""
+    pcm = _loud_pcm(16000)
+    reference = WhisperEngine._rms_energy(pcm)  # C audioop path (present on 3.11)
+
+    # A None entry in sys.modules makes `import audioop` raise ImportError,
+    # forcing _rms_energy down the pure-Python branch.
+    monkeypatch.setitem(sys.modules, "audioop", None)
+    fallback = WhisperEngine._rms_energy(pcm)
+
+    # (pytest.approx is unusable here — numpy is mocked at module top, so approx
+    # crashes probing np.bool_. Compare with an explicit relative tolerance.)
+    assert abs(fallback - reference) <= 0.02 * reference
+    assert fallback > 0.2
+
+
 def test_openai_confidence_heuristic_replaces_hardcoded_value():
     """OpenAI returns no confidence signal; derive one from words-per-second
     plausibility instead of hardcoding 0.88 (which defeated the client gate)."""

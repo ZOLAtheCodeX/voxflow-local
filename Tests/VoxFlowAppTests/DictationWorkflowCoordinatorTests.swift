@@ -210,7 +210,12 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         XCTAssertFalse(recordedStages.contains("cleanup_light_api"))
     }
 
-    @MainActor func testRemoteDictationAutoInsertPolish() async throws {
+    /// Local-only auto-insert (here via the API Whisper STT backend) makes a
+    /// SINGLE backend call — only the inserted mode round-trips; the unused mode
+    /// is filled locally. (The single-call optimization gates on
+    /// providerMode == .localOnly, NOT on "remote" — see the privateAPI test
+    /// below for the two-call path.)
+    @MainActor func testLocalWhisperAutoInsertPolishMakesSingleBackendCall() async throws {
         let (sut, state, textInsertion, _) = makeSUT()
 
         let polishResponse = """
@@ -234,12 +239,12 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         let request = DictationWorkflowRequest(
             sessionID: "dictation-3",
             rawText: "hello world raw input",
-            providerMode: .localOnly, // auto-insert requires localOnly in remote path
+            providerMode: .localOnly,
             consentToken: nil,
             allowRaw: false,
             toneStyle: .neutral,
             insertBehavior: .autoInsertPolish,
-            sttBackend: .whisper, // Whisper uses API backend
+            sttBackend: .whisper, // Whisper uses the API STT backend, still localOnly
             lastTranscriptionConfidence: 0.92,
             targetApp: nil
         )
@@ -258,6 +263,55 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         XCTAssertEqual(state.sessionState, .idle)
         XCTAssertTrue(recordedStages.contains("cleanup_polish_api"))
         XCTAssertFalse(recordedStages.contains("cleanup_light_api"))
+    }
+
+    /// PrivateAPI dictation resolves BOTH modes via the backend (autoMode is nil
+    /// for non-localOnly) and goes to REVIEW even with an auto-insert behavior —
+    /// the redacted/cleaned version must be shown before anything is inserted.
+    /// This covers the two-call branch the single-call optimization skips.
+    @MainActor func testPrivateAPIDictationResolvesBothModesAndReviews() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+
+        let lightResponse = """
+        {"output_text": "hello world light cleaned", "mode_applied": "light", "guardrail_triggered": false}
+        """.data(using: .utf8)!
+        let polishResponse = """
+        {"output_text": "hello world polished text", "mode_applied": "polish", "guardrail_triggered": false}
+        """.data(using: .utf8)!
+
+        var requestCount = 0
+        DictationMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/cleanup")
+            requestCount += 1
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return requestCount == 1 ? (response, lightResponse) : (response, polishResponse)
+        }
+
+        var recordedStages: [String] = []
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-private",
+            rawText: "hello world raw input",
+            providerMode: .privateAPI,
+            consentToken: "test-consent",
+            allowRaw: false,
+            toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish, // ignored for privateAPI — still reviews
+            sttBackend: .whisper,
+            lastTranscriptionConfidence: 0.9,
+            targetApp: nil
+        )
+
+        try await sut.processDictation(request) { name, _, _ in
+            recordedStages.append(name)
+        }
+
+        XCTAssertEqual(requestCount, 2, "privateAPI resolves both modes via the backend")
+        XCTAssertEqual(state.transcriptCandidate?.lightText, "hello world light cleaned")
+        XCTAssertEqual(state.transcriptCandidate?.polishText, "hello world polished text")
+        XCTAssertEqual(textInsertion.insertCallCount, 0, "privateAPI reviews, never auto-inserts")
+        XCTAssertEqual(state.sessionState, .review)
+        XCTAssertTrue(recordedStages.contains("cleanup_light_api"))
+        XCTAssertTrue(recordedStages.contains("cleanup_polish_api"))
     }
 
     /// Review mode (no auto-insert mode) still resolves BOTH light and polish
