@@ -41,6 +41,21 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertEqual(obj?["reason"] as? String, "hallucination_filter")
     }
 
+    func testNonFiniteValueIsPreservedNotDropped() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        // A non-finite duration/rms (e.g. a 0 sample-rate division) must NOT make
+        // JSONSerialization throw and silently drop the whole forensics record —
+        // this log is the "read this file first" tool for empty-capture reports.
+        log.recordRejection(
+            text: "x", reason: "silence", confidence: 0,
+            durationSeconds: .infinity, source: "quick_dictation", rmsEnergy: .nan)
+        let contents = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(
+            with: Data(contents.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["event"] as? String, "reject")
+        XCTAssertEqual(obj?["reason"] as? String, "silence")
+    }
+
     func testRotatesWhenOversized() throws {
         let log = InsertionAuditLog(fileURL: tempURL, maxBytes: 400)
         for i in 0..<20 {

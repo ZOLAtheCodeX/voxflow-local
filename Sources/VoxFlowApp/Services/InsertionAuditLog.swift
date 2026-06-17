@@ -60,8 +60,22 @@ final class InsertionAuditLog {
         append(entry)
     }
 
+    /// Replace any non-finite Double (NaN/±Inf) with a marker string. JSON has
+    /// no representation for them, so JSONSerialization would otherwise throw and
+    /// drop the WHOLE record — defeating the point of a forensics log.
+    private func sanitize(_ entry: [String: Any]) -> [String: Any] {
+        var clean = entry
+        for (key, value) in entry where (value as? Double).map({ !$0.isFinite }) == true {
+            clean[key] = "non-finite"
+        }
+        return clean
+    }
+
     private func append(_ entry: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: entry) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: sanitize(entry)) else {
+            log.error("InsertionAuditLog: dropped a non-serializable audit entry")
+            return
+        }
         rotateIfNeeded()
         if let handle = FileHandle(forWritingAtPath: fileURL.path) {
             defer { try? handle.close() }
