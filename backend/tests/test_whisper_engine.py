@@ -6,22 +6,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Mock dependencies before importing server to avoid ImportError
-# This is necessary because the environment lacks these packages.
-# We keep these mocks globally for this test file.
+# Stub the heavy ML deps so `from server import WhisperEngine` imports fast and
+# deterministically — these tests mock the transformers pipeline rather than run
+# real tensors, and torch is slow to import (it may also be absent in lean CI
+# envs). The `if not in sys.modules` guard means a real module already imported
+# by an earlier test is used as-is, not clobbered. Do NOT stub fastapi/pydantic:
+# they're installed and other files (e.g. test_smart_actions' TestClient) need
+# them real, and stubbing them globally polluted sys.modules and broke any test
+# collected after this one.
 MOCKED_MODULES = [
     "numpy",
-    "fastapi",
-    "fastapi.middleware",
-    "fastapi.middleware.cors",
-    "fastapi.responses",
-    "pydantic",
     "transformers",
     "torch",
 ]
 
 for module in MOCKED_MODULES:
-    sys.modules[module] = MagicMock()
+    if module not in sys.modules:
+        sys.modules[module] = MagicMock()
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
