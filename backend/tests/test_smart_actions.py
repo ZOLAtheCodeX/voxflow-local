@@ -201,10 +201,10 @@ def test_disclaimer_action_uses_disclaimer_prompt():
 
 def test_apply_fails_closed_when_chain_serves_only_regex_floor():
     """When the WHOLE provider chain is unavailable and run() falls to the
-    regex floor (served_by='regex'), smart actions surface ``ollama_unavailable``
+    regex floor (served_by='regex'), smart actions surface ``provider_unavailable``
     and the verbatim transcript instead of the regex output — a grammar-cleaned
     transcript is structurally wrong for a MECE / steel-man / disclaimer request.
-    The Swift client renders this as 'Ollama required' rather than inserting."""
+    The Swift client renders this as a 'provider required' message rather than inserting."""
     from engines.polish import PolishEngine
 
     chain_engine = PolishEngine(chain=[
@@ -217,18 +217,18 @@ def test_apply_fails_closed_when_chain_serves_only_regex_floor():
     assert result.action_id == "memo"
     assert result.output == "raw transcript text"  # verbatim, not regex-cleaned
     assert result.guardrail_triggered is False
-    assert result.error == "ollama_unavailable"
+    assert result.error == "provider_unavailable"
 
 
 def test_apply_uses_second_chain_provider_when_first_ollama_down(monkeypatch):
     """Availability is chain-aware: the old is_available() preflight only probed
     the chain HEAD, so a down first provider (ollama) returned
-    ``ollama_unavailable`` even when a healthy fallback provider could serve.
+    ``provider_unavailable`` even when a healthy fallback provider could serve.
     The whole chain is now attempted, so the second provider serves."""
     from engines.polish import PolishEngine
 
     # Force the head ollama probe to report DOWN — under the old preflight this
-    # short-circuited to ollama_unavailable before run() could reach the cloud
+    # short-circuited to provider_unavailable before run() could reach the cloud
     # fallback. After the fix the probe is irrelevant (never consulted).
     monkeypatch.setattr("engines.polish.probe_ollama_available", lambda: False)
 
@@ -285,7 +285,7 @@ def test_smart_action_endpoint_rejects_whitespace_only_transcript():
 
 def test_smart_action_endpoint_returns_unavailable_when_chain_floors(monkeypatch):
     """HTTP integration: when the chain serves only the regex floor
-    (served_by='regex'), the route returns 200 with error='ollama_unavailable'
+    (served_by='regex'), the route returns 200 with error='provider_unavailable'
     and output=transcript verbatim — smart actions never insert regex output."""
     from fastapi.testclient import TestClient
 
@@ -311,7 +311,7 @@ def test_smart_action_endpoint_returns_unavailable_when_chain_floors(monkeypatch
     assert resp.status_code == 200
     body = resp.json()
     assert body["output"] == "draft memo content"
-    assert body["error"] == "ollama_unavailable"
+    assert body["error"] == "provider_unavailable"
     assert body["guardrail_triggered"] is False
 
 

@@ -116,9 +116,10 @@ class SmartActionEngine:
                 # (apply_tone(light_cleanup())) is fine for polish but
                 # structurally wrong for smart actions — returning grammar-cleaned
                 # text to a user who asked for MECE / steel-man / disclaimer is
-                # misleading. Surface ``ollama_unavailable`` + the verbatim
-                # transcript so the Swift client shows "Ollama required" rather
-                # than inserting the floor output.
+                # misleading. Surface ``provider_unavailable`` + the verbatim
+                # transcript so callers can show a "configure a provider" message
+                # rather than inserting the floor output. (The label is provider-
+                # neutral because the chain may hold non-Ollama providers.)
                 if outcome.served_by == "regex":
                     logger.warning(
                         "SmartActionEngine: chain served only the regex floor — "
@@ -129,7 +130,7 @@ class SmartActionEngine:
                         action_id=action_id,
                         output=transcript,
                         guardrail_triggered=False,
-                        error="ollama_unavailable",
+                        error="provider_unavailable",
                     )
                 return SmartActionResult(
                     action_id=action_id,
