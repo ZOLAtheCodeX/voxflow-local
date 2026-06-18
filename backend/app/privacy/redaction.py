@@ -68,7 +68,16 @@ def redact_sensitive_text(text: str) -> str:
     redacted = _redact_cards(text)
 
     other_patterns: list[tuple[str, str]] = [
-        (r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b", "[EMAIL]"),
+        # ReDoS hardening (Jules S1). The old pattern
+        #   [a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+        # backtracked quadratically (~7s at 40k chars, within the 50k input cap)
+        # on dot-heavy near-matches — enough to hang the cleanup endpoint. Two
+        # fixes: (1) the local part is length-bounded ({1,64}, the RFC 5321
+        # limit) so `re.sub` can't start a full-length forward scan at every
+        # position hunting for an `@`; (2) the domain is matched as dot-separated
+        # labels (the dot is an explicit separator, not inside the label class)
+        # so the label `+` can't overlap the dots. Both keep real emails matching.
+        (r"\b[a-zA-Z0-9._%+-]{1,64}@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}\b", "[EMAIL]"),
         (r"https?://[^\s,)>\"']+", "[URL]"),
         (r"\b(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b", "[PHONE]"),
         (r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)", "[SSN]"),

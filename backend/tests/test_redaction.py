@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
@@ -90,3 +91,23 @@ class TestRedactSensitiveText:
         )
         assert "[EMAIL]" in out
         assert "[ACCOUNT_NUMBER]" in out
+
+    def test_email_redaction_handles_multilabel_domains(self) -> None:
+        # Behavior preserved after the regex hardening: multi-label domains and
+        # plus-addressing still redact exactly as before.
+        out = redact_sensitive_text("Mail alice.k+tag@mail.corp.example.co.uk now.")
+        assert "[EMAIL]" in out
+        assert "example.co.uk" not in out
+
+    def test_email_regex_no_catastrophic_backtracking(self) -> None:
+        # ReDoS regression (Jules S1): the email regex backtracked quadratically
+        # on long dot-heavy near-matches (measured ~7.2s at 40k chars), which
+        # could hang the cleanup endpoint (input cap 50k) while holding the ML
+        # semaphore. Hardened to bounded labels => linear. Generous 100x-margin
+        # bound: this is a backtracking guard, not a perf microbenchmark.
+        adversarial = "x@" + ("a." * 20_000)  # ~40k chars, never a valid email
+        start = time.perf_counter()
+        out = redact_sensitive_text(adversarial)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 2.0, f"email regex backtracked: {elapsed:.2f}s on {len(adversarial)} chars"
+        assert isinstance(out, str)
