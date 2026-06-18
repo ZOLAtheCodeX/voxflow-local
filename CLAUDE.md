@@ -70,7 +70,7 @@ ollama serve &
 ollama pull gemma4:e2b-mlx        # 8–24 GB RAM (recommended) — gemma4:e4b-mlx only for ≥24 GB
 ```
 
-R2 retune (2026-06-11, measured live): the 9 GB `gemma4:e4b-mlx` plus the Whisper backend thrashes a 16 GB machine (prompt eval ~5 tok/s, MLX runner wedges, ~28% of polish requests hit the 30 s timeout). Tier accordingly: `e2b-mlx` for 8–24 GB, `e4b-mlx` for ≥24 GB (`recommend_ollama_model` encodes this). The backend pins the model resident via per-request `keep_alive: "24h"` on the NATIVE `/api/chat` endpoint — the OpenAI-compat endpoint silently drops `keep_alive`, so never switch `OllamaBackend` back to it. `OLLAMA_KEEP_ALIVE` env tweaking is no longer needed. If the runner wedges (requests timing out warm), `ollama stop <model>` restores it.
+R2 retune (2026-06-11, measured live): the 9 GB `gemma4:e4b-mlx` plus the Whisper backend thrashes a 16 GB machine (prompt eval ~5 tok/s, MLX runner wedges, ~28% of polish requests hit the 30 s timeout). Tier accordingly: `e2b-mlx` for 8–24 GB, `e4b-mlx` for ≥24 GB (`recommend_ollama_model` encodes this). The backend sets per-request `keep_alive` on the NATIVE `/api/chat` endpoint (the OpenAI-compat endpoint silently drops `keep_alive`, so never switch `OllamaBackend` back to it). Default is now **`15m`** (was `24h`): `24h` pinned the model (~6 GB for e2b-mlx) resident for a full day and starved 16 GB machines even in light/raw insert modes that never call polish. `15m` keeps it warm through an active session and frees the RAM between sessions; override via `VOXFLOW_OLLAMA_KEEP_ALIVE` (e.g. `24h`) on RAM-rich machines that want always-warm polish. If the runner wedges (requests timing out warm), `ollama stop <model>` restores it (and is also how to free the resident model on demand).
 
 If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanup())`. Same fallback fires when Ollama is reachable but the configured model isn't pulled — `/v1/ready` returns `ollama_available: true` either way (it probes the API socket only, not model presence).
 
@@ -84,6 +84,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | `VOXFLOW_WHISPER_MODEL` | Whisper model id | `openai/whisper-small` |
 | `VOXFLOW_OLLAMA_URL` | Ollama base URL | `http://localhost:11434` |
 | `VOXFLOW_OLLAMA_MODEL` | Polish model id override | auto: RAM-tier recommendation if pulled, else any pulled gemma4 (`resolve_default_ollama_model`) |
+| `VOXFLOW_OLLAMA_KEEP_ALIVE` | How long Ollama keeps the polish model resident after a request (frees RAM between sessions; set `24h` for always-warm) | `15m` |
 | `VOXFLOW_POLISH_BACKEND` | Polish selector (only `ollama` recognised post-3.5) | `ollama` |
 | `VOXFLOW_SIGN_IDENTITY` | Code-signing identity override | auto-detected Apple Development cert |
 | `VOXFLOW_OFFLINE` | Disable HF downloads | `1` |

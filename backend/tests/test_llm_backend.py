@@ -88,11 +88,12 @@ class TestOllamaBackendSuccess:
         assert "cleaned text" in body["messages"][0]["content"].lower()
         assert body["messages"][1]["content"] == "uh send the report by friday"
 
-    def test_payload_pins_model_residency_and_token_budget(self) -> None:
-        """R2.1: keep_alive pins the model in memory across idle gaps (the
-        5-minute Ollama default caused multi-second cold-load p95 spikes);
-        max_tokens raises the ~128-token compat default that truncated
-        long-paragraph polish (truncation then tripped the guardrail)."""
+    def test_payload_keeps_model_warm_but_releases_between_sessions(self) -> None:
+        """keep_alive keeps the model warm through an active session but defaults
+        to releasing it after a short idle (was "24h", which pinned ~6 GB resident
+        for a full day and starved 16 GB machines even when the user's insert mode
+        never used polish). max_tokens raises the ~128-token compat default that
+        truncated long-paragraph polish (truncation then tripped the guardrail)."""
         backend = OllamaBackend(model="gemma4:e4b-mlx")
         with patch(
             "engines.llm_backend.urlrequest.urlopen",
@@ -105,9 +106,21 @@ class TestOllamaBackendSuccess:
             "must use the native endpoint — the OpenAI-compat endpoint drops keep_alive"
         )
         body = json.loads(sent_request.data.decode("utf-8"))
-        assert body["keep_alive"] == "24h"
+        assert body["keep_alive"] == "15m"
         assert body["options"]["num_predict"] == 512
         assert body["options"]["temperature"] == 0.2
+
+    def test_keep_alive_is_configurable(self) -> None:
+        """RAM-rich machines can pin the model longer via the constructor /
+        VOXFLOW_OLLAMA_KEEP_ALIVE; constrained machines get the short default."""
+        backend = OllamaBackend(model="m", keep_alive="2h")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_ollama_response("ok")),
+        ) as urlopen_mock:
+            backend.polish("text", "neutral")
+        body = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        assert body["keep_alive"] == "2h"
 
     def test_strips_whitespace_from_response(self) -> None:
         backend = OllamaBackend()

@@ -100,10 +100,19 @@ class OllamaBackend:
         base_url: str | None = None,
         model: str | None = None,
         timeout: float = 30.0,
+        keep_alive: str | None = None,
     ) -> None:
         self.base_url = (base_url or os.environ.get("VOXFLOW_OLLAMA_URL", "http://localhost:11434")).rstrip("/")
         self.model = model or os.environ.get("VOXFLOW_OLLAMA_MODEL", "gemma4:e4b-mlx")
         self.timeout = timeout
+        # How long Ollama keeps the model resident after a request. Was a
+        # hardcoded "24h", which pinned the model (~6 GB for gemma4:e2b-mlx) in
+        # unified memory for a full day — starving 16 GB machines even when the
+        # user's insert mode (light) never invoked polish. The default now
+        # releases it after a short idle (keeps it warm through an active session,
+        # frees the RAM between sessions); override via VOXFLOW_OLLAMA_KEEP_ALIVE
+        # (e.g. "24h") on RAM-rich machines that prefer always-warm polish.
+        self.keep_alive = keep_alive or os.environ.get("VOXFLOW_OLLAMA_KEEP_ALIVE", "15m")
 
     def polish(
         self,
@@ -141,7 +150,7 @@ class OllamaBackend:
             # 30 s client timeouts between dictations (R2.1). NOTE: only the
             # native /api/chat endpoint honors keep_alive; the OpenAI-compat
             # endpoint silently drops it (verified live 2026-06-11).
-            "keep_alive": "24h",
+            "keep_alive": self.keep_alive,
             "options": {
                 "temperature": 0.2,
                 # Raise the ~128-token default that truncated long-paragraph
