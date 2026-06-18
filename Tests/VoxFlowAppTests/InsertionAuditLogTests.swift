@@ -91,6 +91,24 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertEqual(obj?["applied_gain_db"] as? Double, 4.0)
     }
 
+    /// Residual healthy-RMS empties: record WhisperKit's decode internals so we
+    /// can tell "model VAD rejected it" (high mean_no_speech_prob) from "decode
+    /// produced nothing" (segment_count 0), and spot transient-in-silence
+    /// (high peak, low rms).
+    func testRejectionRecordsDecodeInternals() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordRejection(
+            text: "", reason: "empty", confidence: 0, durationSeconds: 2.1,
+            source: "quick_dictation", rmsEnergy: 0.077,
+            meanNoSpeechProb: 0.82, segmentCount: 3, peakAmplitude: 0.31)
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(
+            with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["mean_no_speech_prob"] as? Double, 0.82)
+        XCTAssertEqual(obj?["segment_count"] as? Int, 3)
+        XCTAssertEqual(obj?["peak_amplitude"] as? Double, 0.31)
+    }
+
     func testRotatesWhenOversized() throws {
         let log = InsertionAuditLog(fileURL: tempURL, maxBytes: 400)
         for i in 0..<20 {

@@ -13,6 +13,12 @@ struct TranscribeResponse: Codable {
     // dB of decoder-side gain the in-app WhisperKit path applied before
     // transcription (nil for the backend STT path, which doesn't normalize).
     var appliedGainDB: Double? = nil
+    // Decode internals (in-app WhisperKit path) for diagnosing healthy-level
+    // empties: mean segment no-speech probability, how many segments the decode
+    // produced, and the raw (pre-gain) peak amplitude.
+    var meanNoSpeechProb: Double? = nil
+    var segmentCount: Int? = nil
+    var peakAmplitude: Double? = nil
 }
 
 struct CleanupResponse: Codable {

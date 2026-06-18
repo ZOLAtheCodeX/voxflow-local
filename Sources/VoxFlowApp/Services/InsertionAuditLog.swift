@@ -53,7 +53,10 @@ final class InsertionAuditLog {
         leadingSilenceSeconds: Double? = nil,
         firstBufferLatencyMs: Int? = nil,
         secondsSinceLastCapture: Double? = nil,
-        appliedGainDB: Double? = nil
+        appliedGainDB: Double? = nil,
+        meanNoSpeechProb: Double? = nil,
+        segmentCount: Int? = nil,
+        peakAmplitude: Double? = nil
     ) {
         var entry: [String: Any] = [
             "event": "reject",
@@ -78,6 +81,12 @@ final class InsertionAuditLog {
         // idle" (cold pipeline) hypothesis the gain fix can't explain.
         if let secondsSinceLastCapture { entry["seconds_since_last_capture"] = secondsSinceLastCapture }
         if let appliedGainDB { entry["applied_gain_db"] = appliedGainDB }
+        // Decode internals for the residual healthy-RMS empties: was it the
+        // model's no-speech VAD (high mean_no_speech_prob), no decode output at
+        // all (segment_count 0), or a transient-in-silence (high peak, low rms)?
+        if let meanNoSpeechProb { entry["mean_no_speech_prob"] = meanNoSpeechProb }
+        if let segmentCount { entry["segment_count"] = segmentCount }
+        if let peakAmplitude { entry["peak_amplitude"] = peakAmplitude }
         append(entry)
     }
 

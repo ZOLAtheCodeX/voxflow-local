@@ -851,7 +851,10 @@ final class AppCoordinator: ObservableObject {
                 leadingSilenceSeconds: capturedAudio.leadingSilenceSeconds,
                 firstBufferLatencyMs: capturedAudio.firstBufferLatencyMs,
                 secondsSinceLastCapture: secondsSinceLastCapture,
-                appliedGainDB: transcription.appliedGainDB
+                appliedGainDB: transcription.appliedGainDB,
+                meanNoSpeechProb: transcription.meanNoSpeechProb,
+                segmentCount: transcription.segmentCount,
+                peakAmplitude: transcription.peakAmplitude
             )
             state.sessionState = .idle
             state.statusLine = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)

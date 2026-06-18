@@ -64,12 +64,16 @@ final class WhisperKitSTTService: ChunkTranscribing {
 
         let started = ContinuousClock.now
         let conversionStarted = ContinuousClock.now
-        let (floatSamples, appliedGainDB) = await Task.detached {
+        let (floatSamples, appliedGainDB, peakAmplitude) = await Task.detached { () -> ([Float], Double, Double) in
             // Boost weak input toward a healthy level BEFORE WhisperKit — low
             // amplitude is the dominant empty-transcription cause. The stored
             // PCM / audit rms are untouched, so instrumentation keeps the TRUE
-            // input level; only the decoder's copy is normalized.
-            AudioGain.normalize(Self.convertPCMInt16ToFloat(audio.pcm))
+            // input level; only the decoder's copy is normalized. Peak is the
+            // raw (pre-gain) max amplitude, to spot transient-in-silence clips.
+            let raw = Self.convertPCMInt16ToFloat(audio.pcm)
+            let peak = Double(raw.map { abs($0) }.max() ?? 0)
+            let (normalized, gainDB) = AudioGain.normalize(raw)
+            return (normalized, gainDB, peak)
         }.value
         let conversionLatencyMs = conversionStarted.elapsedMilliseconds()
 
@@ -102,7 +106,8 @@ final class WhisperKitSTTService: ChunkTranscribing {
         // Coverage-based confidence across ALL segments of ALL results — the
         // old exp(avgLogprob)-of-first-segment estimate scored multi-word
         // noise hallucinations 0.3-0.6, past every downstream gate.
-        let segmentSignals = results.flatMap(\.segments).map { seg in
+        let allSegments = results.flatMap(\.segments)
+        let segmentSignals = allSegments.map { seg in
             TranscriptionConfidence.SegmentSignal(
                 startSeconds: Double(seg.start),
                 endSeconds: Double(seg.end),
@@ -114,6 +119,13 @@ final class WhisperKitSTTService: ChunkTranscribing {
             text: text,
             audioDurationSeconds: audioDurationS
         )
+        // Decode internals for the healthy-RMS-empty investigation: mean
+        // no-speech probability across segments (high = the model's own VAD
+        // rejected it) and how many segments the decode produced (0 = it
+        // produced nothing). nil mean when there are no segments at all.
+        let noSpeechProbs = allSegments.map { Double($0.noSpeechProb) }
+        let meanNoSpeechProb = noSpeechProbs.isEmpty
+            ? nil : noSpeechProbs.reduce(0, +) / Double(noSpeechProbs.count)
 
         // NOTE: hallucination filtering is intentionally NOT done here. The
         // single ingress `TranscriptGate.evaluate` applies the identical
@@ -143,7 +155,10 @@ final class WhisperKitSTTService: ChunkTranscribing {
             modelLoadedBeforeRequest: true,
             modelLoadedAfterRequest: true,
             coldStart: false,
-            appliedGainDB: appliedGainDB
+            appliedGainDB: appliedGainDB,
+            meanNoSpeechProb: meanNoSpeechProb,
+            segmentCount: allSegments.count,
+            peakAmplitude: peakAmplitude
         )
     }
 
