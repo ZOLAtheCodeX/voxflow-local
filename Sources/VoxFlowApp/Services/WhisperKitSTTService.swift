@@ -64,8 +64,12 @@ final class WhisperKitSTTService: ChunkTranscribing {
 
         let started = ContinuousClock.now
         let conversionStarted = ContinuousClock.now
-        let floatSamples = await Task.detached {
-            Self.convertPCMInt16ToFloat(audio.pcm)
+        let (floatSamples, appliedGainDB) = await Task.detached {
+            // Boost weak input toward a healthy level BEFORE WhisperKit — low
+            // amplitude is the dominant empty-transcription cause. The stored
+            // PCM / audit rms are untouched, so instrumentation keeps the TRUE
+            // input level; only the decoder's copy is normalized.
+            AudioGain.normalize(Self.convertPCMInt16ToFloat(audio.pcm))
         }.value
         let conversionLatencyMs = conversionStarted.elapsedMilliseconds()
 
@@ -138,7 +142,8 @@ final class WhisperKitSTTService: ChunkTranscribing {
             ],
             modelLoadedBeforeRequest: true,
             modelLoadedAfterRequest: true,
-            coldStart: false
+            coldStart: false,
+            appliedGainDB: appliedGainDB
         )
     }
 

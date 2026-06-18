@@ -10,6 +10,9 @@ struct TranscribeResponse: Codable {
     let modelLoadedBeforeRequest: Bool?
     let modelLoadedAfterRequest: Bool?
     let coldStart: Bool?
+    // dB of decoder-side gain the in-app WhisperKit path applied before
+    // transcription (nil for the backend STT path, which doesn't normalize).
+    var appliedGainDB: Double? = nil
 }
 
 struct CleanupResponse: Codable {

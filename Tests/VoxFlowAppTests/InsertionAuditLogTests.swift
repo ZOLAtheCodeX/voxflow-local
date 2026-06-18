@@ -74,6 +74,23 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertEqual(obj?["first_buffer_latency_ms"] as? Int, 120)
     }
 
+    /// Symptom-4 investigation: rejects also carry the applied decoder gain and
+    /// the idle gap since the last capture, so the rarer healthy-level miss
+    /// (cold/first-after-idle) can be confirmed or refuted from receipts.
+    func testRejectionRecordsGainAndIdleGap() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordRejection(
+            text: "", reason: "empty", confidence: 0, durationSeconds: 4.7,
+            source: "quick_dictation", rmsEnergy: 0.063,
+            leadingSilenceSeconds: 0.1, firstBufferLatencyMs: 150,
+            secondsSinceLastCapture: 235.0, appliedGainDB: 4.0)
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(
+            with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["seconds_since_last_capture"] as? Double, 235.0)
+        XCTAssertEqual(obj?["applied_gain_db"] as? Double, 4.0)
+    }
+
     func testRotatesWhenOversized() throws {
         let log = InsertionAuditLog(fileURL: tempURL, maxBytes: 400)
         for i in 0..<20 {

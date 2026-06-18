@@ -51,7 +51,9 @@ final class InsertionAuditLog {
         source: String,
         rmsEnergy: Double? = nil,
         leadingSilenceSeconds: Double? = nil,
-        firstBufferLatencyMs: Int? = nil
+        firstBufferLatencyMs: Int? = nil,
+        secondsSinceLastCapture: Double? = nil,
+        appliedGainDB: Double? = nil
     ) {
         var entry: [String: Any] = [
             "event": "reject",
@@ -71,6 +73,11 @@ final class InsertionAuditLog {
         // front-clip (engine not yet armed), not low gain.
         if let leadingSilenceSeconds { entry["leading_silence_seconds"] = leadingSilenceSeconds }
         if let firstBufferLatencyMs { entry["first_buffer_latency_ms"] = firstBufferLatencyMs }
+        // applied_gain_db = how much the decoder-side normalizer boosted this
+        // capture; seconds_since_last_capture tests the "healthy-level miss after
+        // idle" (cold pipeline) hypothesis the gain fix can't explain.
+        if let secondsSinceLastCapture { entry["seconds_since_last_capture"] = secondsSinceLastCapture }
+        if let appliedGainDB { entry["applied_gain_db"] = appliedGainDB }
         append(entry)
     }
 

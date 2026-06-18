@@ -183,6 +183,9 @@ final class AppCoordinator: ObservableObject {
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
     private var lastTranscriptionConfidence: Double = 0.0
+    /// Wall-clock of the last decode, to record idle gap on rejects — tests the
+    /// "healthy-level miss after the pipeline's been idle" (cold) hypothesis.
+    private var lastDecodeAt: Date?
     /// In-flight transcription pipeline, cancellable from cancelActiveCapture
     /// while the session is .transcribing.
     private var transcriptionTask: Task<Void, Never>?
@@ -816,6 +819,10 @@ final class AppCoordinator: ObservableObject {
         let rawText = cockpitDictionary.apply(
             to: transcription.text.trimmingCharacters(in: .whitespacesAndNewlines))
         lastTranscriptionConfidence = transcription.confidenceEstimate
+        // Idle gap since the previous decode (for the cold-pipeline hypothesis);
+        // updated every decode so the value on a reject = gap since last capture.
+        let secondsSinceLastCapture = lastDecodeAt.map { Date().timeIntervalSince($0) }
+        lastDecodeAt = Date()
         #if DEBUG
         log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
         #else
@@ -842,7 +849,9 @@ final class AppCoordinator: ObservableObject {
                 source: Self.captureSourceLabel(commandLane: commandLane),
                 rmsEnergy: rms,
                 leadingSilenceSeconds: capturedAudio.leadingSilenceSeconds,
-                firstBufferLatencyMs: capturedAudio.firstBufferLatencyMs
+                firstBufferLatencyMs: capturedAudio.firstBufferLatencyMs,
+                secondsSinceLastCapture: secondsSinceLastCapture,
+                appliedGainDB: transcription.appliedGainDB
             )
             state.sessionState = .idle
             state.statusLine = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)
