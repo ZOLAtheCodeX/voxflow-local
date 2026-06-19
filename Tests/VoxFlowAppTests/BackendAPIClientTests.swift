@@ -14,7 +14,14 @@ class MockURLProtocol: URLProtocol {
 
     override func startLoading() {
         guard let handler = MockURLProtocol.requestHandler else {
-            fatalError("Handler is unavailable.")
+            // A stray/leaked request (an async backend call outliving its test,
+            // routed through the shared global BackendAPIClient.session after
+            // tearDown nil'd the handler) must NOT fatalError — that crashes the
+            // whole xctest process intermittently on CI (signal 5). Fail just
+            // this request; a test that genuinely forgot its handler still fails
+            // via its own awaited call throwing.
+            client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
+            return
         }
 
         do {
