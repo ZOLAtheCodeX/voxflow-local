@@ -225,8 +225,9 @@ final class SettingsCoordinatorTests: XCTestCase {
         state.providerMode = .localOnly
         // Opt fully out of cleanup (global raw AND every shipped profile raw) so
         // the cockpit is the only thing that could keep the backend up — non-raw
-        // dictation, including the shipped Chrome polish default, now wants it
-        // for local-model cleanup (see localDictationWantsBackendCleanup).
+        // dictation, including the non-raw shipped defaults (Chrome light,
+        // Mail/Outlook review), now wants it for local cleanup (see
+        // localDictationWantsBackendCleanup).
         state.insertBehavior = .autoInsertRaw
         for bundleID in SettingsCoordinator.defaultAppProfiles.keys {
             state.appProfiles[bundleID] = AppProfile(

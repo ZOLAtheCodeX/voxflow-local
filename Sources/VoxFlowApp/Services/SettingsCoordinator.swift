@@ -66,7 +66,12 @@ final class SettingsCoordinator: SettingsCoordinating {
         "com.tinyspeck.slackmacgap": AppProfile(tone: .concise, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
         "com.apple.mail": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
         "com.microsoft.Outlook": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
-        "com.google.Chrome": AppProfile(tone: .neutral, cleanupMode: .polish, insertBehavior: .autoInsertPolish),
+        // Light (not polish) by default: polish loads the ~6 GB Gemma model,
+        // which on a 16 GB machine starves WhisperKit capture (a browser is a
+        // heavy RAM consumer itself). Light gives deterministic "rules" cleanup
+        // with NO model load → fast, reliable capture. High-RAM users can switch
+        // Chrome to Auto-Insert Polish per-app in Settings.
+        "com.google.Chrome": AppProfile(tone: .neutral, cleanupMode: .light, insertBehavior: .autoInsertLight),
         "com.apple.dt.Xcode": AppProfile(tone: .neutral, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
     ]
 
