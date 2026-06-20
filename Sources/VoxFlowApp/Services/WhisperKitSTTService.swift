@@ -37,6 +37,17 @@ final class WhisperKitSTTService: ChunkTranscribing {
         (modelsDir as NSString).appendingPathComponent("whisperkit-coreml__\(modelName)")
     }
 
+    /// A capture with real energy that WhisperKit decoded to ZERO segments is an
+    /// intermittent decoder/ANE glitch (observed live: peak 0.26–0.69, multi-second,
+    /// seg=0), NOT silence — worth one retry on the in-memory audio. Genuine
+    /// near-silence (peak below the threshold) is correctly left empty, and a decode
+    /// that already produced segments is never retried (the happy path is untouched).
+    nonisolated static func shouldRetryEmptyDecode(
+        segmentCount: Int, peakAmplitude: Double, threshold: Double = 0.15
+    ) -> Bool {
+        segmentCount == 0 && peakAmplitude >= threshold
+    }
+
     func load(modelFolder: String) async throws {
         log.info("Loading WhisperKit model from \(modelFolder)")
         let config = WhisperKitConfig(
@@ -77,25 +88,32 @@ final class WhisperKitSTTService: ChunkTranscribing {
         }.value
         let conversionLatencyMs = conversionStarted.elapsedMilliseconds()
 
-        let inferenceStarted = ContinuousClock.now
         // Anti-hallucination thresholds made explicit (they match WhisperKit's
         // current defaults by design — pinned here so an upstream default
         // change can't silently weaken the gate). noSpeechThreshold marks a
         // segment silent when noSpeechProb exceeds it AND avgLogprob falls
         // below logProbThreshold; segment noSpeechProb also feeds
         // TranscriptionConfidence regardless of this gate.
-        let results: [TranscriptionResult] = try await pipe.transcribe(
-            audioArray: floatSamples,
-            decodeOptions: DecodingOptions(
-                language: "en",
-                temperatureFallbackCount: 5,
-                wordTimestamps: true,
-                promptTokens: vocabularyPromptTokens(),
-                compressionRatioThreshold: 2.4,
-                logProbThreshold: -1.0,
-                noSpeechThreshold: 0.6
-            )
+        let decodeOptions = DecodingOptions(
+            language: "en",
+            temperatureFallbackCount: 5,
+            wordTimestamps: true,
+            promptTokens: vocabularyPromptTokens(),
+            compressionRatioThreshold: 2.4,
+            logProbThreshold: -1.0,
+            noSpeechThreshold: 0.6
         )
+        let inferenceStarted = ContinuousClock.now
+        var results: [TranscriptionResult] = try await pipe.transcribe(
+            audioArray: floatSamples, decodeOptions: decodeOptions)
+        // seg=0 retry: real-energy audio that decoded to nothing is an
+        // intermittent decoder glitch, not silence — retry once on the audio
+        // already in memory before giving up (no re-recording for the user).
+        if Self.shouldRetryEmptyDecode(
+            segmentCount: results.flatMap(\.segments).count, peakAmplitude: peakAmplitude) {
+            log.info("WhisperKit returned 0 segments on audio with peak \(String(format: "%.2f", peakAmplitude)) — retrying decode once")
+            results = try await pipe.transcribe(audioArray: floatSamples, decodeOptions: decodeOptions)
+        }
         let inferenceLatencyMs = inferenceStarted.elapsedMilliseconds()
 
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)

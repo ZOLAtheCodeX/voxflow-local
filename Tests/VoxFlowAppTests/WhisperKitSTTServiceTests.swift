@@ -39,6 +39,22 @@ final class WhisperKitSTTServiceTests: XCTestCase {
         XCTAssertEqual(result.count, 1)
     }
 
+    // MARK: - seg=0 retry decision
+
+    func testRetriesEmptyDecodeOnlyForRealAudio() {
+        // Real energy (loud peak) + zero segments = intermittent decoder glitch → retry.
+        XCTAssertTrue(WhisperKitSTTService.shouldRetryEmptyDecode(segmentCount: 0, peakAmplitude: 0.5))
+        // Near-silent + zero segments = genuinely nothing to decode → do NOT retry.
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryEmptyDecode(segmentCount: 0, peakAmplitude: 0.10))
+        // Already produced segments → never retry (the happy path is untouched).
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryEmptyDecode(segmentCount: 2, peakAmplitude: 0.5))
+    }
+
+    func testRetryThresholdBoundary() {
+        XCTAssertTrue(WhisperKitSTTService.shouldRetryEmptyDecode(segmentCount: 0, peakAmplitude: 0.15))
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryEmptyDecode(segmentCount: 0, peakAmplitude: 0.14))
+    }
+
     // MARK: - Model path resolution
 
     func testResolveModelFolder() {
