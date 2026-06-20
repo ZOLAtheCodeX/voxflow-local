@@ -881,6 +881,11 @@ final class AppCoordinator: ObservableObject {
         if let snippet = VoiceCommandRouter.resolveSnippet(
             rawText, snippets: cockpitSnippets.snippets, context: .quickOnly) {
             let appLabel = state.focusTarget.appName ?? "app"
+            // Final cancellation gate: a snippet is built after STT, so a cancel
+            // (or superseding capture) between transcription and this insert must
+            // NOT insert. Propagates to handleCaptureError, which treats
+            // CancellationError as a quiet user cancel.
+            try Task.checkCancellation()
             // insertText sets the status line in both cases — success suffix on
             // success, "Auto-insert failed — copied to clipboard" on failure (it
             // also copies to clipboard). Either way the snippet path returns to

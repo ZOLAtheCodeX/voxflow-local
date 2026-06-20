@@ -56,6 +56,10 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             state.transcriptCandidate = candidate
             pushToSessionMemory(candidate)
             let appLabel = state.focusTarget.appName ?? "app"
+            // Final cancellation gate: if the user cancelled (or a newer capture
+            // superseded this one) after transcription but before insertion, do
+            // NOT insert — propagate as cancellation, not a silent insert.
+            try Task.checkCancellation()
             let insertStarted = ContinuousClock.now
             if await textInsertion.insertText(request.rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: request.targetApp) {
                 recordStage("insert", insertStarted, "mode=raw")
@@ -117,7 +121,7 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             state.selectedMode = .raw
             pushToSessionMemory(candidate)
 
-            await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage)
+            try await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage)
             return
         }
 
@@ -201,7 +205,7 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
         state.selectedMode = defaultMode
         if request.providerMode == .localOnly { pushToSessionMemory(candidate) }
 
-        await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage)
+        try await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage)
     }
 
     /// One backend cleanup round-trip, timed and recorded under the existing
@@ -231,9 +235,12 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
         candidate: TranscriptCandidate,
         request: DictationWorkflowRequest,
         recordStage: WorkflowStageRecorder
-    ) async {
+    ) async throws {
         // Auto-insert light/polish
         if let autoMode = request.insertBehavior.cleanupMode, request.providerMode == .localOnly {
+            // Final cancellation gate before inserting: a cancel (or superseding
+            // capture) after cleanup but before insert must NOT insert text.
+            try Task.checkCancellation()
             let text = candidate.text(for: autoMode)
             let toneLabel = request.toneStyle != state.toneStyle ? ", \(request.toneStyle.displayName)" : ""
             let appLabel = state.focusTarget.appName ?? "app"

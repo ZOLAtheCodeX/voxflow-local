@@ -529,6 +529,49 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
                        "suffix was \(textInsertion.statusSuffix ?? "nil")")
     }
 
+    /// Cancellation after transcription but before insertion must NOT insert —
+    /// even on the backend-cold local-light fallback path. The pipeline runs in a
+    /// cancellable task; cancelling it before the insert checkpoint aborts as a
+    /// CancellationError and the insertion service is never called.
+    @MainActor func testCancelBeforeInsertOnLocalLightPathDoesNotInsert() async {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = false  // backend cold → local-light fallback
+
+        let request = DictationWorkflowRequest(
+            sessionID: "cancel-local", rawText: "do not insert me", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .autoInsertLight, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9, targetApp: nil)
+
+        let task = Task { try await sut.processDictation(request) { _, _, _ in } }
+        task.cancel()  // cancel before the body reaches the insert checkpoint
+        do {
+            try await task.value
+            XCTFail("expected cancellation to propagate")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("expected CancellationError, got \(error)")
+        }
+        XCTAssertEqual(textInsertion.insertCallCount, 0, "no text may be inserted after cancellation")
+    }
+
+    /// Same guarantee on the raw auto-insert path.
+    @MainActor func testCancelBeforeInsertOnRawPathDoesNotInsert() async {
+        let (sut, _, textInsertion, _) = makeSUT()
+        let request = DictationWorkflowRequest(
+            sessionID: "cancel-raw", rawText: "do not insert me raw", providerMode: .localOnly,
+            consentToken: nil, allowRaw: true, toneStyle: .neutral,
+            insertBehavior: .autoInsertRaw, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.95, targetApp: nil)
+
+        let task = Task { try await sut.processDictation(request) { _, _, _ in } }
+        task.cancel()
+        do { try await task.value; XCTFail("expected cancellation") }
+        catch is CancellationError {} catch { XCTFail("got \(error)") }
+        XCTAssertEqual(textInsertion.insertCallCount, 0)
+    }
+
     /// Provenance (review mode): always-review resolves BOTH modes via the
     /// backend, so the candidate must carry per-mode provenance for the LATER
     /// review insert to stamp the receipt correctly.
