@@ -45,6 +45,12 @@ DEFAULT_TASKS = ("polish", "smart_action")
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
+# Default endpoint for an openai_compat provider with no explicit base_url — a
+# LOCAL OpenAI-compatible server (LM Studio / llama.cpp / vLLM / mlx_lm.server).
+# Used for BOTH locality classification (is_cloud) and backend construction so
+# the two never disagree.
+_OPENAI_COMPAT_DEFAULT_URL = "http://localhost:1234"
+
 
 def is_local_url(base_url: str | None) -> bool:
     """True when the provider endpoint stays on this machine.
@@ -82,7 +88,10 @@ class ProviderSpec:
             # Default Ollama endpoint is localhost; explicit base_url decides.
             return not is_local_url(self.base_url or "http://localhost:11434")
         if self.kind == "openai_compat":
-            return not is_local_url(self.base_url)
+            # Classify with the SAME resolved URL the backend will call (the
+            # default is a LOCAL server) so a no-base_url provider isn't
+            # mislabeled cloud and then called at localhost.
+            return not is_local_url(self.base_url or _OPENAI_COMPAT_DEFAULT_URL)
         # openai / anthropic default to their cloud endpoints.
         return not is_local_url(self.base_url)
 
@@ -215,7 +224,7 @@ class ProviderRegistry:
             )
         if spec.kind == "openai_compat":
             return OpenAICompatBackend(
-                base_url=spec.base_url or "http://localhost:1234",
+                base_url=spec.base_url or _OPENAI_COMPAT_DEFAULT_URL,
                 model=spec.model or "",
                 api_key=spec.api_key,
                 timeout=spec.timeout,

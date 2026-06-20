@@ -19,6 +19,28 @@ from engines.provider_registry import (  # noqa: E402
 )
 
 
+class TestOpenAICompatLocality:
+    """openai_compat with no base_url defaults to a LOCAL server (LM Studio etc.,
+    localhost:1234), so it must be classified LOCAL — matching the URL the backend
+    actually calls — not cloud (which would over-redact on-device text and was
+    inconsistent: classified cloud, then called at localhost)."""
+
+    def test_no_base_url_is_local(self) -> None:
+        assert ProviderSpec(id="x", kind="openai_compat").is_cloud is False
+
+    def test_localhost_and_loopback_are_local(self) -> None:
+        assert ProviderSpec(id="x", kind="openai_compat", base_url="http://localhost:1234").is_cloud is False
+        assert ProviderSpec(id="x", kind="openai_compat", base_url="http://127.0.0.1:8080").is_cloud is False
+        assert ProviderSpec(id="x", kind="openai_compat", base_url="http://[::1]:1234").is_cloud is False
+
+    def test_lan_host_is_cloud(self) -> None:
+        # A non-loopback LAN host is off-device → cloud (redact; fail toward privacy).
+        assert ProviderSpec(id="x", kind="openai_compat", base_url="http://192.168.1.50:1234").is_cloud is True
+
+    def test_https_remote_is_cloud(self) -> None:
+        assert ProviderSpec(id="x", kind="openai_compat", base_url="https://api.example.com").is_cloud is True
+
+
 class TestIsLocalUrl:
     def test_localhost_variants_are_local(self):
         assert is_local_url("http://localhost:11434") is True
