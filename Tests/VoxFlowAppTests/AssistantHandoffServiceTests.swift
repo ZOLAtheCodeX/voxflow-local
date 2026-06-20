@@ -60,6 +60,49 @@ final class AssistantHandoffServiceTests: XCTestCase {
         }
     }
 
+    /// Output capture is bounded — a chatty command can't grow memory without limit.
+    func testStdoutIsBoundedToMaxBytes() async {
+        let service = AssistantHandoffService(
+            isEnabled: { true },
+            command: { "yes | head -n 100000" },   // ~200 KB
+            timeoutSeconds: 15,
+            maxOutputBytes: 4096)
+        let result = await service.run(transcript: "ignored")
+        guard case .success(let out) = result else { return XCTFail("expected success, got \(result)") }
+        XCTAssertLessThanOrEqual(out.count, 4096, "stdout capture must be bounded")
+        XCTAssertGreaterThan(out.count, 0)
+    }
+
+    /// A running handoff can be cancelled by the caller: the child process is
+    /// terminated and the result is a quiet .cancelled (not .timedOut).
+    func testCancellationTerminatesAndReturnsCancelled() async {
+        let service = AssistantHandoffService(
+            isEnabled: { true }, command: { "sleep 30" }, timeoutSeconds: 60)
+        let task = Task { await service.run(transcript: "x") }
+        try? await Task.sleep(nanoseconds: 400_000_000)   // let the process start
+        task.cancel()
+        let result = await task.value
+        guard case .failure(.cancelled) = result else {
+            return XCTFail("expected .cancelled, got \(result)")
+        }
+    }
+
+    /// Timeout escalates: a process that ignores SIGTERM is killed with SIGKILL
+    /// so the call still returns promptly instead of hanging.
+    func testTimeoutEscalatesToSIGKILL() async {
+        let service = AssistantHandoffService(
+            isEnabled: { true },
+            command: { "trap '' TERM; sleep 30" },   // ignores SIGTERM
+            timeoutSeconds: 1)
+        let start = Date()
+        let result = await service.run(transcript: "x")
+        let elapsed = Date().timeIntervalSince(start)
+        guard case .failure(.timedOut) = result else {
+            return XCTFail("expected .timedOut, got \(result)")
+        }
+        XCTAssertLessThan(elapsed, 10, "must escalate to SIGKILL, not hang on the SIGTERM-ignoring child")
+    }
+
     /// Pipe-buffer deadlock regression: a command whose stdout exceeds the OS
     /// pipe buffer (~64 KB) must not hang. The old code read stdout only AFTER
     /// the process exited, so a chatty CLI blocked on its write forever and the

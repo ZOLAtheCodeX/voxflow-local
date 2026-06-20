@@ -102,6 +102,9 @@ final class AppCoordinator: ObservableObject {
         isEnabled: { [weak self] in self?.state.assistantHandoffEnabled ?? false },
         command: { [weak self] in self?.state.assistantHandoffCommand ?? "" }
     )
+    /// In-flight handoff, so a new run (or a dismiss) cancels the previous one
+    /// instead of orphaning its child process.
+    private var handoffTask: Task<Void, Never>?
     private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService, audit: insertionAudit)
     private(set) lazy var benchmark: TranslationBenchmarkCoordinating = TranslationBenchmarkCoordinator(state: state, backendManager: backendManager, settings: settings)
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
@@ -1679,15 +1682,23 @@ final class AppCoordinator: ObservableObject {
     func confirmAssistantHandoff() {
         guard let payload = state.handoffPreview else { return }
         state.handoffPreview = nil
+        // Replace, don't orphan: cancel any in-flight handoff (the service
+        // terminates its child process on cancellation) before starting a new one.
+        handoffTask?.cancel()
         state.handoffInFlight = true
-        Task { [weak self] in
+        handoffTask = Task { [weak self] in
             guard let self else { return }
             let result = await self.assistantHandoff.run(transcript: payload)
+            // A cancelled/replaced run must not clobber the newer run's state.
+            if Task.isCancelled { return }
             self.state.handoffInFlight = false
             switch result {
             case .success(let output):
                 self.state.handoffResult = output
                 self.state.statusLine = "Assistant responded"
+            case .failure(.cancelled):
+                // User replaced/dismissed it — stay quiet.
+                break
             case .failure(let error):
                 self.state.statusLine = "Handoff failed: \(String(describing: error))"
             }
@@ -1695,6 +1706,10 @@ final class AppCoordinator: ObservableObject {
     }
 
     func dismissAssistantHandoff() {
+        // Cancel an in-flight handoff so its child process is terminated, not orphaned.
+        handoffTask?.cancel()
+        handoffTask = nil
+        state.handoffInFlight = false
         state.handoffPreview = nil
         state.handoffResult = nil
     }
