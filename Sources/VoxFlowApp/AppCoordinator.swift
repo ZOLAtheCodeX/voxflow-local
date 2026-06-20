@@ -940,8 +940,16 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// User/system cancellation, classified quietly (no error banner): a
+    /// structured-concurrency cancel OR a cancelled URLSession request (e.g. a
+    /// superseded backend/STT call surfacing as URLError.cancelled). Genuine
+    /// network failures are NOT cancellation and still surface.
+    nonisolated static func isUserCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
     private func handleCaptureError(_ error: Error) {
-        if error is CancellationError {
+        if Self.isUserCancellation(error) {
             log.info("Transcription pipeline canceled by user")
             return
         }
