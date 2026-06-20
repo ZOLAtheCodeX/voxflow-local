@@ -120,6 +120,33 @@ class TestConsentStoreBoundedUse:
         assert record.max_uses == 1
 
 
+class TestConsentStorePayloadBinding:
+    """A token must not be reusable to commit a DIFFERENT payload than the one
+    the user previewed/consented to. max_uses=2 stays (review runs light + polish
+    on the SAME text), but each use must match the consented text."""
+
+    def test_rejects_mismatched_payload_without_consuming(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "the consented text", "redacted", max_uses=2)
+        # A different payload is rejected...
+        assert store.resolve(record.token, "s", "cleanup", expected_text="a DIFFERENT text") is None
+        # ...and did NOT consume a use: the correct payload still resolves twice.
+        assert store.resolve(record.token, "s", "cleanup", expected_text="the consented text") is not None
+        assert store.resolve(record.token, "s", "cleanup", expected_text="the consented text") is not None
+        assert store.resolve(record.token, "s", "cleanup", expected_text="the consented text") is None
+
+    def test_matching_payload_allows_review_light_then_polish(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "T", "T-redacted", max_uses=2)
+        assert store.resolve(record.token, "s", "cleanup", expected_text="T") is not None  # light
+        assert store.resolve(record.token, "s", "cleanup", expected_text="T") is not None  # polish
+
+    def test_no_expected_text_is_backward_compatible(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "T", "T-r")
+        assert store.resolve(record.token, "s", "cleanup") is not None
+
+
 class TestConsentStoreThreadSafety:
     def test_concurrent_creates(self):
         store = ConsentStore()

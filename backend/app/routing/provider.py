@@ -211,7 +211,16 @@ class ProviderRouter:
         if not consent_token:
             raise HTTPException(status_code=400, detail="consent_token is required for private API mode")
 
-        record = self._consent_store.resolve(token=consent_token, session_id=session_id, operation=operation)
+        # Bind the consent to the payload: the request text must match the text
+        # the user previewed/consented to (same normalization as privacy_preview),
+        # so a token can't be reused for a different payload. Mismatch reads as an
+        # invalid token (and does not consume a use).
+        record = self._consent_store.resolve(
+            token=consent_token,
+            session_id=session_id,
+            operation=operation,
+            expected_text=normalize_whitespace(submitted_text),
+        )
         if not record:
             raise HTTPException(status_code=400, detail="Invalid or expired privacy consent token")
 

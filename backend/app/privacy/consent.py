@@ -2,8 +2,11 @@
 
 ConsentStore issues short-lived (30-minute default TTL) bounded-use tokens
 that authorize a single privacy-sensitive operation (e.g., cloud cleanup).
-The token binds (session_id, operation) and is consumed on N uses
-(N defaults to 1; cleanup grants 2 to allow preview + commit).
+The token binds (session_id, operation) — and, when `resolve` is given the
+request text, the consented payload too — and is consumed on N uses (N defaults
+to 1; cleanup grants 2 so the review flow can run light + polish on the SAME
+consented text). Payload binding prevents reusing a token to commit a different
+payload than the one previewed.
 
 AuditLogger emits structured JSON to the 'voxflow.audit' channel so audit
 events can be routed separately from operational logs.
@@ -53,13 +56,26 @@ class ConsentStore:
             self._records[token] = record
         return record
 
-    def resolve(self, token: str, session_id: str, operation: str) -> ConsentRecord | None:
+    def resolve(
+        self,
+        token: str,
+        session_id: str,
+        operation: str,
+        expected_text: str | None = None,
+    ) -> ConsentRecord | None:
         with self._lock:
             self._prune_locked()
             record = self._records.get(token)
             if not record:
                 return None
             if record.session_id != session_id or record.operation != operation:
+                return None
+            # Payload binding: when the caller supplies the request text, it must
+            # match the text the user actually consented to (the previewed
+            # original). This stops a token from being reused to commit a
+            # DIFFERENT payload. Checked BEFORE consuming so a mismatch never
+            # burns a use.
+            if expected_text is not None and expected_text != record.original_text:
                 return None
             record.use_count += 1
             if record.use_count >= record.max_uses:
