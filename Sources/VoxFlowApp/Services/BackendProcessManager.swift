@@ -35,6 +35,9 @@ protocol BackendProcessRunning: Sendable {
     func run(_ process: Process) throws
     func listeningPIDs(onPort port: Int) -> [pid_t]
     func terminate(_ pids: [pid_t], signal: Int32)
+    /// The full command line of a PID (for identity checks before terminating).
+    /// nil when the process is gone or cannot be inspected.
+    func commandLine(forPID pid: pid_t) -> String?
     func writePIDFile(_ pid: pid_t)
     func readPIDFile() -> pid_t?
     func removePIDFile()
@@ -79,6 +82,8 @@ struct SystemBackendProcessRunner: BackendProcessRunning {
         }
     }
 
+    func commandLine(forPID pid: pid_t) -> String? { BackendProcessManager.processCommandLine(pid) }
+
     func writePIDFile(_ pid: pid_t) { BackendProcessManager.writePIDFile(pid) }
     func readPIDFile() -> pid_t? { BackendProcessManager.readPIDFile() }
     func removePIDFile() { BackendProcessManager.removePIDFile() }
@@ -92,6 +97,7 @@ struct NoopBackendProcessRunner: BackendProcessRunning {
     func run(_ process: Process) throws {}
     func listeningPIDs(onPort port: Int) -> [pid_t] { [] }
     func terminate(_ pids: [pid_t], signal: Int32) {}
+    func commandLine(forPID pid: pid_t) -> String? { nil }
     func writePIDFile(_ pid: pid_t) {}
     func readPIDFile() -> pid_t? { nil }
     func removePIDFile() {}
@@ -141,11 +147,38 @@ final class BackendProcessManager: @unchecked Sendable {
 
     /// Terminate whatever is listening on the backend port (SIGTERM). Only
     /// called after a foreign verdict; never signals our own process.
+    /// True when a process command line identifies a VoxFlow backend — the
+    /// managed spawn (`python …/backend/app/server.py`) or a manually-run
+    /// `uvicorn server:app` (dev flow). Used to refuse terminating unrelated
+    /// processes that merely hold the backend port or a reused PID.
+    nonisolated static func isVoxFlowBackendCommand(_ command: String?) -> Bool {
+        guard let command, !command.isEmpty else { return false }
+        return command.contains("backend/app/server.py") || command.contains("server:app")
+    }
+
     func terminateForeignListenerAsync(port: Int = BackendProcessManager.defaultBackendPort) {
-        workQueue.async { [runner] in
+        workQueue.async { [runner, log] in
             let ownPid = ProcessInfo.processInfo.processIdentifier
-            let pids = runner.listeningPIDs(onPort: port).filter { $0 != ownPid }
-            runner.terminate(pids, signal: SIGTERM)
+            let candidates = runner.listeningPIDs(onPort: port).filter { $0 != ownPid }
+            // Identity gate: a foreign verdict means "a VoxFlow backend we don't
+            // own answered" — but the PID holding the port now could have changed
+            // (TOCTOU) or be unrelated, so confirm each by command line before
+            // SIGTERM. Unknown processes are refused and logged, never killed.
+            var confirmed: [pid_t] = []
+            var refused: [pid_t] = []
+            for pid in candidates {
+                if Self.isVoxFlowBackendCommand(runner.commandLine(forPID: pid)) {
+                    confirmed.append(pid)
+                } else {
+                    refused.append(pid)
+                }
+            }
+            if !refused.isEmpty {
+                log.warning("Refusing to terminate non-VoxFlow process(es) on port \(port): \(refused)")
+            }
+            if !confirmed.isEmpty {
+                runner.terminate(confirmed, signal: SIGTERM)
+            }
         }
     }
     private let workQueue = DispatchQueue(label: "local.voxflow.app.backend-process-manager")
@@ -667,11 +700,50 @@ final class BackendProcessManager: @unchecked Sendable {
 
     /// Kill any stale backend from a previous app session. Called from atexit/terminate handlers
     /// as a last-resort cleanup when the normal stop() path didn't run.
-    static func killStaleBackend() {
-        guard let pid = readPIDFile() else { return }
+    /// The full command line of a PID via `ps` (nil if gone/uninspectable).
+    /// Shared by the runner's `commandLine(forPID:)` and the static
+    /// `killStaleBackend` identity check.
+    static func processCommandLine(_ pid: pid_t) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/ps")
+        task.arguments = ["-p", "\(pid)", "-o", "command="]
+        let stdout = Pipe()
+        task.standardOutput = stdout
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return nil
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let cmd = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (cmd?.isEmpty == false) ? cmd : nil
+    }
+
+    /// Reap the backend recorded in the PID file (used by the idle-reap path and
+    /// the atexit fallback). Identity-gated: a PID can be REUSED by an unrelated
+    /// process after a crash, so confirm it is actually a VoxFlow backend by
+    /// command line before sending SIGTERM — otherwise just clear the stale file.
+    /// Dependencies are injected (defaults wire the real system) so the policy is
+    /// unit-testable without touching real processes. Static + synchronous so the
+    /// C-level atexit handler can call it.
+    static func killStaleBackend(
+        readPID: () -> pid_t? = { readPIDFile() },
+        command: (pid_t) -> String? = { processCommandLine($0) },
+        terminate: (pid_t) -> Void = { _ = kill($0, SIGTERM) },
+        removePID: () -> Void = { removePIDFile() }
+    ) {
+        guard let pid = readPID() else { return }
+        guard isVoxFlowBackendCommand(command(pid)) else {
+            log.warning("PID-file pid \(pid) is not a VoxFlow backend (gone or reused) — not killing; clearing stale PID file")
+            removePID()
+            return
+        }
         log.info("Killing stale backend (pid \(pid)) from PID file")
-        kill(pid, SIGTERM)
-        removePIDFile()
+        terminate(pid)
+        removePID()
     }
 
 }

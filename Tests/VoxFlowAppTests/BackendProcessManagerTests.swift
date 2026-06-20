@@ -10,11 +10,14 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
     var terminations: [(pids: [pid_t], signal: Int32)] = []
     var listeners: [pid_t] = []
     var queriedPorts: [Int] = []
+    var commandLines: [pid_t: String] = [:]
+    var queriedCommandLinePIDs: [pid_t] = []
     var pidFile: pid_t?
 
     func run(_ process: Process) throws { ranProcesses.append(process) }
     func listeningPIDs(onPort port: Int) -> [pid_t] { queriedPorts.append(port); return listeners }
     func terminate(_ pids: [pid_t], signal: Int32) { terminations.append((pids, signal)) }
+    func commandLine(forPID pid: pid_t) -> String? { queriedCommandLinePIDs.append(pid); return commandLines[pid] }
     func writePIDFile(_ pid: pid_t) { pidFile = pid }
     func readPIDFile() -> pid_t? { pidFile }
     func removePIDFile() { pidFile = nil }
@@ -45,6 +48,86 @@ final class BackendProcessManagerTests: XCTestCase {
         waitForTermination(fake)
 
         XCTAssertEqual(fake.queriedPorts, [9123])
+    }
+
+    private func waitUntil(_ predicate: @escaping () -> Bool, timeout: TimeInterval = 2) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !predicate() && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+    }
+
+    /// PID-file reuse: a PID recorded in the file can be reused by an unrelated
+    /// process after a crash. killStaleBackend must confirm identity before SIGTERM.
+    func testKillStaleBackendRefusesReusedNonVoxFlowPID() {
+        var killed: [pid_t] = []
+        var removedFile = false
+        BackendProcessManager.killStaleBackend(
+            readPID: { 7777 },
+            command: { _ in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" },
+            terminate: { killed.append($0) },
+            removePID: { removedFile = true })
+        XCTAssertEqual(killed, [], "a reused non-VoxFlow PID must never be killed")
+        XCTAssertTrue(removedFile, "the stale PID file should still be cleared")
+    }
+
+    func testKillStaleBackendTerminatesConfirmedBackend() {
+        var killed: [pid_t] = []
+        BackendProcessManager.killStaleBackend(
+            readPID: { 8888 },
+            command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
+            terminate: { killed.append($0) },
+            removePID: {})
+        XCTAssertEqual(killed, [8888])
+    }
+
+    func testKillStaleBackendNoPIDFileIsNoOp() {
+        var killed: [pid_t] = []
+        BackendProcessManager.killStaleBackend(
+            readPID: { nil }, command: { _ in nil },
+            terminate: { killed.append($0) }, removePID: {})
+        XCTAssertEqual(killed, [])
+    }
+
+    func testIsVoxFlowBackendCommand() {
+        // Managed spawn: python running the bundled/repo server.py
+        XCTAssertTrue(BackendProcessManager.isVoxFlowBackendCommand(
+            "/usr/bin/python3 /Applications/VoxFlow.app/Contents/Resources/backend/app/server.py"))
+        // Manually run (dev): uvicorn server:app
+        XCTAssertTrue(BackendProcessManager.isVoxFlowBackendCommand(
+            "/opt/homebrew/bin/uvicorn server:app --host 127.0.0.1 --port 8765"))
+        // Unrelated processes / unknown
+        XCTAssertFalse(BackendProcessManager.isVoxFlowBackendCommand(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+        XCTAssertFalse(BackendProcessManager.isVoxFlowBackendCommand(nil))
+        XCTAssertFalse(BackendProcessManager.isVoxFlowBackendCommand(""))
+    }
+
+    /// Identity check: a non-VoxFlow process holding the port must NOT be killed,
+    /// even after a foreign verdict triggers terminateForeignListenerAsync.
+    func testForeignListenerTerminationRefusesUnknownProcess() {
+        let fake = BackendProcessRunnerFake()
+        fake.listeners = [4242]
+        fake.commandLines = [4242: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+        let manager = BackendProcessManager(runner: fake)
+
+        manager.terminateForeignListenerAsync(port: 8765)
+        waitUntil { fake.queriedCommandLinePIDs.contains(4242) }
+
+        XCTAssertEqual(fake.terminations.flatMap(\.pids), [], "must not kill a non-VoxFlow process")
+    }
+
+    /// A confirmed VoxFlow backend on the port IS terminated.
+    func testForeignListenerTerminationKillsConfirmedBackend() {
+        let fake = BackendProcessRunnerFake()
+        fake.listeners = [5555]
+        fake.commandLines = [5555: "/usr/bin/python3 /x/backend/app/server.py"]
+        let manager = BackendProcessManager(runner: fake)
+
+        manager.terminateForeignListenerAsync(port: 8765)
+        waitUntil { !fake.terminations.isEmpty }
+
+        XCTAssertEqual(fake.terminations.flatMap(\.pids), [5555])
     }
 
     func testForeignListenerTerminationDefaultsTo8765WithoutOverride() {
