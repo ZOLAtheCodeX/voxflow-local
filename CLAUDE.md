@@ -128,8 +128,8 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 ## Testing
 
 ```bash
-swift test                                              # ~449 Swift tests
-./.venv/bin/python -m pytest backend/tests              # ~451 Python tests (+26 model/live-Ollama skipped)
+swift test                                              # ~544 Swift tests
+./.venv/bin/python -m pytest backend/tests              # ~477 Python tests (+26 model/live-Ollama skipped)
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
 VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py  # live Ollama acceptance
@@ -179,3 +179,8 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Add a new `SmartActionId` to `AppModels.swift` without adding the matching system-prompt entry in `backend/app/smart_actions.py` — the engine will fall back to a generic prompt template and the action label/tooltip will look fine while the LLM output stays generic.
 - Have the cockpit voice router fire actions while the session is `.recording` — voice keywords only resolve in `.reviewing`. Multi-word utterances must remain `.none` for Layer 0.
 - Bypass `BackendAPISmartActionAdapter` to call `/v1/smart_action` directly from views — go through `CockpitCoordinator.applyAction` so MRU + undo stay correct.
+- Insert dictation text without a final `try Task.checkCancellation()` first — every auto-insert path (raw, `autoInsertOrReview`, the snippet path) must gate on it so a cancelled/superseded capture never inserts stale text. Cancellation propagates as `CancellationError`/`URLError.cancelled` and is handled quietly by `handleCaptureError` (`AppCoordinator.isUserCancellation`); genuine backend/STT failures still fall back/insert.
+- SIGTERM a process by port or PID file without confirming identity — `terminateForeignListenerAsync` and `killStaleBackend` must gate on `BackendProcessManager.isVoxFlowBackendCommand(...)` (via the `BackendProcessRunning.commandLine` seam: managed `backend/app/server.py` or dev `uvicorn server:app`). Unknown/reused PIDs are refused + logged, never killed.
+- Lower cleanup consent `max_uses` below 2 (it is the light+polish review flow) or drop the payload binding — `ConsentStore.resolve(expected_text:)` must reject reusing a token for a different payload, checked BEFORE consuming a use.
+- Classify `openai_compat` locality from the raw `base_url` — use the resolved URL (`spec.base_url or _OPENAI_COMPAT_DEFAULT_URL`); a no-`base_url` provider is LOCAL (matches the localhost server the backend actually calls), so it isn't mislabeled cloud and over-redacted.
+- Guard `AudioGain.normalize` at the *speech* floor (0.02) — valid weak speech occurs below it (live empties at rms ~0.016); only skip boosting below `silenceFloor` (0.003). The boost applies to the decoder's float copy only; the stored PCM / audit RMS stay the TRUE input level.
