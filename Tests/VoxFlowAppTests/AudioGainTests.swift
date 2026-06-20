@@ -27,9 +27,11 @@ final class AudioGainTests: XCTestCase {
     }
 
     func testCapsGainForVeryQuietAudio() {
-        let veryQuiet = [Float](repeating: 0.001, count: 1000)  // desired ~100x
+        // 0.01 is above the silence floor (0.003) but wants 10x (20 dB) → capped
+        // at 18 dB. (Must stay above the floor, else it's skipped as dead-air.)
+        let veryQuiet = [Float](repeating: 0.01, count: 1000)
         let (_, db) = AudioGain.normalize(veryQuiet, targetRMS: 0.1, maxGainDB: 18)
-        XCTAssertEqual(db, 18, accuracy: 0.001)   // capped, not 40 dB
+        XCTAssertEqual(db, 18, accuracy: 0.001)   // capped, not 20 dB
     }
 
     func testSilenceIsNoOp() {
@@ -43,6 +45,24 @@ final class AudioGainTests: XCTestCase {
         let (out, db) = AudioGain.normalize([])
         XCTAssertEqual(db, 0)
         XCTAssertTrue(out.isEmpty)
+    }
+
+    func testDoesNotBoostTrueDeadAirBelowSilenceFloor() {
+        // Below the silence floor (0.003) it's genuine dead-air noise — do NOT
+        // amplify it toward speech level.
+        let deadAir = [Float](repeating: 0.001, count: 1000)   // rms 0.001 < 0.003
+        let (out, db) = AudioGain.normalize(deadAir)
+        XCTAssertEqual(db, 0, accuracy: 0.0001)
+        XCTAssertEqual(out, deadAir)
+    }
+
+    func testStillBoostsWeakSpeechAboveSilenceFloor() {
+        // Valid weak speech can sit BELOW the 0.02 speech floor (live empties were
+        // seen at rms 0.016). It must still boost — a speech-floor guard would
+        // re-break the empty-capture fix. Only true dead-air (< 0.003) is skipped.
+        let weakSpeech = [Float](repeating: 0.016, count: 1000)
+        let (_, db) = AudioGain.normalize(weakSpeech)
+        XCTAssertGreaterThan(db, 0)
     }
 
     func testClampsTransientsToUnitRange() {

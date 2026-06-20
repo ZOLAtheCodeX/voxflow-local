@@ -17,17 +17,23 @@ enum AudioGain {
     /// - Bounded by `maxGainDB` so it can't amplify room noise without limit.
     /// - Output clamped to [-1, 1] so transients can't overflow.
     /// - Returns the (possibly) scaled samples and the gain actually applied (dB).
+    /// `silenceFloor` (matches `CapturedAudio.silenceFloor`): below this RMS the
+    /// signal is genuine dead-air noise — leave it untouched rather than amplify
+    /// it toward speech level. We deliberately do NOT guard at the *speech* floor
+    /// (0.02): valid weak speech was observed below it (rms 0.016), so a
+    /// speech-floor guard would re-break the empty-capture fix.
     static func normalize(
         _ samples: [Float],
         targetRMS: Float = 0.1,
-        maxGainDB: Float = 18
+        maxGainDB: Float = 18,
+        silenceFloor: Float = 0.003
     ) -> (samples: [Float], appliedGainDB: Double) {
         guard !samples.isEmpty else { return (samples, 0) }
 
         var sumSquares = 0.0
         for s in samples { sumSquares += Double(s) * Double(s) }
         let rms = (sumSquares / Double(samples.count)).squareRoot()
-        guard rms > 0 else { return (samples, 0) }
+        guard rms >= Double(silenceFloor) else { return (samples, 0) }
 
         let desired = Double(targetRMS) / rms
         guard desired > 1.0 else { return (samples, 0) }   // already healthy
