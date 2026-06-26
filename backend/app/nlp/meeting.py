@@ -70,9 +70,6 @@ def infer_task_owners(
 
     results: list[dict[str, Any]] = []
 
-    segments = speaker_segments if speaker_segments is not None else infer_speaker_segments(transcript)
-    known_speakers = {segment["speaker"] for segment in segments if segment.get("speaker")}
-
     for item in action_items[:10]:
         cleaned_item = normalize_whitespace(item)
         owner = "Unassigned"

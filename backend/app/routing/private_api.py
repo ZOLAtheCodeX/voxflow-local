@@ -15,9 +15,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any
-from urllib import error as urlerror
 from urllib import parse as urlparse
-from urllib import request as urlrequest
 
 from fastapi import HTTPException
 

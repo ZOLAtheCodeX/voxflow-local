@@ -26,6 +26,12 @@ from .provider_registry import ProviderSpec
 
 logger = logging.getLogger("voxflow")
 
+# Maximal digit run, hoisted so the guardrail reuses one compiled pattern.
+# (Python's re module already caches compiled patterns, so this is a clarity
+# change more than a perf one — it makes the digit-preservation invariant a
+# named module constant rather than an inline literal.)
+_DIGIT_RUN_RE = re.compile(r"\d+")
+
 
 @dataclass(frozen=True)
 class PolishOutcome:
@@ -234,7 +240,7 @@ class PolishEngine:
         # passes; words->digits ("five hundred" -> "500") adds digits and
         # loses nothing, so it never trips. Checked before the short-input
         # early exit below — digit loss in a 3-word utterance still counts.
-        for digit_run in re.findall(r"\d+", original):
+        for digit_run in _DIGIT_RUN_RE.findall(original):
             if digit_run not in candidate:
                 return "guardrail_digits"
 

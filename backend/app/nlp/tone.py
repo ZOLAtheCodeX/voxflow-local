@@ -15,17 +15,23 @@ from text_cleanup_rules import (
 
 from .cleanup import normalize_whitespace
 
+# Concatenate the rule lists once at import time. The patterns are already
+# pre-compiled in text_cleanup_rules; the only per-call cost was allocating a
+# fresh `list + list` on every tone application, so hoist that out.
+_CONCISE_RULES = HEDGING_PHRASES + SOFTENERS
+_FORMAL_RULES = CONTRACTIONS + CASUAL_INTERJECTIONS
+
 
 def _apply_concise_tone(text: str) -> str:
     result = text
-    for pattern, replacement in HEDGING_PHRASES + SOFTENERS:
+    for pattern, replacement in _CONCISE_RULES:
         result = pattern.sub(replacement, result)
     return normalize_whitespace(result)
 
 
 def _apply_formal_tone(text: str) -> str:
     result = text
-    for pattern, replacement in CONTRACTIONS + CASUAL_INTERJECTIONS:
+    for pattern, replacement in _FORMAL_RULES:
         result = pattern.sub(replacement, result)
     result = normalize_whitespace(result)
     if result and result[-1] not in ".!?":
