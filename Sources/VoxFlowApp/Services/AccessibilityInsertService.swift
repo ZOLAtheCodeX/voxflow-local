@@ -16,6 +16,10 @@ protocol TextInserting {
 final class AccessibilityInsertService: TextInserting {
     private let systemWide = AXUIElementCreateSystemWide()
 
+    /// What we last inserted, for boundary-aware spacing when AX can't read the
+    /// field (Electron/web/terminals). Overwritten on every successful insert.
+    private var priorInsertion: SmartSpacing.PriorInsertion?
+
     func focusedTargetSnapshot() -> FocusTargetSnapshot {
         guard let focusedElement = copyFocusedElement() else {
             return .unavailable
@@ -68,8 +72,15 @@ final class AccessibilityInsertService: TextInserting {
 
     func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
         // R5.0: boundary-aware spacing — successive dictations used to land
-        // back-to-back ("test.I've tested").
-        let text = SmartSpacing.adjusted(text, precedingCharacter: precedingCharacter())
+        // back-to-back ("test.I've tested"). The AX read returns nil in
+        // Electron/web/terminals (the paste-fallback apps), so fall back to the
+        // trailing char of our own last insertion into the same target.
+        let preceding = SmartSpacing.effectivePrecedingCharacter(
+            axPreceding: precedingCharacter(),
+            prior: priorInsertion,
+            currentTargetPid: targetApp?.processIdentifier
+        )
+        let text = SmartSpacing.adjusted(text, precedingCharacter: preceding)
         // No ``?? NSWorkspace.shared.frontmostApplication`` fallback here —
         // callers must commit to a target. The frozen snapshot is the
         // source of truth for "where the user was typing"; resolving
@@ -78,14 +89,26 @@ final class AccessibilityInsertService: TextInserting {
         // above keeps the legacy "use frontmost" behaviour available, but
         // makes the choice explicit at the call site.
         if insertDirectly(text: text) {
+            recordPriorInsertion(text, targetApp: targetApp)
             return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
         }
 
         if await simulatePaste(text: text, targetApp: targetApp) {
+            recordPriorInsertion(text, targetApp: targetApp)
             return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
         }
 
         return InsertResult(method: .failed, success: false, fallbackUsed: true, errorCode: "INSERT_FAILED")
+    }
+
+    /// Remember what we just inserted so the next insertion into the same target
+    /// can space correctly even when AX can't read the field. Recorded only on a
+    /// successful insert — a failed attempt didn't change the field.
+    private func recordPriorInsertion(_ insertedText: String, targetApp: NSRunningApplication?) {
+        priorInsertion = SmartSpacing.PriorInsertion(
+            targetPid: targetApp?.processIdentifier,
+            trailingCharacter: insertedText.last
+        )
     }
 
     func triggerUndo() -> Bool {
