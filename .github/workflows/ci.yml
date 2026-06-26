@@ -33,6 +33,21 @@ jobs:
       - name: Test
         run: swift test
 
+  lint:
+    name: Ruff (non-blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # Non-blocking for now: surfaces real dead-code / undefined-name
+      # regressions on every PR without failing the build. Promote to a hard
+      # gate (drop continue-on-error) once the tree stays clean for a few PRs.
+      - name: Ruff
+        continue-on-error: true
+        uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
+        with:
+          args: "check backend/app --output-format=github"
+
   python:
     name: Python tests
     runs-on: macos-26

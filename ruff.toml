@@ -1,0 +1,19 @@
+# Ruff config for the VoxFlow backend (Python 3.11+).
+# Scope: backend/app — the application code. Tests and scripts are not linted
+# yet (they have benign import-hygiene noise); fold them in once this pass is
+# clean and promoted to a hard gate.
+#
+# Rule set is deliberately conservative for a first, NON-BLOCKING pass:
+#   F  (pyflakes)    — real dead code, unused imports, undefined names
+#   E/W (pycodestyle) — basic style errors/warnings
+# isort (I) is intentionally left out for now: enabling it would reorder
+# imports across ~8 files (pure churn unrelated to any behavior). Add "I" and
+# run `ruff check --fix` as its own dedicated commit when ready.
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W"]
+# E501 (line too long) is noisy on an existing codebase; the formatter, not the
+# linter, should own wrapping.
+ignore = ["E501"]
