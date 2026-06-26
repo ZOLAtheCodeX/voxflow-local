@@ -630,7 +630,22 @@ final class AppCoordinator: ObservableObject {
         privacy.clearPendingOperation()
 
         do {
-            try audioCapture.startCapture()
+            // Gate the "speak now" cue on the FIRST real audio buffer rather
+            // than on engine.start() returning. The engine takes ~150 ms to
+            // deliver its first buffer; playing the cue immediately told the
+            // user to speak before the mic was live, clipping the front of
+            // every utterance (and emptying short ones). The mic is still live
+            // ONLY during capture — privacy posture is unchanged.
+            var liveCue: (@Sendable () -> Void)?
+            if !commandLane {
+                liveCue = { [weak self] in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.state.sessionState == .recording else { return }
+                        self.cueSoundService.playStartCue()
+                    }
+                }
+            }
+            try audioCapture.startCapture(onCaptureLive: liveCue)
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
@@ -644,9 +659,6 @@ final class AppCoordinator: ObservableObject {
                     self.log.warning("Capture timeout reached (\(Self.maxCaptureDuration)s) — auto-stopping")
                     await self.finishCaptureAndTranscribe(commandLane: commandLane)
                 }
-            }
-            if !commandLane {
-                cueSoundService.playStartCue()
             }
         } catch {
             state.sessionState = .error

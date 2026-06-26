@@ -100,6 +100,10 @@ final class AudioCaptureService: AudioCapturing {
         // because the tap callback runs on the audio thread.
         var captureStartedAt: ContinuousClock.Instant?
         var firstBufferLatencyMs: Int?
+        // Fired once when the first real buffer lands, so the caller can gate the
+        // "mic is live, speak now" cue on actual hardware readiness. Held under
+        // the lock because it's set on the main thread and read on the audio thread.
+        var onCaptureLive: (@Sendable () -> Void)?
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -143,13 +147,14 @@ final class AudioCaptureService: AudioCapturing {
         state.withLock { $0.bufferLimitReached }
     }
 
-    func startCapture() throws {
+    func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws {
         deviceChangedDuringCapture = false
         state.withLock {
             $0.pcmBuffer.removeAll(keepingCapacity: true)
             $0.bufferLimitReached = false
             $0.captureStartedAt = nil
             $0.firstBufferLatencyMs = nil
+            $0.onCaptureLive = onCaptureLive
         }
 
         let inputNode = engine.inputNode
@@ -228,16 +233,22 @@ final class AudioCaptureService: AudioCapturing {
 
             let chunk = int16Samples.withUnsafeBufferPointer { Data(buffer: $0) }
 
-            self.state.withLock { state in
-                if state.firstBufferLatencyMs == nil, let start = state.captureStartedAt {
-                    state.firstBufferLatencyMs = start.elapsedMilliseconds()
+            // Detect the first buffer under the lock, capture the live handler,
+            // then invoke it OUTSIDE the lock — never run caller code while
+            // holding the audio-thread lock.
+            let liveCallback: (@Sendable () -> Void)? = self.state.withLock { state in
+                let isFirstBuffer = state.firstBufferLatencyMs == nil
+                if isFirstBuffer {
+                    state.firstBufferLatencyMs = state.captureStartedAt?.elapsedMilliseconds() ?? 0
                 }
-                guard state.pcmBuffer.count < AudioCaptureService.maxBufferBytes else {
+                if state.pcmBuffer.count < AudioCaptureService.maxBufferBytes {
+                    state.pcmBuffer.append(chunk)
+                } else {
                     state.bufferLimitReached = true
-                    return
                 }
-                state.pcmBuffer.append(chunk)
+                return isFirstBuffer ? state.onCaptureLive : nil
             }
+            liveCallback?()
         }
 
         engine.prepare()

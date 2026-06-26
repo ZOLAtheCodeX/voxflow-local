@@ -7,7 +7,7 @@ private final class FakeCapture: AudioCapturing {
     var failNextStart = false
     var nextAudio: CapturedAudio
     init(nextAudio: CapturedAudio) { self.nextAudio = nextAudio }
-    func startCapture() throws {
+    func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws {
         startCount += 1
         if failNextStart { failNextStart = false; throw AudioCaptureError.captureNotRunning }
     }
