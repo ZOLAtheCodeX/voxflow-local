@@ -1,7 +1,9 @@
 # Ruff config for the VoxFlow backend (Python 3.11+).
 # Scope: backend/app — the application code. Tests and scripts are not linted
 # yet (they have benign import-hygiene noise); fold them in once this pass is
-# clean and promoted to a hard gate.
+# clean and promoted to a hard gate. extend-exclude ENFORCES that scope for
+# plain `ruff check` and editor ruff-LSP runs, which otherwise lint the whole
+# repo and surface noise the CI job (scoped by path argument) never shows.
 #
 # Rule set is deliberately conservative for a first, NON-BLOCKING pass:
 #   F  (pyflakes)    — real dead code, unused imports, undefined names
@@ -11,6 +13,7 @@
 # run `ruff check --fix` as its own dedicated commit when ready.
 target-version = "py311"
 line-length = 100
+extend-exclude = ["backend/tests", "scripts"]
 
 [lint]
 select = ["E", "F", "W"]

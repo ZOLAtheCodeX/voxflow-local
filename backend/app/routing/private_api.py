@@ -183,7 +183,7 @@ class PrivateAPIClient:
         action_items = coerce_string_list(parsed.get("action_items"), 6)
         follow_ups = coerce_string_list(parsed.get("follow_ups"), 4)
         speaker_segments = coerce_speaker_segments(parsed.get("speaker_segments"), transcript)
-        task_owners = coerce_task_owners(parsed.get("task_owners"), action_items, transcript, speaker_segments)
+        task_owners = coerce_task_owners(parsed.get("task_owners"), action_items)
 
         markdown_export = render_meeting_markdown_export(
             summary=normalize_whitespace(str(parsed.get("summary", ""))),

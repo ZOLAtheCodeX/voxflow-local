@@ -60,11 +60,10 @@ def infer_speaker_segments(transcript: str) -> list[dict[str, Any]]:
     return [{"speaker": "Speaker 1", "text": fallback_excerpt, "utterance_count": 1}]
 
 
-def infer_task_owners(
-    action_items: list[str],
-    transcript: str,
-    speaker_segments: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
+def infer_task_owners(action_items: list[str]) -> list[dict[str, Any]]:
+    # Owner inference reads only the action-item text itself (the
+    # "Name will/to/should ..." patterns); it never consulted the transcript
+    # or speaker segments, so it takes neither.
     if not action_items:
         return []
 
@@ -121,11 +120,9 @@ def coerce_speaker_segments(value: Any, transcript: str) -> list[dict[str, Any]]
 def coerce_task_owners(
     value: Any,
     action_items: list[str],
-    transcript: str,
-    speaker_segments: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(value, list):
-        return infer_task_owners(action_items, transcript, speaker_segments)
+        return infer_task_owners(action_items)
 
     rows: list[dict[str, Any]] = []
     for entry in value[:10]:
@@ -143,7 +140,7 @@ def coerce_task_owners(
         confidence = max(0.0, min(1.0, confidence))
         rows.append({"task": task, "owner": owner or "Unassigned", "confidence": round(confidence, 2)})
 
-    return rows or infer_task_owners(action_items, transcript, speaker_segments)
+    return rows or infer_task_owners(action_items)
 
 
 def render_meeting_markdown_export(
@@ -261,7 +258,7 @@ def build_meeting_summary(transcript: str, tone: str) -> dict[str, Any]:
         follow_ups = action_items[:1]
 
     speaker_segments = infer_speaker_segments(transcript)
-    task_owners = infer_task_owners(action_items, transcript, speaker_segments)
+    task_owners = infer_task_owners(action_items)
     markdown_export = render_meeting_markdown_export(
         summary=summary,
         decisions=decisions[:5],
