@@ -6,6 +6,12 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-07-01
+
+A stability and hardening release: three weeks of daily-driver use, an
+adversarial multi-agent review, and field diagnostics via the JSONL audit
+receipts drove ~55 commits of fixes. No new user-facing surfaces.
+
 ### Changed
 - Dictation polish now runs through the local Gemma LLM (via Ollama) on the
   default WhisperKit path instead of the deterministic regex pipeline. The
@@ -13,21 +19,67 @@ All notable changes to VoxFlow Local are documented here. The format follows
   or unreachable, so dictation never hard-depends on Ollama. Auto-insert
   resolves only the mode it actually inserts (one backend call instead of two),
   so text lands faster.
-- Chrome's default per-app profile is now Gemma polish (was raw insertion), so
-  dictation into the browser is cleaned up out of the box. Slack and Xcode keep
-  their raw defaults.
-- The backend now stays warm based on your global insert behavior rather than
-  the app you happen to be focused on, so the local model is ready regardless of
+- Chrome's default per-app profile is now light cleanup (was raw insertion):
+  rules-based tidying with no model load. Full Gemma polish stays opt-in per
+  app — keeping the ~6 GB polish model resident starves live capture on 16 GB
+  machines when dictating into the browser.
+- The backend stays warm based on your global insert behavior rather than the
+  app you happen to be focused on, so the local model is ready regardless of
   focus.
+- Ollama `keep_alive` default is now 15 minutes (was 24 h): the polish model
+  stays warm through an active session and frees ~6 GB between sessions.
+  Override with `VOXFLOW_OLLAMA_KEEP_ALIVE=24h` on RAM-rich machines.
+- Distribution is now explicitly fork-and-build: the DMG/notarization path was
+  removed, and ad-hoc signing requires a loud `VOXFLOW_ALLOW_ADHOC=1` opt-in
+  (a free-tier Apple Development certificate remains the recommended way to
+  keep the Accessibility grant across rebuilds).
+
+### Added
+- Capture stall watchdog: if the audio engine starts but the input device
+  never delivers a buffer, the capture stops within 3 s with a clear status
+  line (and a `capture_stalled` audit receipt) instead of hanging silently.
+- Audit receipts now record full provenance (which provider and model actually
+  served each insertion, in auto-insert and review mode) plus capture
+  diagnostics: first-buffer latency, applied gain, idle gap, leading silence.
+- Weak-microphone feedback: empty captures with sub-speech input level show
+  "very low mic level — check your input" instead of a generic "no speech
+  detected".
+- CI: non-blocking Ruff lint job, Dependabot for GitHub Actions, and all
+  workflow actions pinned to commit SHAs.
 
 ### Fixed
-- The local model could appear "not connected" after launching while focused on
-  a raw-profile app and then switching to a normal one — the backend now warms
-  independently of focus.
-- Empty captures with weak microphone input now show a "very low mic level —
-  check your input" hint instead of a generic "no speech detected"; every
-  transcript rejection records the audio level to the JSONL audit log, and a
-  fully silent capture is logged where before it left no trace.
+- Front-clipped and empty captures (the dominant field failure): the "speak
+  now" cue is now gated on the first real audio buffer instead of engine
+  start (~150 ms early), in both quick dictation and the cockpit; weak audio
+  gets decoder-side gain normalization and a one-shot decode retry; a
+  generation guard keeps stale audio-tap callbacks from leaking old audio or
+  firing the cue for a finished capture.
+- Successive dictations pasted into AX-opaque apps (Electron, web areas,
+  terminals) ran together without spaces; the new boundary fallback was then
+  hardened so it cannot misfire: cursor-at-field-start is honored as
+  authoritative, and the remembered boundary is invalidated by any real
+  keystroke or click, by undo, by a 60 s age bound, and under secure input.
+- A cancelled or superseded dictation can no longer insert stale text: every
+  auto-insert path gates on a final cancellation check, and cancellation is
+  handled quietly instead of surfacing a backend-failure banner.
+- Backend lifecycle: spawns at cold launch (not after the WhisperKit load),
+  honors a custom `VOXFLOW_BACKEND_URL` end-to-end including stale-listener
+  cleanup, never SIGTERMs a process on the port or in the PID file without
+  confirming it is actually a VoxFlow backend, and no longer churns readiness
+  on no-op reconfigurations.
+- Assistant handoff (experimental): lifecycle hardening (cancel, escalate,
+  bound, replace) and a pipe-buffer deadlock fix for large transcripts.
+- Smart actions surface a provider-unavailable error instead of silently
+  swallowing it; tone changes degrade to local cleanup when the backend
+  fails.
+
+### Security
+- Cloud STT fallback is off by default (raw audio cannot be PII-redacted);
+  privacy documentation narrowed to exactly what is enforced.
+- Cleanup consent tokens are bound to the exact consented payload, not just
+  the session and operation.
+- Email-redaction regex hardened against quadratic-blowup (ReDoS) inputs.
+- Dependency bump: sentencepiece 0.2.0 → 0.2.1 (GHSA-38vq-g6vr-w8wf).
 
 ## [0.1.0] — 2026-06-14
 
