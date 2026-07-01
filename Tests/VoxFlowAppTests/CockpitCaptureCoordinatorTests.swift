@@ -1,3 +1,4 @@
+import os
 import XCTest
 @testable import VoxFlowApp
 
@@ -6,9 +7,16 @@ private final class FakeCapture: AudioCapturing {
     var stopCount = 0
     var failNextStart = false
     var nextAudio: CapturedAudio
+    /// Whether each startCapture call carried a live callback — pins which
+    /// starts gate on the first buffer (the initial ⌘R start) and which
+    /// deliberately don't (the every-5s segmentation restarts).
+    var liveCallbackPresence: [Bool] = []
+    var lastLiveCallback: (@Sendable () -> Void)?
     init(nextAudio: CapturedAudio) { self.nextAudio = nextAudio }
     func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws {
         startCount += 1
+        liveCallbackPresence.append(onCaptureLive != nil)
+        lastLiveCallback = onCaptureLive
         if failNextStart { failNextStart = false; throw AudioCaptureError.captureNotRunning }
     }
     func stopCapture() throws -> CapturedAudio { stopCount += 1; return nextAudio }
@@ -39,6 +47,37 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         // Set the HIGH byte of each little-endian Int16 → 0x4000 = 16384 → ~0.5 amplitude, robustly non-silent.
         if !silent { for i in stride(from: 1, to: data.count, by: 2) { data[i] = 0x40 } }
         return CapturedAudio(pcm: data, sampleRate: 16000)
+    }
+
+    // MARK: - First-buffer gating (front-clip fix parity with the palette path)
+
+    func test_startRecording_gates_live_hook_on_first_buffer() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let fired = OSAllocatedUnfairLock(initialState: false)
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: FakeTranscriber(), session: session,
+            onCaptureLive: { fired.withLock { $0 = true } })
+        coord.startRecording(targetApp: nil)
+        XCTAssertEqual(capture.liveCallbackPresence, [true], "the ⌘R start must gate on the first buffer")
+        XCTAssertFalse(fired.withLock { $0 }, "hook must wait for the first buffer, not engine start")
+        capture.lastLiveCallback?()
+        XCTAssertTrue(fired.withLock { $0 })
+        await coord.stopRecording()
+    }
+
+    func test_flush_restart_does_not_reinstall_live_hook() async {
+        // The 5 s segmentation restarts would otherwise re-fire the cue on
+        // every flush boundary — a ding per chunk.
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: FakeTranscriber(), session: session,
+            onCaptureLive: {})
+        coord.startRecording(targetApp: nil)
+        await coord.flushNow(force: true)
+        XCTAssertEqual(capture.liveCallbackPresence, [true, false])
+        await coord.stopRecording()
     }
 
     func test_flushNow_appends_transcribed_text_and_restarts_capture() async {

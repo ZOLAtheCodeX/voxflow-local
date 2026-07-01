@@ -16,6 +16,14 @@ final class CockpitCaptureCoordinator {
     private let audit: InsertionAuditLog?
     private let flushIntervalNs: UInt64
     private let minChunkBytes: Int
+    /// Fired on the audio thread when the ⌘R start's FIRST buffer arrives —
+    /// the same first-buffer gating as the palette path, so the "mic is live"
+    /// signal doesn't lead the hardware by ~150 ms and front-clip the first
+    /// word of the session. Only the initial start gates: the every-5s
+    /// segmentation restarts in `flushNow` deliberately pass no callback (a
+    /// cue per flush boundary would ding through the whole session; the
+    /// ~150 ms restart gap is inherent to stop→restart segmentation).
+    private let onCaptureLive: (@Sendable () -> Void)?
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCaptureCoordinator")
     private var loopTask: Task<Void, Never>?
     private var isFlushing = false
@@ -29,7 +37,8 @@ final class CockpitCaptureCoordinator {
         flushIntervalNs: UInt64 = 5_000_000_000,
         // 0.3 s at 16 kHz mono PCM16 — aligned with the quick-dictation
         // minimum (TranscriptGate.minAudioSeconds); was 8_000 (0.25 s).
-        minChunkBytes: Int = 9_600
+        minChunkBytes: Int = 9_600,
+        onCaptureLive: (@Sendable () -> Void)? = nil
     ) {
         self.capture = capture
         self.transcriber = transcriber
@@ -38,12 +47,13 @@ final class CockpitCaptureCoordinator {
         self.audit = audit
         self.flushIntervalNs = flushIntervalNs
         self.minChunkBytes = minChunkBytes
+        self.onCaptureLive = onCaptureLive
     }
 
     func startRecording(targetApp: FocusTargetSnapshot?) {
         guard case .idle = session.state else { return }
         session.start(targetApp: targetApp)
-        do { try capture.startCapture() } catch {
+        do { try capture.startCapture(onCaptureLive: onCaptureLive) } catch {
             log.error("startCapture failed: \(error.localizedDescription)")
             session.reset()
             return
