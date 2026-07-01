@@ -32,56 +32,98 @@ final class SmartSpacingTests: XCTestCase {
     // The AX read returns nil in Electron/web/terminals — the same apps that
     // fall back to paste — so smart-spacing silently no-opped there and
     // dictations ran together. The fallback uses our OWN last insertion into
-    // the same target.
+    // the same target, but ONLY when AX genuinely can't see the field
+    // (.unreadable) and the record is fresh.
+
+    private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+
+    private func prior(pid: Int32?, trailing: Character?, age: TimeInterval = 0) -> SmartSpacing.PriorInsertion {
+        SmartSpacing.PriorInsertion(targetPid: pid, trailingCharacter: trailing, recordedAt: now.addingTimeInterval(-age))
+    }
 
     func testAXReadWinsOverPriorInsertion() {
-        let prior = SmartSpacing.PriorInsertion(targetPid: 42, trailingCharacter: "x")
         // When AX can read the field, that is the source of truth — prior is ignored.
         XCTAssertEqual(
-            SmartSpacing.effectivePrecedingCharacter(axPreceding: ".", prior: prior, currentTargetPid: 42),
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .character("."), prior: prior(pid: 42, trailing: "x"), currentTargetPid: 42, now: now),
             "."
         )
     }
 
+    func testFieldStartNeverFallsBackToPriorInsertion() {
+        // AX READ SUCCEEDED and said "cursor at position 0" — an empty or fresh
+        // field. That is an authoritative "no preceding character": falling back
+        // to the prior insertion here put a stray leading space at the start of
+        // new documents in fully AX-readable apps.
+        XCTAssertNil(
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .fieldStart, prior: prior(pid: 42, trailing: "."), currentTargetPid: 42, now: now)
+        )
+    }
+
     func testFallsBackToPriorInsertionTrailingCharForSameTarget() {
-        let prior = SmartSpacing.PriorInsertion(targetPid: 42, trailingCharacter: ".")
-        // AX unreadable (nil) but we last inserted into pid 42 ending in "." —
+        // AX unreadable but we last inserted into pid 42 ending in "." —
         // use it so the next dictation gets a leading space.
         XCTAssertEqual(
-            SmartSpacing.effectivePrecedingCharacter(axPreceding: nil, prior: prior, currentTargetPid: 42),
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .unreadable, prior: prior(pid: 42, trailing: "."), currentTargetPid: 42, now: now),
+            "."
+        )
+    }
+
+    func testStalePriorInsertionIsIgnored() {
+        // The record describes a field we cannot observe: the user may have
+        // sent the message, cleared the field, or moved on. Beyond the max age
+        // it is more likely wrong than right — drop it.
+        XCTAssertNil(
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .unreadable,
+                prior: prior(pid: 42, trailing: ".", age: SmartSpacing.priorInsertionMaxAge + 1),
+                currentTargetPid: 42,
+                now: now)
+        )
+    }
+
+    func testPriorInsertionJustInsideMaxAgeStillUsed() {
+        XCTAssertEqual(
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .unreadable,
+                prior: prior(pid: 42, trailing: ".", age: SmartSpacing.priorInsertionMaxAge - 1),
+                currentTargetPid: 42,
+                now: now),
             "."
         )
     }
 
     func testDoesNotReusePriorInsertionAcrossDifferentTargets() {
-        let prior = SmartSpacing.PriorInsertion(targetPid: 42, trailingCharacter: ".")
         // Different focused app — we know nothing about THIS field, so no guess.
         XCTAssertNil(
-            SmartSpacing.effectivePrecedingCharacter(axPreceding: nil, prior: prior, currentTargetPid: 99)
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .unreadable, prior: prior(pid: 42, trailing: "."), currentTargetPid: 99, now: now)
         )
     }
 
     func testNoFallbackWithoutPriorInsertion() {
         XCTAssertNil(
-            SmartSpacing.effectivePrecedingCharacter(axPreceding: nil, prior: nil, currentTargetPid: 42)
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .unreadable, prior: nil, currentTargetPid: 42, now: now)
         )
     }
 
     func testNoFallbackWhenTargetPidUnknown() {
         // Prior insertion with an unknown (nil) pid can't be confirmed as the
         // same target, so we must not reuse it.
-        let prior = SmartSpacing.PriorInsertion(targetPid: nil, trailingCharacter: ".")
         XCTAssertNil(
-            SmartSpacing.effectivePrecedingCharacter(axPreceding: nil, prior: prior, currentTargetPid: 42)
+            SmartSpacing.effectivePrecedingCharacter(
+                axRead: .unreadable, prior: prior(pid: nil, trailing: "."), currentTargetPid: 42, now: now)
         )
     }
 
     func testFallbackThenAdjustedAddsSpaceInUnreadableApp() {
-        // End-to-end of the bug: AX nil, prior insertion ended in "." into the
-        // same target → the next insertion ("I've tested") gets its space.
-        let prior = SmartSpacing.PriorInsertion(targetPid: 7, trailingCharacter: ".")
+        // End-to-end of the bug: AX unreadable, prior insertion ended in "."
+        // into the same target → the next insertion ("I've tested") gets its space.
         let preceding = SmartSpacing.effectivePrecedingCharacter(
-            axPreceding: nil, prior: prior, currentTargetPid: 7)
+            axRead: .unreadable, prior: prior(pid: 7, trailing: "."), currentTargetPid: 7, now: now)
         XCTAssertEqual(SmartSpacing.adjusted("I've tested", precedingCharacter: preceding), " I've tested")
     }
 }
