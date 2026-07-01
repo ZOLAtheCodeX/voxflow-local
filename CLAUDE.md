@@ -128,7 +128,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 ## Testing
 
 ```bash
-swift test                                              # ~544 Swift tests
+swift test                                              # ~562 Swift tests
 ./.venv/bin/python -m pytest backend/tests              # ~477 Python tests (+26 model/live-Ollama skipped)
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
@@ -184,3 +184,5 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Lower cleanup consent `max_uses` below 2 (it is the light+polish review flow) or drop the payload binding — `ConsentStore.resolve(expected_text:)` must reject reusing a token for a different payload, checked BEFORE consuming a use.
 - Classify `openai_compat` locality from the raw `base_url` — use the resolved URL (`spec.base_url or _OPENAI_COMPAT_DEFAULT_URL`); a no-`base_url` provider is LOCAL (matches the localhost server the backend actually calls), so it isn't mislabeled cloud and over-redacted.
 - Guard `AudioGain.normalize` at the *speech* floor (0.02) — valid weak speech occurs below it (live empties at rms ~0.016); only skip boosting below `silenceFloor` (0.003). The boost applies to the decoder's float copy only; the stored PCM / audit RMS stay the TRUE input level.
+- Treat AX cursor-at-position-0 as unreadable — `SmartSpacing.AXPrecedingRead.fieldStart` is an authoritative "no preceding character"; ONLY `.unreadable` may consult the prior-insertion fallback. The record must stay invalidation-bound: cleared by real user key/mouse events (VoxFlow's own synthetic events are source-tagged and ignored), by `triggerUndo()`, by the 60 s age bound, and never recorded after a paste under secure event input.
+- Bypass the capture generation guard in the audio tap — `AudioCaptureService.ingest` drops stale-generation callbacks wholesale (no append, no latency record, no live cue); every stop/config-change path must bump the generation AND clear `onCaptureLive`. The start cue is gated on the first delivered buffer in BOTH capture surfaces (palette and cockpit ⌘R); cockpit flush restarts deliberately pass no callback.
