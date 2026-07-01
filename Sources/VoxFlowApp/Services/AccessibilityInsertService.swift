@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import Foundation
 
 /// Seam for text insertion so unit tests can NEVER reach the real
@@ -17,8 +18,40 @@ final class AccessibilityInsertService: TextInserting {
     private let systemWide = AXUIElementCreateSystemWide()
 
     /// What we last inserted, for boundary-aware spacing when AX can't read the
-    /// field (Electron/web/terminals). Overwritten on every successful insert.
+    /// field (Electron/web/terminals). Overwritten on every successful insert;
+    /// cleared by any real user key/mouse event (see the invalidation monitor),
+    /// by ``triggerUndo()``, and age-bounded by
+    /// ``SmartSpacing/priorInsertionMaxAge``.
     private var priorInsertion: SmartSpacing.PriorInsertion?
+
+    /// Global key/mouse monitor that invalidates ``priorInsertion``: the record
+    /// describes a field we cannot observe, so ANY real user input (Enter sent
+    /// the message, a click moved the cursor, typing edited the text) makes it
+    /// untrustworthy. Installed lazily on the first record — never in tests and
+    /// never before the feature has something to protect. VoxFlow's own
+    /// synthetic events (the paste Cmd+V) are tagged and ignored.
+    private var invalidationMonitor: Any?
+
+    /// Marks CGEvents VoxFlow posts itself so the invalidation monitor can
+    /// tell them apart from real user input. "VOXF" in ASCII.
+    private static let syntheticEventTag: Int64 = 0x564F_5846
+
+    // No deinit removing the monitor: the service is app-lifetime (a `let` on
+    // AppCoordinator), and monitor removal must happen on the main thread,
+    // which a nonisolated deinit cannot guarantee under strict concurrency.
+    private func installInvalidationMonitorIfNeeded() {
+        guard invalidationMonitor == nil,
+              NSClassFromString("XCTestCase") == nil else { return }
+        invalidationMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            guard event.cgEvent?.getIntegerValueField(.eventSourceUserData)
+                    != AccessibilityInsertService.syntheticEventTag else { return }
+            Task { @MainActor [weak self] in
+                self?.priorInsertion = nil
+            }
+        }
+    }
 
     func focusedTargetSnapshot() -> FocusTargetSnapshot {
         guard let focusedElement = copyFocusedElement() else {
@@ -59,15 +92,21 @@ final class AccessibilityInsertService: TextInserting {
     }
 
     /// Character immediately before the insertion point, read via AX.
-    /// nil when the field is empty, unreadable, or has a selection start at 0.
-    private func precedingCharacter() -> Character? {
+    /// `.fieldStart` (cursor at position 0) is an authoritative answer, not a
+    /// failure — conflating it with `.unreadable` let the prior-insertion
+    /// fallback put a stray leading space at the start of fresh documents in
+    /// fully AX-readable apps.
+    private func precedingAXRead() -> SmartSpacing.AXPrecedingRead {
         guard let focused = copyFocusedElement(),
               let value = copyStringAttribute(kAXValueAttribute as CFString, on: focused),
-              let range = copySelectedRange(on: focused),
-              range.location > 0 else { return nil }
+              let range = copySelectedRange(on: focused) else { return .unreadable }
+        if range.location == 0 { return .fieldStart }
         let ns = value as NSString
-        guard range.location <= ns.length else { return nil }
-        return ns.substring(with: NSRange(location: range.location - 1, length: 1)).first
+        guard range.location > 0, range.location <= ns.length else { return .unreadable }
+        guard let preceding = ns.substring(with: NSRange(location: range.location - 1, length: 1)).first else {
+            return .unreadable
+        }
+        return .character(preceding)
     }
 
     func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
@@ -76,7 +115,7 @@ final class AccessibilityInsertService: TextInserting {
         // Electron/web/terminals (the paste-fallback apps), so fall back to the
         // trailing char of our own last insertion into the same target.
         let preceding = SmartSpacing.effectivePrecedingCharacter(
-            axPreceding: precedingCharacter(),
+            axRead: precedingAXRead(),
             prior: priorInsertion,
             currentTargetPid: targetApp?.processIdentifier
         )
@@ -94,7 +133,12 @@ final class AccessibilityInsertService: TextInserting {
         }
 
         if await simulatePaste(text: text, targetApp: targetApp) {
-            recordPriorInsertion(text, targetApp: targetApp)
+            // simulatePaste only proves the Cmd+V event was POSTED. Under
+            // secure event input the target never receives it, so nothing
+            // landed — recording would poison the next spacing decision.
+            if !IsSecureEventInputEnabled() {
+                recordPriorInsertion(text, targetApp: targetApp)
+            }
             return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
         }
 
@@ -107,12 +151,17 @@ final class AccessibilityInsertService: TextInserting {
     private func recordPriorInsertion(_ insertedText: String, targetApp: NSRunningApplication?) {
         priorInsertion = SmartSpacing.PriorInsertion(
             targetPid: targetApp?.processIdentifier,
-            trailingCharacter: insertedText.last
+            trailingCharacter: insertedText.last,
+            recordedAt: Date()
         )
+        installInvalidationMonitorIfNeeded()
     }
 
     func triggerUndo() -> Bool {
-        simulateKeyPress(virtualKey: 0x06, flags: .maskCommand)
+        // Undo removes (some of) our text — the trailing-character record no
+        // longer describes the field.
+        priorInsertion = nil
+        return simulateKeyPress(virtualKey: 0x06, flags: .maskCommand)
     }
 
     private func insertDirectly(text: String) -> Bool {
@@ -186,6 +235,9 @@ final class AccessibilityInsertService: TextInserting {
 
     private func simulateKeyPress(virtualKey: CGKeyCode, flags: CGEventFlags) -> Bool {
         guard let source = CGEventSource(stateID: .combinedSessionState) else { return false }
+        // Tag our own events so the invalidation monitor ignores them —
+        // otherwise the paste's Cmd+V would clear the record it just enabled.
+        source.userData = Self.syntheticEventTag
         guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
               let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false) else {
             return false
