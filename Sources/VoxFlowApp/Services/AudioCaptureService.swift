@@ -92,7 +92,9 @@ final class AudioCaptureService: AudioCapturing {
     private let engine = AVAudioEngine()
     private let logger = Logger(subsystem: "local.voxflow.app", category: "AudioCaptureService")
 
-    private struct State: Sendable {
+    // Internal (not private) so the per-buffer ingest step is unit-testable
+    // without constructing the real service's AVAudioEngine.
+    struct State: Sendable {
         var pcmBuffer = Data()
         var bufferLimitReached = false
         // Cold-start instrumentation: when capture armed, and how long until the
@@ -104,8 +106,39 @@ final class AudioCaptureService: AudioCapturing {
         // "mic is live, speak now" cue on actual hardware readiness. Held under
         // the lock because it's set on the main thread and read on the audio thread.
         var onCaptureLive: (@Sendable () -> Void)?
+        // Monotonic capture identity. `removeTap` does not synchronize with an
+        // executing tap block, so a stale callback from the previous capture can
+        // run after startCapture resets this state — the tap closure carries the
+        // generation it was installed under and `ingest` drops mismatches.
+        var generation: UInt64 = 0
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
+
+    /// Per-buffer ingest step, called by the tap callback under the state lock.
+    /// Returns the live callback exactly once — for the first buffer of the
+    /// CURRENT capture generation — so the caller can invoke it outside the
+    /// lock. A stale generation is dropped wholesale: no append (old audio must
+    /// not leak into the new capture), no latency record (a ~0 value would
+    /// poison the cold-start receipts), no live callback (the cue would fire
+    /// before the engine is live).
+    static func ingest(
+        state: inout State,
+        chunk: Data,
+        generation: UInt64,
+        maxBytes: Int = maxBufferBytes
+    ) -> (@Sendable () -> Void)? {
+        guard state.generation == generation else { return nil }
+        let isFirstBuffer = state.firstBufferLatencyMs == nil
+        if isFirstBuffer {
+            state.firstBufferLatencyMs = state.captureStartedAt?.elapsedMilliseconds() ?? 0
+        }
+        if state.pcmBuffer.count < maxBytes {
+            state.pcmBuffer.append(chunk)
+        } else {
+            state.bufferLimitReached = true
+        }
+        return isFirstBuffer ? state.onCaptureLive : nil
+    }
 
     private var isCapturing = false
     private var deviceChangedDuringCapture = false
@@ -140,6 +173,10 @@ final class AudioCaptureService: AudioCapturing {
         engine.stop()
         isCapturing = false
         deviceChangedDuringCapture = true
+        state.withLock {
+            $0.generation &+= 1
+            $0.onCaptureLive = nil
+        }
         logger.warning("Audio device configuration changed mid-capture — capture invalidated")
     }
 
@@ -149,12 +186,14 @@ final class AudioCaptureService: AudioCapturing {
 
     func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws {
         deviceChangedDuringCapture = false
-        state.withLock {
+        let captureGeneration: UInt64 = state.withLock {
             $0.pcmBuffer.removeAll(keepingCapacity: true)
             $0.bufferLimitReached = false
             $0.captureStartedAt = nil
             $0.firstBufferLatencyMs = nil
             $0.onCaptureLive = onCaptureLive
+            $0.generation &+= 1
+            return $0.generation
         }
 
         let inputNode = engine.inputNode
@@ -233,20 +272,11 @@ final class AudioCaptureService: AudioCapturing {
 
             let chunk = int16Samples.withUnsafeBufferPointer { Data(buffer: $0) }
 
-            // Detect the first buffer under the lock, capture the live handler,
-            // then invoke it OUTSIDE the lock — never run caller code while
-            // holding the audio-thread lock.
-            let liveCallback: (@Sendable () -> Void)? = self.state.withLock { state in
-                let isFirstBuffer = state.firstBufferLatencyMs == nil
-                if isFirstBuffer {
-                    state.firstBufferLatencyMs = state.captureStartedAt?.elapsedMilliseconds() ?? 0
-                }
-                if state.pcmBuffer.count < AudioCaptureService.maxBufferBytes {
-                    state.pcmBuffer.append(chunk)
-                } else {
-                    state.bufferLimitReached = true
-                }
-                return isFirstBuffer ? state.onCaptureLive : nil
+            // Ingest under the lock (generation-guarded), then invoke the live
+            // handler OUTSIDE the lock — never run caller code while holding
+            // the audio-thread lock.
+            let liveCallback = self.state.withLock { state in
+                Self.ingest(state: &state, chunk: chunk, generation: captureGeneration)
             }
             liveCallback?()
         }
@@ -273,7 +303,15 @@ final class AudioCaptureService: AudioCapturing {
         engine.stop()
         isCapturing = false
 
-        let (captured, firstBufferLatencyMs) = state.withLock { ($0.pcmBuffer, $0.firstBufferLatencyMs) }
+        // Bump the generation so any tap block still executing is dropped by
+        // `ingest`, and release the live handler — a capture that has stopped
+        // must never fire its cue, and the closure (with its captured coordinator
+        // machinery) must not linger in shared state across the idle period.
+        let (captured, firstBufferLatencyMs) = state.withLock { state in
+            state.generation &+= 1
+            state.onCaptureLive = nil
+            return (state.pcmBuffer, state.firstBufferLatencyMs)
+        }
 
         return CapturedAudio(
             pcm: captured,

@@ -174,11 +174,26 @@ final class AppCoordinator: ObservableObject {
         transcriber: whisperKitService,
         session: cockpitSessionService,
         dictionary: cockpitDictionary,
-        audit: insertionAudit
+        audit: insertionAudit,
+        // Same first-buffer cue gating as the palette path — ⌘R otherwise
+        // invites speech ~150 ms before the engine delivers, clipping the
+        // first word of the session.
+        onCaptureLive: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, case .recording = self.cockpitSessionService.state else { return }
+                self.cueSoundService.playStartCue()
+            }
+        }
     )
 
     private var timer: Timer?
     private var captureTimeoutTimer: Timer?
+    /// Surfaces the start-but-no-buffers failure mode the buffer-gated cue
+    /// would otherwise hide (see startCapture).
+    private let captureLiveWatchdog = CaptureLiveWatchdog()
+    /// Receipts show first-buffer latency around 150 ms on a cold engine —
+    /// 3 s is a 20x margin before declaring the input device dead.
+    static let captureLiveStallTimeout: TimeInterval = 3.0
     private var sessionCounter: Int = 0
     private var hotkeysRegistered = false
     private var didFinishLaunching = false
@@ -636,16 +651,28 @@ final class AppCoordinator: ObservableObject {
             // user to speak before the mic was live, clipping the front of
             // every utterance (and emptying short ones). The mic is still live
             // ONLY during capture — privacy posture is unchanged.
-            var liveCue: (@Sendable () -> Void)?
-            if !commandLane {
-                liveCue = { [weak self] in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.state.sessionState == .recording else { return }
-                        self.cueSoundService.playStartCue()
-                    }
+            //
+            // Very short press-and-release captures can finish before the
+            // first-buffer Task runs; the .recording guard then skips the
+            // START cue by design (playing "speak now" after the capture ended
+            // would mislead) — the user still gets the STOP cue from
+            // prepareForTranscription as feedback.
+            let playCue = !commandLane
+            let onCaptureLive: @Sendable () -> Void = { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.captureLiveWatchdog.markLive()
+                    guard playCue, self.state.sessionState == .recording else { return }
+                    self.cueSoundService.playStartCue()
                 }
             }
-            try audioCapture.startCapture(onCaptureLive: liveCue)
+            try audioCapture.startCapture(onCaptureLive: onCaptureLive)
+            // With the cue gated on the first buffer, a device that starts but
+            // never delivers would hang in armed silence — no cue, no error —
+            // until the capture timeout. The watchdog surfaces that promptly.
+            captureLiveWatchdog.arm(timeout: Self.captureLiveStallTimeout) { [weak self] in
+                self?.handleCaptureStalled()
+            }
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
@@ -754,6 +781,7 @@ final class AppCoordinator: ObservableObject {
             cueSoundService.playStopCue()
         }
 
+        captureLiveWatchdog.cancel()
         timer?.invalidate()
         captureTimeoutTimer?.invalidate()
         captureTimeoutTimer = nil
@@ -981,6 +1009,33 @@ final class AppCoordinator: ObservableObject {
         state.statusLine = "Error. Retry capture."
     }
 
+    /// The engine started but no audio buffer arrived within the stall
+    /// timeout — the input device is delivering nothing (wedged CoreAudio,
+    /// zero-input aggregate device). Stop the armed-but-dead capture and tell
+    /// the user now instead of letting it sit silent until the capture
+    /// timeout. The "capture_stalled" receipt keeps the failure diagnosable
+    /// from insertions.jsonl.
+    private func handleCaptureStalled() {
+        guard state.sessionState == .recording else { return }
+        log.error("No audio buffer within \(Self.captureLiveStallTimeout)s of engine start — stopping stalled capture")
+        _ = try? audioCapture.stopCapture()
+        timer?.invalidate()
+        captureTimeoutTimer?.invalidate()
+        captureTimeoutTimer = nil
+        state.isCommandLaneActive = false
+        fnTriggeredCaptureInProgress = false
+        cueSoundService.playStopCue()
+        insertionAudit.recordRejection(
+            text: "",
+            reason: "capture_stalled",
+            confidence: 0,
+            durationSeconds: 0,
+            source: "watchdog"
+        )
+        state.setIdle()
+        state.statusLine = "Microphone delivered no audio — check the input device"
+    }
+
     func retryLastCapture() {
         state.transcriptCandidate = nil
         state.translationCandidate = nil
@@ -994,6 +1049,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     func cancelActiveCapture() {
+        captureLiveWatchdog.cancel()
         timer?.invalidate()
         captureTimeoutTimer?.invalidate()
         captureTimeoutTimer = nil
