@@ -69,35 +69,35 @@ class TestInferSpeakerSegments:
 class TestInferTaskOwners:
     def test_lead_match_high_confidence(self):
         items = ["Alice will finalize the report"]
-        result = infer_task_owners(items, "Alice: I'll handle it.\nBob: Thanks.")
+        result = infer_task_owners(items)
         assert result[0]["owner"] == "Alice"
         assert result[0]["confidence"] == 0.92
 
     def test_any_match_medium_confidence(self):
         items = ["The task is something Bob should review"]
-        result = infer_task_owners(items, "Bob: ok.\nAlice: noted.")
+        result = infer_task_owners(items)
         assert result[0]["owner"] == "Bob"
         assert result[0]["confidence"] == 0.78
 
     def test_no_pattern_match_stays_unassigned(self):
         items = ["Update the documentation"]
-        result = infer_task_owners(items, "Alice: Let me check.\nBob: Sure.")
+        result = infer_task_owners(items)
         # No "Name will/to/should" pattern → stays Unassigned (no fabrication)
         assert result[0]["owner"] == "Unassigned"
         assert result[0]["confidence"] == 0.35
 
     def test_no_named_speakers_stays_unassigned(self):
         items = ["Update the documentation"]
-        result = infer_task_owners(items, "Just a plain transcript.")
+        result = infer_task_owners(items)
         assert result[0]["owner"] == "Unassigned"
         assert result[0]["confidence"] == 0.35
 
     def test_empty_items(self):
-        assert infer_task_owners([], "Some transcript") == []
+        assert infer_task_owners([]) == []
 
     def test_max_ten_items(self):
         items = [f"Task {i}" for i in range(15)]
-        result = infer_task_owners(items, "")
+        result = infer_task_owners(items)
         assert len(result) == 10
 
 
@@ -270,7 +270,6 @@ class TestRenderMeetingNotion:
 class TestCoerceTaskOwners:
     def test_coerce_task_owners_invalid_confidence(self):
         items = ["Alice will do the task"]
-        transcript = "Alice: I'll do it."
         value = [
             {
                 "task": "Alice will do the task",
@@ -278,7 +277,7 @@ class TestCoerceTaskOwners:
                 "confidence": "not-a-number"
             }
         ]
-        result = coerce_task_owners(value, items, transcript)
+        result = coerce_task_owners(value, items)
         assert len(result) == 1
         assert result[0]["task"] == "Alice will do the task"
         assert result[0]["owner"] == "Alice"
@@ -286,7 +285,6 @@ class TestCoerceTaskOwners:
 
     def test_coerce_task_owners_valid_confidence(self):
         items = ["Alice will do the task"]
-        transcript = "Alice: I'll do it."
         value = [
             {
                 "task": "Alice will do the task",
@@ -294,6 +292,6 @@ class TestCoerceTaskOwners:
                 "confidence": "0.95"
             }
         ]
-        result = coerce_task_owners(value, items, transcript)
+        result = coerce_task_owners(value, items)
         assert len(result) == 1
         assert result[0]["confidence"] == 0.95

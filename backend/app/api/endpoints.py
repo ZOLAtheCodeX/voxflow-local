@@ -319,8 +319,6 @@ async def meeting_summarize(payload: MeetingRequest) -> MeetingSummaryResponse:
         task_owners=coerce_task_owners(
             structured.get("task_owners"),
             action_items,
-            effective_text,
-            speaker_segments,
         ),
         markdown_export=str(structured.get("markdown_export", "")).strip(),
         notion_export=str(structured.get("notion_export", "")).strip(),
