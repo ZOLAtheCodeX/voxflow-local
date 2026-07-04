@@ -364,7 +364,6 @@ def prompt_frame(payload: PromptFrameRequest) -> PromptFrameResponse:
     framed, intent = provider_router.frame_prompt(
         session_id=payload.session_id,
         text=payload.text,
-        consent_token=payload.consent_token,
     )
     audit_logger.log(
         operation="prompt_frame",
@@ -472,4 +471,10 @@ async def events(websocket: WebSocket) -> None:
             await websocket.send_json({"event": "ack"})
     except Exception as exc:
         logger.debug("WebSocket closed: %s", exc)
-        await websocket.close()
+        try:
+            await websocket.close()
+        except Exception as close_exc:
+            # close() itself raises when the peer already completed the close
+            # handshake (abrupt disconnect) — the connection is gone either
+            # way; don't let the cleanup failure surface as an ASGI error.
+            logger.debug("WebSocket close after disconnect: %s", close_exc)

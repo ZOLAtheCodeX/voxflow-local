@@ -56,3 +56,30 @@ def test_websocket_acks_messages(monkeypatch) -> None:
         ws.send_text("ping-2")
         ack2 = ws.receive_json()
         assert ack2.get("event") == "ack"
+
+
+def test_websocket_close_after_peer_disconnect_does_not_raise() -> None:
+    """The generic except path calls ``websocket.close()``, which itself
+    raises if the peer already completed the close handshake (abrupt client
+    disconnect). The handler must swallow that secondary failure — an
+    unhandled exception here surfaces as a spurious 500-class ASGI error for
+    a connection that is already gone."""
+    import asyncio
+
+    from api import endpoints as ep
+
+    class _GoneWebSocket:
+        async def accept(self) -> None:
+            return None
+
+        async def send_json(self, payload) -> None:
+            return None
+
+        async def receive_text(self) -> str:
+            raise RuntimeError("client disconnected abruptly")
+
+        async def close(self, code: int = 1000, reason: str | None = None) -> None:
+            raise RuntimeError("Cannot call close once a close message has been sent")
+
+    # Must complete without propagating the close() failure.
+    asyncio.run(ep.events(_GoneWebSocket()))

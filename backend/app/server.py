@@ -226,30 +226,59 @@ async def rate_limit_middleware(
 app.include_router(api_router)
 
 
+def _is_loopback_host(host: str) -> bool:
+    """localhost, ::1, or anything in 127.0.0.0/8."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        import ipaddress
+
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def resolve_bind_host_port(env: Mapping[str, str] | None = None) -> tuple[str, int]:
-    """Resolve the uvicorn bind host/port.
+    """Resolve the uvicorn bind host/port for the MANAGED spawn.
 
     Explicit ``VOXFLOW_BACKEND_HOST`` / ``VOXFLOW_BACKEND_PORT`` (set by the Swift
     launcher from the resolved BackendEndpoint) win; otherwise derive from
     ``VOXFLOW_BACKEND_URL``; otherwise default to ``127.0.0.1:8765``. Keeping the
     bound socket in lockstep with the client URL is what makes a custom
     ``VOXFLOW_BACKEND_URL`` actually work end to end.
+
+    Non-loopback hosts are REFUSED (SystemExit): the managed spawn binds
+    loopback only — the Swift launcher enforces the same rule before spawning,
+    and this guard makes the guarantee true at the bind point too. For a
+    non-loopback bind, run the backend yourself (``scripts/run_backend.sh``
+    passes ``--host`` to uvicorn directly and never enters this path).
     """
     env = os.environ if env is None else env
-    host = env.get("VOXFLOW_BACKEND_HOST")
+    host: str | None = None
+    port = 8765
+    explicit_host = env.get("VOXFLOW_BACKEND_HOST")
     port_raw = env.get("VOXFLOW_BACKEND_PORT")
-    if host and port_raw:
+    if explicit_host and port_raw:
         try:
-            return host, int(port_raw)
+            host, port = explicit_host, int(port_raw)
         except ValueError:
-            pass
-    url = env.get("VOXFLOW_BACKEND_URL")
-    if url:
-        parsed = urlparse(url)
-        if parsed.hostname:
-            port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            return parsed.hostname, port
-    return "127.0.0.1", 8765
+            host = None
+    if host is None:
+        url = env.get("VOXFLOW_BACKEND_URL")
+        if url:
+            parsed = urlparse(url)
+            if parsed.hostname:
+                host = parsed.hostname
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if host is None:
+        host, port = "127.0.0.1", 8765
+    if not _is_loopback_host(host):
+        raise SystemExit(
+            f"refusing to bind non-loopback host {host!r}: the managed spawn "
+            "binds loopback only. Run the backend yourself "
+            "(scripts/run_backend.sh) for a custom host."
+        )
+    return host, port
 
 
 if __name__ == "__main__":

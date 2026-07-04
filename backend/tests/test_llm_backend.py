@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import pytest
 
 from engines.llm_backend import (
+    AnthropicBackend,
     OllamaBackend,
     TextLLMBackend,
     probe_ollama_available,
@@ -208,6 +209,22 @@ class TestOllamaBackendAvailability:
             side_effect=urlerror.URLError("refused"),
         ):
             assert backend.is_available() is False
+
+
+class TestAnthropicBackendAvailability:
+    """Parity with Ollama/OpenAICompat: every chain backend exposes
+    is_available() so generic `getattr(backend, "is_available", ...)` probes
+    (readiness snapshot, providers_test) never silently report a configured
+    Anthropic provider unreachable. Key presence is the cheap no-network
+    signal — the class docstring already promises "declines without a key"."""
+
+    def test_available_with_key(self) -> None:
+        backend = AnthropicBackend(model="claude-haiku-4-5-20251001", api_key="sk-ant-test")
+        assert backend.is_available() is True
+
+    def test_not_available_without_key(self) -> None:
+        backend = AnthropicBackend(model="claude-haiku-4-5-20251001", api_key="")
+        assert backend.is_available() is False
 
 
 class TestPolishEngineWithFakeBackend:

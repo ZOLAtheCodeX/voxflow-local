@@ -211,15 +211,18 @@ class ProviderRouter:
         if not consent_token:
             raise HTTPException(status_code=400, detail="consent_token is required for private API mode")
 
-        # Bind the consent to the payload: the request text must match the text
-        # the user previewed/consented to (same normalization as privacy_preview),
-        # so a token can't be reused for a different payload. Mismatch reads as an
-        # invalid token (and does not consume a use).
+        # Bind the consent to the payload AND the raw/redacted choice: the
+        # request text must match the text the user previewed/consented to
+        # (same normalization as privacy_preview), and the allow_raw choice
+        # locks on first use so a multi-use cleanup token can't commit
+        # redacted then flip to raw. Mismatch reads as an invalid token (and
+        # does not consume a use).
         record = self._consent_store.resolve(
             token=consent_token,
             session_id=session_id,
             operation=operation,
             expected_text=normalize_whitespace(submitted_text),
+            allow_raw=allow_raw,
         )
         if not record:
             raise HTTPException(status_code=400, detail="Invalid or expired privacy consent token")
@@ -333,7 +336,10 @@ class ProviderRouter:
             structured = build_meeting_summary(resolved.effective_text, payload.tone_style.lower())
         return structured, resolved
 
-    def frame_prompt(self, session_id: str, text: str, consent_token: str | None) -> tuple[str, str]:
+    def frame_prompt(self, session_id: str, text: str) -> tuple[str, str]:
+        # Prompt framing is fully local (no privacy gate), so no consent
+        # resolution happens here; the request schema still carries
+        # consent_token for wire compatibility, but it is not consumed.
         intent = self._prompt_framing_engine.detect_intent(text)
         framed = self._prompt_framing_engine.frame(text, intent)
         return framed, intent

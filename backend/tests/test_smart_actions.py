@@ -227,10 +227,12 @@ def test_apply_uses_second_chain_provider_when_first_ollama_down(monkeypatch):
     The whole chain is now attempted, so the second provider serves."""
     from engines.polish import PolishEngine
 
-    # Force the head ollama probe to report DOWN — under the old preflight this
+    # Force the ollama probe to report DOWN — under the old preflight this
     # short-circuited to provider_unavailable before run() could reach the cloud
-    # fallback. After the fix the probe is irrelevant (never consulted).
-    monkeypatch.setattr("engines.polish.probe_ollama_available", lambda: False)
+    # fallback. After the fix the probe is irrelevant (never consulted; the
+    # dead preflight is gone from PolishEngine entirely), so patch it at its
+    # source module as a belt-and-braces regression guard.
+    monkeypatch.setattr("engines.llm_backend.probe_ollama_available", lambda *, force=False: False)
 
     dead_ollama = _ChainBackend("ollama", "")  # head: down
     alive_cloud = _ChainBackend("anthropic", "# Issue\nGDPR\n# Recommendation\nProceed.")

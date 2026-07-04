@@ -32,6 +32,10 @@ class ConsentRecord:
     created_at: float
     max_uses: int = 1
     use_count: int = 0
+    # Raw/redacted CHOICE, locked by the first resolve that passes one.
+    # None = not yet locked (the choice is made client-side after preview, so
+    # it cannot be known at creation time).
+    allow_raw_choice: bool | None = None
 
 
 class ConsentStore:
@@ -62,6 +66,7 @@ class ConsentStore:
         session_id: str,
         operation: str,
         expected_text: str | None = None,
+        allow_raw: bool | None = None,
     ) -> ConsentRecord | None:
         with self._lock:
             self._prune_locked()
@@ -77,6 +82,18 @@ class ConsentStore:
             # burns a use.
             if expected_text is not None and expected_text != record.original_text:
                 return None
+            # Choice binding: the raw/redacted choice locks on first use, so a
+            # multi-use token (cleanup grants 2 for light+polish review) cannot
+            # commit REDACTED and then flip to RAW on the later use. Also
+            # checked BEFORE consuming. The FIRST use's choice can't be
+            # validated here — the choice is made after preview and never
+            # reaches token creation (binding it there needs a cross-side API
+            # change; deferred, Route B).
+            if allow_raw is not None:
+                if record.allow_raw_choice is None:
+                    record.allow_raw_choice = allow_raw
+                elif record.allow_raw_choice != allow_raw:
+                    return None
             record.use_count += 1
             if record.use_count >= record.max_uses:
                 self._records.pop(token, None)

@@ -327,6 +327,13 @@ class AnthropicBackend:
         self.api_key = api_key
         self.timeout = timeout
 
+    def is_available(self) -> bool:
+        """Key presence — the cheap no-network signal, matching the class
+        contract ("declines without a key"). Parity with Ollama/OpenAICompat
+        so generic ``getattr(backend, "is_available", ...)`` probes never
+        silently report a configured Anthropic provider unreachable."""
+        return bool(self.api_key)
+
     def polish(
         self,
         text: str,

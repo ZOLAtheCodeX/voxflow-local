@@ -11,6 +11,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 import server
@@ -39,10 +41,49 @@ class TestResolveBindHostPort:
 
     def test_https_url_without_port_defaults_443(self):
         assert server.resolve_bind_host_port(
-            {"VOXFLOW_BACKEND_URL": "https://example.test"}
-        ) == ("example.test", 443)
+            {"VOXFLOW_BACKEND_URL": "https://127.0.0.1"}
+        ) == ("127.0.0.1", 443)
 
     def test_non_numeric_port_env_falls_through_to_default(self):
         assert server.resolve_bind_host_port(
             {"VOXFLOW_BACKEND_HOST": "127.0.0.1", "VOXFLOW_BACKEND_PORT": "abc"}
         ) == ("127.0.0.1", 8765)
+
+
+class TestLoopbackGuard:
+    """CLAUDE.md promises: "Managed spawn binds loopback only; a non-loopback
+    host is refused (run the backend yourself)." resolve_bind_host_port's only
+    runtime caller is the managed spawn's __main__ (run_backend.sh passes
+    --host to uvicorn directly and never enters it), so enforcing here makes
+    the doc's guarantee true at the bind point without touching the documented
+    run-it-yourself path."""
+
+    def test_non_loopback_host_env_refused(self):
+        with pytest.raises(SystemExit):
+            server.resolve_bind_host_port(
+                {"VOXFLOW_BACKEND_HOST": "0.0.0.0", "VOXFLOW_BACKEND_PORT": "8765"}
+            )
+
+    def test_non_loopback_url_refused(self):
+        with pytest.raises(SystemExit):
+            server.resolve_bind_host_port(
+                {"VOXFLOW_BACKEND_URL": "http://192.168.1.5:8765"}
+            )
+
+    def test_non_loopback_hostname_refused(self):
+        with pytest.raises(SystemExit):
+            server.resolve_bind_host_port(
+                {"VOXFLOW_BACKEND_URL": "https://example.test"}
+            )
+
+    def test_loopback_variants_allowed(self):
+        assert server.resolve_bind_host_port(
+            {"VOXFLOW_BACKEND_HOST": "localhost", "VOXFLOW_BACKEND_PORT": "9000"}
+        ) == ("localhost", 9000)
+        assert server.resolve_bind_host_port(
+            {"VOXFLOW_BACKEND_HOST": "::1", "VOXFLOW_BACKEND_PORT": "9000"}
+        ) == ("::1", 9000)
+        # Whole 127.0.0.0/8 block is loopback, not just .1.
+        assert server.resolve_bind_host_port(
+            {"VOXFLOW_BACKEND_HOST": "127.0.0.2", "VOXFLOW_BACKEND_PORT": "9000"}
+        ) == ("127.0.0.2", 9000)

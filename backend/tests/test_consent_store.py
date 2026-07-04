@@ -147,6 +147,50 @@ class TestConsentStorePayloadBinding:
         assert store.resolve(record.token, "s", "cleanup") is not None
 
 
+class TestConsentStoreChoiceBinding:
+    """The raw/redacted CHOICE locks on first use: a multi-use token (cleanup
+    grants 2 for the light+polish review flow) must not allow previewing and
+    committing REDACTED, then flipping to RAW on the second use (or vice
+    versa). Mismatch reads as an invalid token and — like payload binding —
+    is checked BEFORE consuming, so it never burns a use. The very first
+    use's choice cannot be validated backend-side (the choice is made after
+    preview, so it never reaches token creation) — that would need a
+    cross-side API change, deferred deliberately (Route B)."""
+
+    def test_flipping_redacted_to_raw_on_second_use_is_rejected(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "T", "T-redacted", max_uses=2)
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=False) is not None
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=True) is None
+
+    def test_flipping_raw_to_redacted_on_second_use_is_rejected(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "T", "T-redacted", max_uses=2)
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=True) is not None
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=False) is None
+
+    def test_same_choice_allows_light_then_polish(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "T", "T-redacted", max_uses=2)
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=False) is not None
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=False) is not None
+
+    def test_choice_mismatch_does_not_consume_a_use(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "T", "T-redacted", max_uses=2)
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=False) is not None
+        # Flip rejected...
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=True) is None
+        # ...but the remaining use with the locked choice still works.
+        assert store.resolve(record.token, "s", "cleanup", allow_raw=False) is not None
+
+    def test_no_choice_passed_is_backward_compatible(self):
+        store = ConsentStore()
+        record = store.create("s", "cleanup", "T", "T-r", max_uses=2)
+        assert store.resolve(record.token, "s", "cleanup") is not None
+        assert store.resolve(record.token, "s", "cleanup") is not None
+
+
 class TestConsentStoreThreadSafety:
     def test_concurrent_creates(self):
         store = ConsentStore()

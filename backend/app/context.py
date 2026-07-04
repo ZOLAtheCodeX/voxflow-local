@@ -159,13 +159,18 @@ def readiness_snapshot() -> ReadyResponse:
 
                     installed = {m.get("name", "") for m in list_ollama_models(timeout=1.5)}
                     model_pulled = model_name in installed
-                except Exception:
+                except Exception as exc:
+                    # None = "could not verify", not "missing" — but say why,
+                    # or a misconfigured provider is invisible on the exact
+                    # path meant to surface it.
+                    logger.debug("readiness: could not enumerate Ollama models for %s: %s", spec.id, exc)
                     model_pulled = None
         elif spec.kind == "openai_compat":
             # Local servers come and go; probe is cheap (1.5 s worst case).
             try:
                 reachable = provider_registry.backend(spec.id).is_available()
-            except Exception:
+            except Exception as exc:
+                logger.debug("readiness: availability probe failed for %s: %s", spec.id, exc)
                 reachable = False
         else:
             # Cloud APIs: a key on file is the best cheap signal.
