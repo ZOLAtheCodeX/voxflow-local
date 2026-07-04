@@ -6,6 +6,13 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- transformers bumped 4.56 → 5.3.0 (with huggingface-hub 0.34 → 1.22),
+  actually fixing CVE-2026-4372 rather than relying on the dismissed-alert
+  mitigations (WhisperKit default, offline mode, official models).
+  Validated against the real-model STT regression suite: 14/14 clips pass
+  with latency identical to the 4.56 baseline (p50 721 ms).
+
 ## [0.1.2] — 2026-07-04
 
 A drift-review and hardening release: a full-repo drift audit, a

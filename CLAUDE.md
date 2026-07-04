@@ -59,7 +59,7 @@ swift build && swift run VoxFlowLocal      # frontend (requires backend running)
 ```
 
 - Swift 6.2 strict concurrency, macOS 14+ deployment target
-- Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.8.0, transformers 4.56.0
+- Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.10.0, transformers 5.3.0
 - Health: `curl http://127.0.0.1:8765/v1/health` · Readiness: `curl http://127.0.0.1:8765/v1/ready`
 
 ### Ollama (text polish)
