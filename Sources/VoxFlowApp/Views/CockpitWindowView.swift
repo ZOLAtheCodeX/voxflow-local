@@ -4,7 +4,8 @@ import SwiftUI
 ///
 /// Document-centric layout per the design spec: top bar (status pills),
 /// main pane (transcript + voice prompt strip + chip row), side panel
-/// (Target + Recent). Keyboard shortcuts wired via ``KeyEventBridge``
+/// (Target / Notion / Dictionary / Assistant / Recent). Keyboard shortcuts
+/// wired via ``KeyEventBridge``
 /// for the ones SwiftUI's `.keyboardShortcut` modifier can't capture
 /// cleanly while the cockpit is open.
 struct CockpitWindowView: View {

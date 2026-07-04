@@ -20,14 +20,14 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
     SessionMemoryStore.swift            Ring buffer for recent dictations
     MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem
     FocusContextMonitor.swift           Focused-target poller; frozen during capture
-    CockpitCoordinator.swift            @MainActor cockpit orchestration — chip MRU + voice routing + insert/copy/undo
+    CockpitCoordinator.swift            @MainActor cockpit orchestration — chip MRU + voice routing + insert/copy/undo + Notion target/search + assistant handoff + protocol/chain dispatch
     LongFormSessionService.swift        State machine (idle → recording → reviewing) + JSON auto-save (~5 s)
     SmartActionService.swift            actor: smart-action backend dispatch + 20-entry undo history
     VoiceCommandRouter.swift            Single-keyword parser for in-review voice commands
   Models/AppModels.swift        Domain types — includes SmartActionId, AppliedAction, LongFormSession, LongFormState
   State/AppState.swift          @Published app state — cockpitVisible / cockpitSession / chipMRU / voicePromptStripDismissed
   Views/                        SwiftUI views — VFDesignTokens.swift is the single source of truth for typography / colors / motion / materials
-    Cockpit/                    Cockpit Layer 0 views (TopBar, Transcript, ChipRow, SidePanel, Palette, VoicePromptStrip, KeyEventBridge)
+    Cockpit/                    Cockpit views (TopBar, Transcript, ChipRow, SidePanel [Target/Notion/Dictionary/Assistant/Recent], Palette, VoicePromptStrip, KeyEventBridge)
     CockpitWindowView.swift     Top-level cockpit window — wires shortcuts ⌘R/⌘./⌘Z/⌘↩/⌘C/⌘\/⌘W/esc
 
 backend/app/                    FastAPI server, decomposed in Phase 2
@@ -82,6 +82,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself). | `http://127.0.0.1:8765` |
 | `VOXFLOW_STT_BACKEND` | `whisper` / `whisperKit` / `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model id | `openai/whisper-small` |
+| `VOXFLOW_STT_ALLOW_FALLBACK` | Opt-in: let a dead local Whisper fall back to cloud OpenAI STT (sends raw, un-redactable audio). Fail-closed when unset | unset (off) |
 | `VOXFLOW_OLLAMA_URL` | Ollama base URL | `http://localhost:11434` |
 | `VOXFLOW_OLLAMA_MODEL` | Polish model id override | auto: RAM-tier recommendation if pulled, else any pulled gemma4 (`resolve_default_ollama_model`) |
 | `VOXFLOW_OLLAMA_KEEP_ALIVE` | How long Ollama keeps the polish model resident after a request (frees RAM between sessions; set `24h` for always-warm) | `15m` |
@@ -122,7 +123,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - Polish engine executes the BYOM provider chain (R3): availability failures fall to the next provider, guardrail rejections fall straight to the regex floor, the floor is unconditional. `run()` returns `PolishOutcome` (text, guardrail_triggered, degraded_reason, served_by, model_id, fallback_depth); `polish()` is the 3-tuple compat wrapper. Cloud-bound payloads pass `redact_sensitive_text` first. Guardrail is word-level with tone-aware floors (R2.2).
 - BYOM config: `~/Library/Application Support/VoxFlow/providers.json` (written by Swift `ProviderConfigStore`, read by the backend registry at launch; `VOXFLOW_PROVIDERS_CONFIG` dev override). Per-task chains: `polish`, `smart_action` — each task gets its OWN PolishEngine (`smart_action_polish_engine` in context.py). API keys live in the Keychain (`voxflow.provider.<id>`); the app injects them at backend launch as `VOXFLOW_PROVIDER_KEY_*` env vars named by `api_key_env` — never in the JSON file.
 - `/v1/ready` reports `polish_chain`, per-provider `reachable`/`model_pulled` (closes the ready-but-missing-model blind spot), and `active_polish_provider`/`active_polish_model` — the Swift mode-in-use indicator (palette footer + cockpit pill) renders these; empty provider = regex fallback (orange). `/v1/providers/test` powers the Settings test-connection button.
-- STT fallback chain is real (R3.5): dead local Whisper falls back to configured OpenAI STT; `stt_fallback_active` reports it.
+- STT fallback chain (R3.5): a dead local Whisper falls back to configured OpenAI STT, but only when `VOXFLOW_STT_ALLOW_FALLBACK` is set — fail-closed OFF by default, because raw audio can't be PII-redacted the way text can. `stt_fallback_active` reports whether it actually fired.
 - Logging: `logging.getLogger("voxflow")`; never bare `print()`.
 
 ## Testing

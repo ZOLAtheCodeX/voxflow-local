@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Cockpit side panel — Target + Notion + Recent cards.
+/// Cockpit side panel — Target, Notion, Dictionary, Assistant, and Recent cards.
 ///
-/// Layer 0 omits the Dictionary card (Layer 1) and the ambient-buffer
-/// status (Layer 2). Per-layer content per the cockpit design spec.
+/// Omits only the ambient-buffer status (Layer 2). Per-layer content per the
+/// cockpit design spec.
 struct CockpitSidePanelView: View {
     @ObservedObject var state: AppState
     @ObservedObject var sessionService: LongFormSessionService

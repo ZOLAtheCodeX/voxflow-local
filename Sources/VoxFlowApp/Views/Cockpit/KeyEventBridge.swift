@@ -4,8 +4,9 @@ import AppKit
 /// Captures local key events for the SwiftUI view it's attached to.
 ///
 /// Used by the cockpit window to wire keyboard shortcuts that SwiftUI's
-/// `.keyboardShortcut` modifier can't reach (e.g. capturing ⌘K to present
-/// the action palette, or ⌘\ to toggle the side panel).
+/// `.keyboardShortcut` modifier can't reach (e.g. ⌘R to record, ⌘\ to toggle
+/// the side panel, esc to close). Shortcuts that a plain button can own — like
+/// ⌘K for the action palette — stay on `.keyboardShortcut` and are NOT here.
 ///
 /// The handler returns `nil` to consume the event or returns the event to
 /// let it propagate.
