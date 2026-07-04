@@ -6,12 +6,36 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-07-04
+
+A drift-review and hardening release: a full-repo drift audit, a
+production-hardening pass over the privacy and process-management layers,
+and an adversarial multi-agent review of the hardening itself (which
+reworked one design before it shipped). One user-facing behavior change:
+cockpit keyboard shortcuts now respect an active text edit.
+
+### Security
+- Privacy consent tokens now bind the raw/redacted choice: the first use of
+  a token locks it, so the two-use cleanup token (light + polish review)
+  can no longer preview redacted text and then commit the raw original.
+- The app-managed backend spawn refuses to bind a non-loopback host at the
+  bind point itself (it always requested loopback; now the Python side
+  enforces it too, including the bracketed `[::1]` form). Manual runs via
+  `scripts/run_backend.sh` are unaffected.
+- The backend PID file records which app session spawned the backend, and
+  stale cleanup refuses to kill — and leaves the record of — a backend
+  spawned by a different session, protecting concurrent sessions from
+  reaping each other. Crash recovery is unchanged: leftovers from a crashed
+  session are still reaped through the command-line identity gate.
+
 ### Fixed
-- Editing the transcript in the cockpit review pane no longer fights the
-  global shortcuts: while the editor (or a search field) has focus, ⌘Z
-  undoes your typing and ⌘C copies the selection (both previously acted on
-  the whole transcript / last smart action), and esc exits editing —
-  committing the draft — instead of closing the window. A second esc closes.
+- Cockpit keyboard shortcuts no longer hijack native text editing: while
+  the transcript editor (or a search field) has focus, ⌘Z undoes your
+  typing and ⌘C copies the selection (both previously acted on the whole
+  transcript / last smart action), esc exits editing — committing the
+  draft — with a second esc closing, and ⌘↩ commits your draft before
+  inserting (previously it inserted the last saved text, silently dropping
+  uncommitted edits).
 - The Settings test-connection button no longer reports an Ollama model as
   "available" when the model-list probe itself fails (timeout, reset); it
   now says the model could not be verified.
@@ -20,6 +44,11 @@ All notable changes to VoxFlow Local are documented here. The format follows
   when constructed directly without the tier resolver).
 - Smart actions that return empty output can no longer land on the cockpit
   undo stack (they were already excluded from session history).
+- Readiness-probe failures log why (once per provider) instead of silently
+  degrading, and an Anthropic provider with a key on file always reads as
+  reachable in generic availability probes.
+- The app bundle's version string now tracks releases (it had stayed at
+  0.1.0 through v0.1.1).
 
 ### Changed
 - Cockpit polish: transient error banner auto-dismisses after 8 s, the
