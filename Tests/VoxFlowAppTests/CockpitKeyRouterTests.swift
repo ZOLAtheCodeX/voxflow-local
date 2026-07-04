@@ -42,6 +42,26 @@ final class CockpitKeyRouterTests: XCTestCase {
         )
     }
 
+    // MARK: ⌘↩ — commit the draft before inserting
+
+    func test_cmdReturn_notEditing_insertsDirectly() {
+        XCTAssertEqual(
+            CockpitKeyRouter.route(key: "\r", keyCode: otherKeyCode, modifiers: [.command], isTextEditingActive: false),
+            .insert
+        )
+    }
+
+    func test_cmdReturn_editing_commitsDraftFirst() {
+        // Mid-edit, the draft lives only in the TextEditor — inserting the
+        // last COMMITTED transcript would ship stale text. The router demands
+        // commit-then-insert so the shell resigns focus (committing via the
+        // editor's focus-loss handler) before reading the transcript.
+        XCTAssertEqual(
+            CockpitKeyRouter.route(key: "\r", keyCode: otherKeyCode, modifiers: [.command], isTextEditingActive: true),
+            .commitThenInsert
+        )
+    }
+
     // MARK: esc — two-step close while editing
 
     func test_esc_notEditing_closes() {
@@ -70,10 +90,8 @@ final class CockpitKeyRouterTests: XCTestCase {
                 CockpitKeyRouter.route(key: ".", keyCode: otherKeyCode, modifiers: [.command], isTextEditingActive: editing),
                 .stop, "⌘. must stay global (editing=\(editing))"
             )
-            XCTAssertEqual(
-                CockpitKeyRouter.route(key: "\r", keyCode: otherKeyCode, modifiers: [.command], isTextEditingActive: editing),
-                .insert, "⌘↩ must stay global (editing=\(editing))"
-            )
+            // ⌘↩ is asserted separately: it stays global but switches to
+            // commit-then-insert while editing (see the dedicated tests).
             XCTAssertEqual(
                 CockpitKeyRouter.route(key: "\\", keyCode: otherKeyCode, modifiers: [.command], isTextEditingActive: editing),
                 .toggleSidePanel, "⌘\\ must stay global (editing=\(editing))"

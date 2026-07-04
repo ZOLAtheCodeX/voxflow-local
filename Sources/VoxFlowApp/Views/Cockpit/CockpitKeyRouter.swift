@@ -6,6 +6,7 @@ enum CockpitKeyAction: Equatable {
     case stop              // ⌘. — stop capture
     case undo              // ⌘Z — undo last smart action
     case insert            // ⌘↩ — insert into target + close + reset
+    case commitThenInsert  // ⌘↩ while editing — resign focus (committing the draft) before inserting
     case copy              // ⌘C — copy whole transcript
     case toggleSidePanel   // ⌘\
     case close             // ⌘W / esc
@@ -38,7 +39,10 @@ enum CockpitKeyRouter {
             case "r": return .record
             case ".": return .stop
             case "z": return isTextEditingActive ? .passThrough : .undo
-            case "\r": return .insert
+            // Mid-edit the draft lives only in the TextEditor; inserting the
+            // last committed transcript would ship stale text, so the draft
+            // must be committed (focus resigned) first.
+            case "\r": return isTextEditingActive ? .commitThenInsert : .insert
             case "c": return isTextEditingActive ? .passThrough : .copy
             case "\\": return .toggleSidePanel
             case "w": return .close

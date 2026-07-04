@@ -212,6 +212,17 @@ struct CockpitWindowView: View {
         case .insert:
             Task { await coordinator.insertIntoTarget() }
             return nil
+        case .commitThenInsert:
+            // Resign focus so the transcript editor's focus-loss handler
+            // commits the draft (setTranscript), then give SwiftUI one beat
+            // to run that handler before the insert path reads the
+            // transcript. Cooperative sleep only — never Thread.sleep.
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            Task {
+                try? await Task.sleep(for: .milliseconds(120))
+                await coordinator.insertIntoTarget()
+            }
+            return nil
         case .copy:
             coordinator.copyToClipboard()
             return nil

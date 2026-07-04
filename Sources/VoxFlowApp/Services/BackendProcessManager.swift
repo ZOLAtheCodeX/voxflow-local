@@ -38,7 +38,9 @@ protocol BackendProcessRunning: Sendable {
     /// The full command line of a PID (for identity checks before terminating).
     /// nil when the process is gone or cannot be inspected.
     func commandLine(forPID pid: pid_t) -> String?
-    func writePIDFile(_ pid: pid_t)
+    /// Record the spawned pid AND the session's instance stamp so the stale
+    /// reaper can later verify the file still describes the live backend.
+    func writePIDFile(_ pid: pid_t, stamp: String)
     func readPIDFile() -> pid_t?
     func removePIDFile()
 }
@@ -84,7 +86,7 @@ struct SystemBackendProcessRunner: BackendProcessRunning {
 
     func commandLine(forPID pid: pid_t) -> String? { BackendProcessManager.processCommandLine(pid) }
 
-    func writePIDFile(_ pid: pid_t) { BackendProcessManager.writePIDFile(pid) }
+    func writePIDFile(_ pid: pid_t, stamp: String) { BackendProcessManager.writePIDFile(pid, stamp: stamp) }
     func readPIDFile() -> pid_t? { BackendProcessManager.readPIDFile() }
     func removePIDFile() { BackendProcessManager.removePIDFile() }
 }
@@ -98,7 +100,7 @@ struct NoopBackendProcessRunner: BackendProcessRunning {
     func listeningPIDs(onPort port: Int) -> [pid_t] { [] }
     func terminate(_ pids: [pid_t], signal: Int32) {}
     func commandLine(forPID pid: pid_t) -> String? { nil }
-    func writePIDFile(_ pid: pid_t) {}
+    func writePIDFile(_ pid: pid_t, stamp: String) {}
     func readPIDFile() -> pid_t? { nil }
     func removePIDFile() {}
 }
@@ -354,7 +356,7 @@ final class BackendProcessManager: @unchecked Sendable {
             lastSpawnedPID = task.processIdentifier
             _lastStartupFailureReason = nil
             log.info("Backend started (pid: \(task.processIdentifier))")
-            runner.writePIDFile(task.processIdentifier)
+            runner.writePIDFile(task.processIdentifier, stamp: instanceStamp)
 
             // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts.
             // Skip restart if the shutdown was intentional (stop/restart called).
@@ -671,10 +673,31 @@ final class BackendProcessManager: @unchecked Sendable {
     }
 
     // MARK: - PID file persistence
+    //
+    // Format: first line = pid, second line = the spawning session's instance
+    // stamp. The stamp lets the stale reaper verify (via /v1/health) that the
+    // file still describes the live backend before SIGTERM. Legacy bare-pid
+    // files (no stamp line) parse fine and skip the stamp check.
 
-    static func writePIDFile(_ pid: pid_t) {
+    /// Pure encoder — kept separate so the format is unit-testable without
+    /// touching the real PID file (tests must never do that).
+    static func encodePIDFileContents(pid: pid_t, stamp: String) -> String {
+        "\(pid)\n\(stamp)"
+    }
+
+    /// Pure parser for both formats. nil when the first line isn't a pid.
+    static func parsePIDFileContents(_ contents: String) -> (pid: pid_t, stamp: String?)? {
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let first = lines.first, let pid = pid_t(first), pid > 0 else { return nil }
+        let stamp = lines.dropFirst().first(where: { !$0.isEmpty })
+        return (pid, stamp)
+    }
+
+    static func writePIDFile(_ pid: pid_t, stamp: String) {
         do {
-            try "\(pid)".write(toFile: pidFilePath, atomically: true, encoding: .utf8)
+            try encodePIDFileContents(pid: pid, stamp: stamp)
+                .write(toFile: pidFilePath, atomically: true, encoding: .utf8)
         } catch {
             log.warning("Failed to write PID file: \(error.localizedDescription)")
         }
@@ -686,16 +709,48 @@ final class BackendProcessManager: @unchecked Sendable {
 
     static func readPIDFile() -> pid_t? {
         guard let contents = try? String(contentsOfFile: pidFilePath, encoding: .utf8),
-              let pid = pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)),
-              pid > 0 else {
+              let parsed = parsePIDFileContents(contents) else {
             return nil
         }
         // Check if process is still alive (signal 0 = existence check)
-        guard kill(pid, 0) == 0 else {
+        guard kill(parsed.pid, 0) == 0 else {
             removePIDFile()
             return nil
         }
-        return pid
+        return parsed.pid
+    }
+
+    /// The instance stamp recorded alongside the pid, if the file has one.
+    static func readPIDFileStamp() -> String? {
+        guard let contents = try? String(contentsOfFile: pidFilePath, encoding: .utf8) else { return nil }
+        return parsePIDFileContents(contents)?.stamp
+    }
+
+    /// Synchronously fetch the live backend's instance stamp from /v1/health
+    /// on the resolved port. Short timeout — this runs in launch cleanup and
+    /// the atexit fallback, so it must never hang. nil on any failure.
+    static func probeHealthInstanceStamp(timeout: TimeInterval = 0.6) -> String? {
+        let endpoint = BackendEndpoint.resolved()
+        let base = endpoint.url.absoluteString.hasSuffix("/")
+            ? String(endpoint.url.absoluteString.dropLast())
+            : endpoint.url.absoluteString
+        guard let url = URL(string: "\(base)/v1/health") else { return nil }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = timeout
+        config.timeoutIntervalForResource = timeout
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let semaphore = DispatchSemaphore(value: 0)
+        var stamp: String?
+        let task = session.dataTask(with: url) { data, _, _ in
+            defer { semaphore.signal() }
+            guard let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            stamp = json["instance_stamp"] as? String
+        }
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + timeout + 0.2)
+        return stamp
     }
 
     /// Kill any stale backend from a previous app session. Called from atexit/terminate handlers
@@ -733,11 +788,33 @@ final class BackendProcessManager: @unchecked Sendable {
         readPID: () -> pid_t? = { readPIDFile() },
         command: (pid_t) -> String? = { processCommandLine($0) },
         terminate: (pid_t) -> Void = { _ = kill($0, SIGTERM) },
-        removePID: () -> Void = { removePIDFile() }
+        removePID: () -> Void = { removePIDFile() },
+        // Stamp probe defaults are XCTest-inert (same rule as defaultRunner()):
+        // a test that forgets to inject must never read the real PID file or
+        // probe the real health endpoint.
+        recordedStamp: () -> String? = {
+            NSClassFromString("XCTestCase") != nil ? nil : readPIDFileStamp()
+        },
+        probeStamp: () -> String? = {
+            NSClassFromString("XCTestCase") != nil ? nil : probeHealthInstanceStamp()
+        }
     ) {
         guard let pid = readPID() else { return }
         guard isVoxFlowBackendCommand(command(pid)) else {
             log.warning("PID-file pid \(pid) is not a VoxFlow backend (gone or reused) — not killing; clearing stale PID file")
+            removePID()
+            return
+        }
+        // Strict identity: when the file records an instance stamp AND the
+        // resolved port answers /v1/health, the stamps must agree — a
+        // contradiction means the port is served by a DIFFERENT backend than
+        // the file describes (e.g. another session took over), so the file is
+        // stale/foreign and the recorded pid must not be killed. A failed
+        // probe (hung or not-listening backend) falls back to the cmdline
+        // gate above — the probe only ever REDUCES kills, it never blocks
+        // reaping a wedged backend.
+        if let recorded = recordedStamp(), let live = probeStamp(), recorded != live {
+            log.warning("PID-file stamp \(recorded, privacy: .public) contradicts live backend stamp \(live, privacy: .public) — not killing pid \(pid); clearing stale PID file")
             removePID()
             return
         }

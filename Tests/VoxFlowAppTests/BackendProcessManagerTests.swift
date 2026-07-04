@@ -13,14 +13,15 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
     var commandLines: [pid_t: String] = [:]
     var queriedCommandLinePIDs: [pid_t] = []
     var pidFile: pid_t?
+    var pidFileStamp: String?
 
     func run(_ process: Process) throws { ranProcesses.append(process) }
     func listeningPIDs(onPort port: Int) -> [pid_t] { queriedPorts.append(port); return listeners }
     func terminate(_ pids: [pid_t], signal: Int32) { terminations.append((pids, signal)) }
     func commandLine(forPID pid: pid_t) -> String? { queriedCommandLinePIDs.append(pid); return commandLines[pid] }
-    func writePIDFile(_ pid: pid_t) { pidFile = pid }
+    func writePIDFile(_ pid: pid_t, stamp: String) { pidFile = pid; pidFileStamp = stamp }
     func readPIDFile() -> pid_t? { pidFile }
-    func removePIDFile() { pidFile = nil }
+    func removePIDFile() { pidFile = nil; pidFileStamp = nil }
 }
 
 final class BackendProcessManagerTests: XCTestCase {
@@ -87,6 +88,83 @@ final class BackendProcessManagerTests: XCTestCase {
             readPID: { nil }, command: { _ in nil },
             terminate: { killed.append($0) }, removePID: {})
         XCTAssertEqual(killed, [])
+    }
+
+    // MARK: - Stamp-bound PID file (strict identity probe before SIGTERM)
+
+    func testKillStaleBackendRefusesWhenLiveStampContradictsRecord() {
+        // The port answers /v1/health with a DIFFERENT instance stamp than the
+        // PID file recorded: the file is stale/foreign (another session took
+        // over the port) — the recorded pid must not be killed.
+        var killed: [pid_t] = []
+        var removedFile = false
+        BackendProcessManager.killStaleBackend(
+            readPID: { 8888 },
+            command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
+            terminate: { killed.append($0) },
+            removePID: { removedFile = true },
+            recordedStamp: { "STAMP-RECORDED" },
+            probeStamp: { "STAMP-DIFFERENT-LIVE" })
+        XCTAssertEqual(killed, [], "stamp contradiction must refuse the kill")
+        XCTAssertTrue(removedFile, "the contradicted PID file is stale and should be cleared")
+    }
+
+    func testKillStaleBackendProceedsWhenLiveStampMatchesRecord() {
+        var killed: [pid_t] = []
+        BackendProcessManager.killStaleBackend(
+            readPID: { 8888 },
+            command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
+            terminate: { killed.append($0) },
+            removePID: {},
+            recordedStamp: { "STAMP-A" },
+            probeStamp: { "STAMP-A" })
+        XCTAssertEqual(killed, [8888])
+    }
+
+    func testKillStaleBackendFallsBackToCmdlineGateWhenProbeUnreachable() {
+        // A hung/not-listening backend can't answer the health probe — the
+        // probe is an ADDITIONAL guard, not a new requirement, or a wedged
+        // backend could never be reaped. Cmdline gate still applies.
+        var killed: [pid_t] = []
+        BackendProcessManager.killStaleBackend(
+            readPID: { 8888 },
+            command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
+            terminate: { killed.append($0) },
+            removePID: {},
+            recordedStamp: { "STAMP-A" },
+            probeStamp: { nil })
+        XCTAssertEqual(killed, [8888])
+    }
+
+    func testKillStaleBackendProceedsWithoutRecordedStamp() {
+        // Legacy bare-pid file (no stamp line): behave exactly as before.
+        var killed: [pid_t] = []
+        BackendProcessManager.killStaleBackend(
+            readPID: { 8888 },
+            command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
+            terminate: { killed.append($0) },
+            removePID: {},
+            recordedStamp: { nil },
+            probeStamp: { "STAMP-ANY" })
+        XCTAssertEqual(killed, [8888])
+    }
+
+    func testPIDFileContentsRoundTripWithStamp() {
+        let encoded = BackendProcessManager.encodePIDFileContents(pid: 1234, stamp: "ABC-123")
+        let parsed = BackendProcessManager.parsePIDFileContents(encoded)
+        XCTAssertEqual(parsed?.pid, 1234)
+        XCTAssertEqual(parsed?.stamp, "ABC-123")
+    }
+
+    func testPIDFileParseAcceptsLegacyBarePID() {
+        let parsed = BackendProcessManager.parsePIDFileContents("1234\n")
+        XCTAssertEqual(parsed?.pid, 1234)
+        XCTAssertNil(parsed?.stamp)
+    }
+
+    func testPIDFileParseRejectsGarbage() {
+        XCTAssertNil(BackendProcessManager.parsePIDFileContents("not-a-pid"))
+        XCTAssertNil(BackendProcessManager.parsePIDFileContents(""))
     }
 
     func testIsVoxFlowBackendCommand() {
