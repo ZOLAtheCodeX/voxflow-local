@@ -182,6 +182,29 @@ class TestProvidersTestEndpoint:
         assert isinstance(data["reachable"], bool)
         assert "detail" in data
 
+    @pytest.mark.anyio
+    async def test_model_probe_failure_does_not_claim_available(self, client, monkeypatch):
+        """Server reachable but enumerating installed models raises: the endpoint
+        must NOT fall through to reporting the model 'available'. The old
+        `except Exception: pass` made the Settings test-connection button turn
+        green on a probe timeout, asserting a model was pulled when the check
+        actually failed."""
+        from api import endpoints as ep
+
+        monkeypatch.setattr(ep, "probe_ollama_available", lambda *, force=False: True)
+
+        def _raise(base_url=None, *, timeout=2.0):
+            raise RuntimeError("connection reset while enumerating models")
+
+        monkeypatch.setattr(ep, "list_ollama_models", _raise)
+
+        async with client as c:
+            resp = await c.post("/v1/providers/test", json={"provider_id": "ollama"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["reachable"] is True
+        assert "available" not in data["detail"].lower()
+
 
 class TestChainIntegrationWithConfigFile:
     def test_engine_built_from_config_file_falls_back_to_ollama(self, tmp_path, monkeypatch):

@@ -103,7 +103,14 @@ class OllamaBackend:
         keep_alive: str | None = None,
     ) -> None:
         self.base_url = (base_url or os.environ.get("VOXFLOW_OLLAMA_URL", "http://localhost:11434")).rstrip("/")
-        self.model = model or os.environ.get("VOXFLOW_OLLAMA_MODEL", "gemma4:e4b-mlx")
+        # Tier-safe literal default. select_backend and the BYOM registry both
+        # pass a model resolved through the RAM-tier chokepoint
+        # (auto_resolve_ollama_model), so this fallback only bites DIRECT
+        # construction with no explicit model + no env override. It must be the
+        # conservative e2b-mlx, NOT the 9 GB e4b-mlx: on a 16 GB machine e4b plus
+        # the Whisper backend thrashes (matches resolve_default_ollama_model's
+        # static floor). Defaulting down is always safe; defaulting up is not.
+        self.model = model or os.environ.get("VOXFLOW_OLLAMA_MODEL", "gemma4:e2b-mlx")
         self.timeout = timeout
         # How long Ollama keeps the model resident after a request. Was a
         # hardcoded "24h", which pinned the model (~6 GB for gemma4:e2b-mlx) in

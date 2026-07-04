@@ -110,6 +110,15 @@ class TestOllamaBackendSuccess:
         assert body["options"]["num_predict"] == 512
         assert body["options"]["temperature"] == 0.2
 
+    def test_default_model_is_ram_safe_not_heavy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A bare OllamaBackend() (no explicit model, no env override) must default
+        to the tier-safe e2b-mlx, NOT the 9 GB e4b-mlx that thrashes 16 GB machines.
+        Direct construction bypasses the RAM-tier chokepoint (select_backend and the
+        registry pass a resolved model), so the literal fallback must be the
+        conservative default — matching resolve_default_ollama_model's static floor."""
+        monkeypatch.delenv("VOXFLOW_OLLAMA_MODEL", raising=False)
+        assert OllamaBackend().model == "gemma4:e2b-mlx"
+
     def test_keep_alive_is_configurable(self) -> None:
         """RAM-rich machines can pin the model longer via the constructor /
         VOXFLOW_OLLAMA_KEEP_ALIVE; constrained machines get the short default."""

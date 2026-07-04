@@ -61,6 +61,25 @@ final class SmartActionServiceTests: XCTestCase {
         XCTAssertEqual(count, 0, "echo / no-op results don't go in the undo stack")
     }
 
+    func test_history_skips_empty_output() async throws {
+        // An empty transform differs from a non-empty transcript, so the old
+        // `output != transcript` filter would push it onto the undo stack even
+        // though CockpitCoordinator.isMeaningful (which gates session history)
+        // rejects it — an empty result could land on the undo stack but not in
+        // history. The two filters must agree.
+        let stub = StubSmartActionBackend(response: SmartActionResult(
+            actionId: .memo,
+            output: "",
+            guardrailTriggered: false,
+            error: nil
+        ))
+        let service = SmartActionService(backend: stub)
+
+        _ = try await service.apply(.memo, to: "raw")
+        let count = await service.historyCount()
+        XCTAssertEqual(count, 0, "empty output isn't undoable — must match CockpitCoordinator.isMeaningful")
+    }
+
     func test_popLast_returns_before_text() async throws {
         let stub = StubSmartActionBackend(response: SmartActionResult(
             actionId: .memo,

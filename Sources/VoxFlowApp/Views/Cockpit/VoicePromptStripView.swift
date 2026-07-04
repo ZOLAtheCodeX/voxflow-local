@@ -9,10 +9,12 @@ import SwiftUI
 struct VoicePromptStripView: View {
     @ObservedObject var state: AppState
 
-    private static let dismissThreshold = 10
-
     var isVisible: Bool {
-        !state.voicePromptStripDismissed && state.totalCaptureCount < Self.dismissThreshold
+        // Shares CockpitCoordinator's constant so this visibility test and the
+        // coordinator's persisted-dismiss write stay in lockstep (they were two
+        // independent `= 10` literals that could drift apart).
+        !state.voicePromptStripDismissed
+            && state.totalCaptureCount < CockpitCoordinator.voicePromptStripDismissThreshold
     }
 
     var body: some View {

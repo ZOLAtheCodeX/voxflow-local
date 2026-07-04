@@ -127,21 +127,27 @@ def providers_test(payload: ProviderTestRequest) -> ProviderTestResponse:
 
     backend = provider_registry.backend(spec.id)
     if spec.kind == "ollama":
-        from engines.llm_backend import list_ollama_models, probe_ollama_available
-
         reachable = probe_ollama_available(force=True)
         if not reachable:
             return ProviderTestResponse(provider_id=spec.id, reachable=False, detail="Ollama server unreachable")
         model = spec.model or getattr(backend, "model", "")
         try:
             installed = {m.get("name", "") for m in list_ollama_models(timeout=2.0)}
-            if model and model not in installed:
-                return ProviderTestResponse(
-                    provider_id=spec.id, reachable=True,
-                    detail=f"Server reachable but model '{model}' is not pulled — run: ollama pull {model}",
-                )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Server answered the reachability probe but enumerating models
+            # failed (timeout, reset, malformed payload). Don't fall through to
+            # claiming the model is available — that turned the Settings
+            # test-connection button green on a probe that actually failed.
+            logger.warning("providers_test: could not enumerate Ollama models: %s", exc)
+            return ProviderTestResponse(
+                provider_id=spec.id, reachable=True,
+                detail=f"Server reachable but could not verify model '{model}' is pulled",
+            )
+        if model and model not in installed:
+            return ProviderTestResponse(
+                provider_id=spec.id, reachable=True,
+                detail=f"Server reachable but model '{model}' is not pulled — run: ollama pull {model}",
+            )
         return ProviderTestResponse(provider_id=spec.id, reachable=True, detail=f"Reachable; model '{model}' available")
 
     if spec.kind in ("openai_compat", "openai"):

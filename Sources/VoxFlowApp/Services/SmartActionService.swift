@@ -39,8 +39,11 @@ actor SmartActionService {
         let result = try await backend.performSmartAction(action, transcript: transcript)
         // Only record successful (non-guardrail) transforms in the undo stack
         // — guardrail trips substitute the regex fallback, which the user
-        // expects as the floor, not as something to undo.
-        if !result.guardrailTriggered && result.output != transcript {
+        // expects as the floor, not as something to undo. Empty output is not
+        // undoable either: this must match CockpitCoordinator.isMeaningful
+        // (which gates session history), or a result could land on the undo
+        // stack without a matching history entry.
+        if !result.guardrailTriggered && !result.output.isEmpty && result.output != transcript {
             history.append((action, beforeText: transcript, afterText: result.output))
             if history.count > Self.historyCap {
                 history.removeFirst(history.count - Self.historyCap)

@@ -51,7 +51,10 @@ final class CockpitCoordinator: ObservableObject {
     /// order (memo / MECE / items) wins.
     private static let mruActivationThreshold = 30
     /// Voice prompt strip dismisses automatically after this many captures.
-    private static let voicePromptStripDismissThreshold = 10
+    /// Single source of truth — ``VoicePromptStripView.isVisible`` reads this
+    /// same constant so the visibility test and the persisted-dismiss write
+    /// cannot silently diverge.
+    static let voicePromptStripDismissThreshold = 10
 
     init(
         state: AppState,
