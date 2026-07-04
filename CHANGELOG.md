@@ -6,6 +6,26 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Editing the transcript in the cockpit review pane no longer fights the
+  global shortcuts: while the editor (or a search field) has focus, ⌘Z
+  undoes your typing and ⌘C copies the selection (both previously acted on
+  the whole transcript / last smart action), and esc exits editing —
+  committing the draft — instead of closing the window. A second esc closes.
+- The Settings test-connection button no longer reports an Ollama model as
+  "available" when the model-list probe itself fails (timeout, reset); it
+  now says the model could not be verified.
+- `OllamaBackend`'s literal default model is the RAM-tier-safe
+  `gemma4:e2b-mlx` (was the 9 GB `e4b-mlx`, which thrashes 16 GB machines
+  when constructed directly without the tier resolver).
+- Smart actions that return empty output can no longer land on the cockpit
+  undo stack (they were already excluded from session history).
+
+### Changed
+- Cockpit polish: transient error banner auto-dismisses after 8 s, the
+  polish-provenance pill is visible to VoiceOver, and an empty session no
+  longer claims "auto-saved".
+
 ## [0.1.1] — 2026-07-01
 
 A stability and hardening release: three weeks of daily-driver use, an
