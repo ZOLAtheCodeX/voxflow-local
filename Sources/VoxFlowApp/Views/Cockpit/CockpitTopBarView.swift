@@ -27,7 +27,7 @@ struct CockpitTopBarView: View {
             }
             .accessibilityLabel("Recording in progress")
         case .reviewing:
-            pill("● review", tint: .blue)
+            pill("● review", tint: VF.colorInfo)
         }
     }
 
@@ -39,7 +39,10 @@ struct CockpitTopBarView: View {
         let label = provider.isEmpty
             ? "regex fallback"
             : (model.isEmpty ? provider : "\(provider) · \(model)")
-        return pill(label, tint: provider.isEmpty ? .orange : VF.colorNeutral)
+        return pill(label, tint: provider.isEmpty ? VF.colorWarning : VF.colorNeutral)
+            .accessibilityLabel(provider.isEmpty
+                ? "Polish degraded to regex fallback"
+                : "Polish served by \(label)")
     }
 
     @ViewBuilder private var targetPill: some View {
@@ -47,7 +50,7 @@ struct CockpitTopBarView: View {
            let name = target.appName {
             HStack(spacing: 4) {
                 Text("→").foregroundStyle(.secondary)
-                pill(name, tint: .blue)
+                pill(name, tint: VF.colorInfo)
             }
         } else {
             HStack(spacing: 4) {

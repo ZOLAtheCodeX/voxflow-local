@@ -84,10 +84,6 @@ struct CockpitWindowView: View {
                 handleKey(event)
             }
         )
-        .onAppear {
-            // Wire the session-stop callback into the coordinator so the
-            // teaching-mode voice strip counter advances.
-        }
         .onChange(of: sessionService.state) { _, newValue in
             if case .reviewing = newValue {
                 coordinator.didEnterReviewState()
@@ -158,6 +154,15 @@ struct CockpitWindowView: View {
                     Text(lastError)
                         .font(VF.captionFont)
                         .foregroundStyle(VF.colorWarning)
+                        // Transient failure banner — auto-dismiss after a beat
+                        // instead of lingering until the next action succeeds.
+                        // task(id:) cancels the previous timer when a new error
+                        // replaces this one, so the window restarts per error.
+                        .task(id: lastError) {
+                            try? await Task.sleep(for: .seconds(8))
+                            guard !Task.isCancelled else { return }
+                            self.lastError = nil
+                        }
                 }
             }
             .padding(VF.spacingMedium)

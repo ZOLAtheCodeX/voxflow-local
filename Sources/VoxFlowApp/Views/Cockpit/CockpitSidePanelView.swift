@@ -216,7 +216,7 @@ struct CockpitSidePanelView: View {
                 ForEach(recent) { entry in
                     HStack(spacing: VF.spacingSmall) {
                         Text(entry.wrong).font(VF.microFont).foregroundStyle(.secondary)
-                        Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                        Image(systemName: "arrow.right").font(VF.microFont).foregroundStyle(.tertiary)
                         Text(entry.right).font(VF.captionFont)
                         Spacer()
                     }

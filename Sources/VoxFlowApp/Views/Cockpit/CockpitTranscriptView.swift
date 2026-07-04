@@ -67,7 +67,10 @@ struct CockpitTranscriptView: View {
             .components(separatedBy: "\n\n")
             .filter { !$0.isEmpty }
             .count
-        return Text("\(words) words · \(paragraphs) paragraph\(paragraphs == 1 ? "" : "s") · auto-saved")
+        // "auto-saved" only once there is content — an empty, never-saved
+        // session showing "0 words · 0 paragraphs · auto-saved" was misleading.
+        let saved = session.transcript.isEmpty ? "" : " · auto-saved"
+        return Text("\(words) words · \(paragraphs) paragraph\(paragraphs == 1 ? "" : "s")\(saved)")
             .font(VF.captionFont)
             .foregroundStyle(.secondary)
     }

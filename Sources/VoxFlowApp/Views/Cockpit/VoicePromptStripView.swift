@@ -34,10 +34,10 @@ struct VoicePromptStripView: View {
             }
             .padding(.horizontal, VF.spacingMedium)
             .padding(.vertical, 6)
-            .background(VF.tintedBackground(.blue, opacity: 0.08), in: RoundedRectangle(cornerRadius: VF.cornerSmall))
+            .background(VF.tintedBackground(VF.colorInfo, opacity: 0.08), in: RoundedRectangle(cornerRadius: VF.cornerSmall))
             .overlay(
                 RoundedRectangle(cornerRadius: VF.cornerSmall)
-                    .strokeBorder(.blue.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(VF.colorInfo.opacity(0.3), lineWidth: 1)
             )
             .foregroundStyle(VF.colorInfo)
         }
