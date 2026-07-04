@@ -6,6 +6,23 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Silero VAD speech-presence detection (~2 MB, bundled offline in the
+  wheel): a gate in front of whisper-backend decode stops noise-only audio
+  from ever reaching the model (Whisper hallucinates text from non-speech;
+  the RMS energy gate can't tell noise from speech), and a new local-only
+  `/v1/audio/diagnose` endpoint upgrades the empty-capture status line to
+  "speech detected but too quiet — raise your input level" vs "background
+  noise only" vs "speech but not recognized". Fail-open at every layer:
+  a VAD problem can never block transcription or change a message.
+  Disable the decode gate with `VOXFLOW_VAD_GATE=0`.
+- Memory-aware polish degradation: under OS memory pressure the polish
+  chain skips LOCAL providers so the resident LLM never competes with live
+  capture for unified memory on constrained machines — cloud providers
+  still run, and the provenance pill shows the degradation
+  (`degraded_reason: memory_pressure`). Disable with
+  `VOXFLOW_POLISH_MEMORY_GUARD=0`.
+
 ### Security
 - transformers bumped 4.56 → 5.3.0 (with huggingface-hub 0.34 → 1.22),
   actually fixing CVE-2026-4372 rather than relying on the dismissed-alert
