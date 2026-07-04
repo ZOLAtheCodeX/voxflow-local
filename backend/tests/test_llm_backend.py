@@ -26,6 +26,7 @@ from engines.llm_backend import (
     select_backend,
 )
 from engines.polish import PolishEngine
+from engines.provider_registry import ProviderSpec
 
 
 class _FakeBackend:
@@ -225,6 +226,86 @@ class TestAnthropicBackendAvailability:
     def test_not_available_without_key(self) -> None:
         backend = AnthropicBackend(model="claude-haiku-4-5-20251001", api_key="")
         assert backend.is_available() is False
+
+
+class TestMemoryPressureDegrade:
+    """Memory-aware polish degradation: under OS memory pressure (macOS
+    kern.memorystatus_vm_pressure_level ≥ 2 = warn), LOCAL providers are
+    skipped so the resident LLM never competes with live capture on a
+    constrained machine. CLOUD providers cost no local RAM and still run.
+    The floor reports degraded_reason="memory_pressure" so the provenance
+    pill (orange) shows the degradation. Fail-open: a missing signal means
+    normal (never degrade on signal failure)."""
+
+    _INPUT = "send the weekly report to the operations team before friday"
+
+    def _local_spec(self) -> ProviderSpec:
+        return ProviderSpec(id="ollama", kind="ollama")
+
+    def _cloud_spec(self) -> ProviderSpec:
+        return ProviderSpec(id="claude", kind="anthropic", model="m")
+
+    def test_pressure_skips_local_provider_to_regex_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 2)
+        local = _FakeBackend("Polished output that would have served.")
+        engine = PolishEngine(chain=[(self._local_spec(), local)])
+
+        out = engine.run(self._INPUT, "neutral")
+
+        assert local.calls == [], "local provider must not run under memory pressure"
+        assert out.served_by == "regex"
+        assert out.degraded_reason == "memory_pressure"
+        assert out.text  # the floor always yields usable output
+
+    def test_pressure_falls_through_to_cloud_provider(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 2)
+        local = _FakeBackend("local output")
+        cloud = _FakeBackend("Please send the weekly report to the operations team before Friday.")
+        engine = PolishEngine(chain=[(self._local_spec(), local), (self._cloud_spec(), cloud)])
+
+        out = engine.run(self._INPUT, "neutral")
+
+        assert local.calls == []
+        assert out.served_by == "claude"
+        assert out.degraded_reason is None
+        assert out.fallback_depth == 1
+
+    def test_normal_pressure_leaves_local_provider_untouched(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 1)
+        local = _FakeBackend("Please send the weekly report to the operations team before Friday.")
+        engine = PolishEngine(chain=[(self._local_spec(), local)])
+
+        out = engine.run(self._INPUT, "neutral")
+
+        assert out.served_by == "ollama"
+        assert out.degraded_reason is None
+
+    def test_guard_can_be_disabled_by_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 4)
+        monkeypatch.setenv("VOXFLOW_POLISH_MEMORY_GUARD", "0")
+        local = _FakeBackend("Please send the weekly report to the operations team before Friday.")
+        engine = PolishEngine(chain=[(self._local_spec(), local)])
+
+        out = engine.run(self._INPUT, "neutral")
+
+        assert out.served_by == "ollama"
+
+    def test_detect_fails_open_to_normal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        def _boom(*args, **kwargs):
+            raise OSError("sysctl unavailable")
+
+        monkeypatch.setattr(llm_backend.subprocess, "run", _boom)
+        assert llm_backend.detect_memory_pressure_level() == 1
 
 
 class TestPolishEngineWithFakeBackend:

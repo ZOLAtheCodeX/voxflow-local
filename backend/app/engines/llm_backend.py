@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import time
 from threading import Lock
 from typing import Protocol
@@ -492,13 +493,34 @@ def resolve_default_ollama_model(
 # ── Host memory + recommended model ─────────────────────────────────────
 
 
+def detect_memory_pressure_level() -> int:
+    """The macOS kernel's own memory-pressure signal
+    (``kern.memorystatus_vm_pressure_level``): 1 = normal, 2 = warn,
+    4 = critical. Already damped by the OS, so callers need no hysteresis.
+
+    Fails OPEN to 1 (normal) when the signal is unavailable (non-macOS,
+    sysctl failure) — a missing signal must never degrade polish quality.
+    """
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception as exc:
+        logger.debug("memory-pressure sysctl failed: %s", exc)
+    return 1
+
+
 def detect_host_memory_bytes() -> int:
     """Detect physical RAM in bytes. macOS uses ``sysctl hw.memsize``;
     Linux falls back to ``os.sysconf``. Returns 0 on any failure.
     """
     try:
-        import subprocess  # local import — only needed for this helper
-
         result = subprocess.run(
             ["sysctl", "-n", "hw.memsize"],
             capture_output=True,

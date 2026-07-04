@@ -13,6 +13,7 @@ Backend construction is driven by ``select_backend()`` in ``llm_backend.py``.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -21,6 +22,7 @@ from threading import Lock
 from nlp import apply_tone, light_cleanup, replace_spoken_punctuation
 from privacy import redact_sensitive_text
 
+from . import llm_backend
 from .llm_backend import TextLLMBackend, select_backend
 from .provider_registry import ProviderSpec
 
@@ -131,9 +133,28 @@ class PolishEngine:
         if system_prompt is None:
             text = replace_spoken_punctuation(text)
 
+        # Memory-aware degrade: under OS memory pressure (warn or worse),
+        # skip LOCAL providers — the resident LLM must never compete with
+        # live capture for unified memory on a constrained machine. Cloud
+        # providers cost no local RAM and still run. The pressure signal is
+        # the kernel's own damped level (fail-open to normal), so no
+        # hysteresis is needed here. Disable via VOXFLOW_POLISH_MEMORY_GUARD=0.
+        # Called through the module so tests can monkeypatch the source.
+        guard_enabled = os.environ.get("VOXFLOW_POLISH_MEMORY_GUARD", "1").strip() != "0"
+        pressure = llm_backend.detect_memory_pressure_level() if guard_enabled else 1
+        memory_skipped = False
+
         redacted_text: str | None = None
         for depth, (spec, backend) in enumerate(self._chain):
             is_cloud = bool(spec and spec.is_cloud)
+            if not is_cloud and pressure >= 2:
+                if not memory_skipped:
+                    logger.info(
+                        "Memory pressure level %d — skipping local polish provider(s); cloud chain entries still run",
+                        pressure,
+                    )
+                memory_skipped = True
+                continue
             if is_cloud:
                 if redacted_text is None:
                     redacted_text = redact_sensitive_text(text)
@@ -186,7 +207,8 @@ class PolishEngine:
             return PolishOutcome(candidate, False, None, served_by=served_by, model_id=model_id, fallback_depth=depth)
 
         return PolishOutcome(
-            apply_tone(light_cleanup(text), tone), False, "backend_unavailable",
+            apply_tone(light_cleanup(text), tone), False,
+            "memory_pressure" if memory_skipped else "backend_unavailable",
             served_by="regex", model_id=None, fallback_depth=len(self._chain),
         )
 

@@ -46,7 +46,7 @@ class CleanupResponse(BaseModel):
     guardrail_triggered: bool
     # Why output is not clean LLM text: backend_unavailable / echo /
     # guardrail_similarity / guardrail_length / guardrail_empty /
-    # guardrail_digits. None = clean.
+    # guardrail_digits / memory_pressure. None = clean.
     degraded_reason: str | None = None
     # Provenance (R3.4): which provider served this. "rules" = deterministic
     # regex pipeline (raw/light modes), "regex" = the polish fallback floor.
