@@ -182,44 +182,55 @@ struct CockpitWindowView: View {
 
     /// Handle ⌘R / ⌘. / ⌘Z / ⌘↩ / ⌘C / ⌘\ / ⌘W / esc.
     /// Returns nil to consume the event, or the event to let SwiftUI handle it.
+    /// The routing policy (including the focus-aware ⌘Z/⌘C/esc behavior while
+    /// the transcript editor or a search field is focused) lives in
+    /// ``CockpitKeyRouter`` — keep this a mechanical dispatch.
     private func handleKey(_ event: NSEvent) -> NSEvent? {
         let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
         let key = event.charactersIgnoringModifiers ?? ""
 
-        if modifiers == .command {
-            switch key {
-            case "r":
-                cockpitCapture.startRecording(targetApp: state.focusTarget)
-                return nil
-            case ".":
-                Task { await cockpitCapture.stopRecording() }
-                return nil
-            case "z":
-                Task { await coordinator.undoLastAction() }
-                return nil
-            case "\r":
-                Task { await coordinator.insertIntoTarget() }
-                return nil
-            case "c":
-                coordinator.copyToClipboard()
-                return nil
-            case "\\":
-                sidePanelHidden.toggle()
-                return nil
-            case "w":
-                coordinator.close()
-                return nil
-            default:
-                break
-            }
-        }
-
-        // Plain escape closes the cockpit.
-        if event.keyCode == 53 {  // escape
+        switch CockpitKeyRouter.route(
+            key: key,
+            keyCode: event.keyCode,
+            modifiers: modifiers,
+            isTextEditingActive: isTextEditingActive()
+        ) {
+        case .record:
+            cockpitCapture.startRecording(targetApp: state.focusTarget)
+            return nil
+        case .stop:
+            Task { await cockpitCapture.stopRecording() }
+            return nil
+        case .undo:
+            Task { await coordinator.undoLastAction() }
+            return nil
+        case .insert:
+            Task { await coordinator.insertIntoTarget() }
+            return nil
+        case .copy:
+            coordinator.copyToClipboard()
+            return nil
+        case .toggleSidePanel:
+            sidePanelHidden.toggle()
+            return nil
+        case .close:
             coordinator.close()
             return nil
+        case .exitEditing:
+            // Resigning first responder flips the transcript editor's
+            // @FocusState, which commits the draft via its onChange handler.
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            return nil
+        case .passThrough:
+            return event
         }
+    }
 
-        return event
+    /// Whether an editable text view (the transcript editor in `.reviewing`,
+    /// or a field editor for e.g. the Notion search field) currently has
+    /// keyboard focus. Untestable one-liner by design — all routing policy
+    /// that consumes this lives in the unit-tested ``CockpitKeyRouter``.
+    private func isTextEditingActive() -> Bool {
+        (NSApp.keyWindow?.firstResponder as? NSTextView)?.isEditable == true
     }
 }

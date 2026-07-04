@@ -112,7 +112,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - `CockpitCoordinator` (@MainActor) routes chip taps + voice utterances + keyboard shortcuts. Chip MRU promotion threshold is 3 invocations (`promotionThreshold`); voice-prompt strip auto-dismisses after 10 review states (`voicePromptStripDismissThreshold`).
 - `VoiceCommandRouter.parse(_:)` is intentionally simple: single keyword, trailing punctuation stripped, case-insensitive. Multi-word utterances return `.none` — Layer 0 ships memo/MECE/items/cancel/undo only.
 - Six `SmartActionId`s ship in Layer 0: `.memo`, `.mece`, `.items`, `.steel` (steel-man), `.pyramid`, `.disclaimer`. System prompts live backend-side in `backend/app/smart_actions.py` (`_ACTION_DESCRIPTIONS` + `_SYSTEM_PROMPT_TEMPLATE`). Unknown `action_id` returns the transcript verbatim — never 5xx.
-- Keyboard shortcuts (wired via `KeyEventBridge`): `⌘R` start, `⌘.` stop, `⌘Z` undo, `⌘↩` insert into target + close + reset, `⌘C` copy, `⌘\` toggle side panel, `⌘W` / esc close. Visible chips bind `⌘1`-`⌘6`; `⌘K` opens the full action palette.
+- Keyboard shortcuts (wired via `KeyEventBridge`): `⌘R` start, `⌘.` stop, `⌘Z` undo, `⌘↩` insert into target + close + reset, `⌘C` copy, `⌘\` toggle side panel, `⌘W` / esc close. Visible chips bind `⌘1`-`⌘6`; `⌘K` opens the full action palette. Routing policy lives in the pure `CockpitKeyRouter` (keep `handleKey` a mechanical dispatch): while an editable text view has focus (transcript editor, Notion search), `⌘Z`/`⌘C` pass through to native undo/copy-selection and esc exits editing (committing the draft) — a second esc closes.
 
 ### Python
 - ConsentStore: 30-min TTL, thread-safe (`threading.Lock`); bounded-use tokens.
