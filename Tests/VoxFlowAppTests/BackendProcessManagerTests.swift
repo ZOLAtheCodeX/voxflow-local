@@ -64,10 +64,11 @@ final class BackendProcessManagerTests: XCTestCase {
         var killed: [pid_t] = []
         var removedFile = false
         BackendProcessManager.killStaleBackend(
-            readPID: { 7777 },
+            readRecord: { (7777, nil) },
             command: { _ in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" },
             terminate: { killed.append($0) },
-            removePID: { removedFile = true })
+            removePID: { removedFile = true },
+            ownStamp: nil)
         XCTAssertEqual(killed, [], "a reused non-VoxFlow PID must never be killed")
         XCTAssertTrue(removedFile, "the stale PID file should still be cleared")
     }
@@ -75,77 +76,77 @@ final class BackendProcessManagerTests: XCTestCase {
     func testKillStaleBackendTerminatesConfirmedBackend() {
         var killed: [pid_t] = []
         BackendProcessManager.killStaleBackend(
-            readPID: { 8888 },
+            readRecord: { (8888, nil) },
             command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
             terminate: { killed.append($0) },
-            removePID: {})
+            removePID: {},
+            ownStamp: nil)
         XCTAssertEqual(killed, [8888])
     }
 
     func testKillStaleBackendNoPIDFileIsNoOp() {
         var killed: [pid_t] = []
         BackendProcessManager.killStaleBackend(
-            readPID: { nil }, command: { _ in nil },
-            terminate: { killed.append($0) }, removePID: {})
+            readRecord: { nil }, command: { _ in nil },
+            terminate: { killed.append($0) }, removePID: {},
+            ownStamp: nil)
         XCTAssertEqual(killed, [])
     }
 
-    // MARK: - Stamp-bound PID file (strict identity probe before SIGTERM)
+    // MARK: - Stamp-bound PID file (own-session identity before SIGTERM)
 
-    func testKillStaleBackendRefusesWhenLiveStampContradictsRecord() {
-        // The port answers /v1/health with a DIFFERENT instance stamp than the
-        // PID file recorded: the file is stale/foreign (another session took
-        // over the port) — the recorded pid must not be killed.
+    func testKillStaleBackendRefusesAnotherSessionsRecord() {
+        // Concurrent sessions share one PID-file path. If the file records a
+        // DIFFERENT session's stamp, that session's (possibly live, healthy)
+        // backend is not ours to kill — refuse AND leave the file in place:
+        // the record belongs to the other session.
         var killed: [pid_t] = []
         var removedFile = false
         BackendProcessManager.killStaleBackend(
-            readPID: { 8888 },
+            readRecord: { (8888, "STAMP-SESSION-B") },
             command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
             terminate: { killed.append($0) },
             removePID: { removedFile = true },
-            recordedStamp: { "STAMP-RECORDED" },
-            probeStamp: { "STAMP-DIFFERENT-LIVE" })
-        XCTAssertEqual(killed, [], "stamp contradiction must refuse the kill")
-        XCTAssertTrue(removedFile, "the contradicted PID file is stale and should be cleared")
+            ownStamp: "STAMP-SESSION-A")
+        XCTAssertEqual(killed, [], "another session's backend must not be killed")
+        XCTAssertFalse(removedFile, "the other session's PID record must be left in place")
     }
 
-    func testKillStaleBackendProceedsWhenLiveStampMatchesRecord() {
+    func testKillStaleBackendKillsOwnRecordedChild() {
+        var killed: [pid_t] = []
+        var removedFile = false
+        BackendProcessManager.killStaleBackend(
+            readRecord: { (8888, "STAMP-MINE") },
+            command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
+            terminate: { killed.append($0) },
+            removePID: { removedFile = true },
+            ownStamp: "STAMP-MINE")
+        XCTAssertEqual(killed, [8888])
+        XCTAssertTrue(removedFile)
+    }
+
+    func testKillStaleBackendCrashRecoveryWithoutOwnStampUsesCmdlineGate() {
+        // Idle-reap before this session ever spawned (ownStamp nil): the
+        // record is a previous crashed session's leftover — exactly what the
+        // reaper exists for. The cmdline gate alone decides, as before.
         var killed: [pid_t] = []
         BackendProcessManager.killStaleBackend(
-            readPID: { 8888 },
+            readRecord: { (8888, "STAMP-CRASHED-SESSION") },
             command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
             terminate: { killed.append($0) },
             removePID: {},
-            recordedStamp: { "STAMP-A" },
-            probeStamp: { "STAMP-A" })
+            ownStamp: nil)
         XCTAssertEqual(killed, [8888])
     }
 
-    func testKillStaleBackendFallsBackToCmdlineGateWhenProbeUnreachable() {
-        // A hung/not-listening backend can't answer the health probe — the
-        // probe is an ADDITIONAL guard, not a new requirement, or a wedged
-        // backend could never be reaped. Cmdline gate still applies.
+    func testKillStaleBackendLegacyFileWithoutStampFallsBackToCmdlineGate() {
         var killed: [pid_t] = []
         BackendProcessManager.killStaleBackend(
-            readPID: { 8888 },
+            readRecord: { (8888, nil) },
             command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
             terminate: { killed.append($0) },
             removePID: {},
-            recordedStamp: { "STAMP-A" },
-            probeStamp: { nil })
-        XCTAssertEqual(killed, [8888])
-    }
-
-    func testKillStaleBackendProceedsWithoutRecordedStamp() {
-        // Legacy bare-pid file (no stamp line): behave exactly as before.
-        var killed: [pid_t] = []
-        BackendProcessManager.killStaleBackend(
-            readPID: { 8888 },
-            command: { _ in "/usr/bin/python3 /x/backend/app/server.py" },
-            terminate: { killed.append($0) },
-            removePID: {},
-            recordedStamp: { nil },
-            probeStamp: { "STAMP-ANY" })
+            ownStamp: "STAMP-MINE")
         XCTAssertEqual(killed, [8888])
     }
 

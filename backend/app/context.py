@@ -37,6 +37,18 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 
+# Readiness-probe failures logged once per provider: /v1/ready is polled, so a
+# per-poll WARNING would flood the log, while DEBUG would be invisible at the
+# INFO default above.
+_readiness_probe_warned: set[str] = set()
+
+
+def _warn_readiness_probe_once(provider_id: str, message: str) -> None:
+    if provider_id in _readiness_probe_warned:
+        return
+    _readiness_probe_warned.add(provider_id)
+    logger.warning("readiness: %s: %s", provider_id, message)
+
 MAX_AUDIO_PAYLOAD_BYTES = 10 * 1024 * 1024  # 10 MB decoded PCM limit
 MAX_AUDIO_BASE64_CHARS = int(MAX_AUDIO_PAYLOAD_BYTES * 4 / 3) + 100
 
@@ -162,15 +174,17 @@ def readiness_snapshot() -> ReadyResponse:
                 except Exception as exc:
                     # None = "could not verify", not "missing" — but say why,
                     # or a misconfigured provider is invisible on the exact
-                    # path meant to surface it.
-                    logger.debug("readiness: could not enumerate Ollama models for %s: %s", spec.id, exc)
+                    # path meant to surface it. WARNING (visible at the
+                    # default INFO config) but once per provider: /v1/ready
+                    # is polled, and a per-poll line would flood the log.
+                    _warn_readiness_probe_once(spec.id, f"could not enumerate Ollama models: {exc}")
                     model_pulled = None
         elif spec.kind == "openai_compat":
             # Local servers come and go; probe is cheap (1.5 s worst case).
             try:
                 reachable = provider_registry.backend(spec.id).is_available()
             except Exception as exc:
-                logger.debug("readiness: availability probe failed for %s: %s", spec.id, exc)
+                _warn_readiness_probe_once(spec.id, f"availability probe failed: {exc}")
                 reachable = False
         else:
             # Cloud APIs: a key on file is the best cheap signal.

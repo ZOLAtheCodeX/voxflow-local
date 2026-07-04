@@ -87,3 +87,9 @@ class TestLoopbackGuard:
         assert server.resolve_bind_host_port(
             {"VOXFLOW_BACKEND_HOST": "127.0.0.2", "VOXFLOW_BACKEND_PORT": "9000"}
         ) == ("127.0.0.2", 9000)
+        # Foundation URL.host can hand the Swift launcher the BRACKETED IPv6
+        # form, which BackendEndpoint.isLoopback whitelists — the backend must
+        # accept it too, or a whitelisted config dies at the bind point.
+        assert server.resolve_bind_host_port(
+            {"VOXFLOW_BACKEND_HOST": "[::1]", "VOXFLOW_BACKEND_PORT": "9000"}
+        ) == ("[::1]", 9000)

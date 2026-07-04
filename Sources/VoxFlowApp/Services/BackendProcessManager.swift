@@ -357,6 +357,7 @@ final class BackendProcessManager: @unchecked Sendable {
             _lastStartupFailureReason = nil
             log.info("Backend started (pid: \(task.processIdentifier))")
             runner.writePIDFile(task.processIdentifier, stamp: instanceStamp)
+            Self.spawnedSessionStamp = instanceStamp
 
             // Auto-restart on unexpected crash (non-zero exit), up to maxCrashRestarts.
             // Skip restart if the shutdown was intentional (stop/restart called).
@@ -720,37 +721,30 @@ final class BackendProcessManager: @unchecked Sendable {
         return parsed.pid
     }
 
-    /// The instance stamp recorded alongside the pid, if the file has one.
-    static func readPIDFileStamp() -> String? {
-        guard let contents = try? String(contentsOfFile: pidFilePath, encoding: .utf8) else { return nil }
-        return parsePIDFileContents(contents)?.stamp
+    /// One atomic read of the PID file: pid + the recorded session stamp.
+    /// (Reading pid and stamp in two separate calls was a TOCTOU — the file
+    /// could be rewritten between them, mixing records.) Alive-checked like
+    /// ``readPIDFile()``.
+    static func readPIDFileRecord() -> (pid: pid_t, stamp: String?)? {
+        guard let contents = try? String(contentsOfFile: pidFilePath, encoding: .utf8),
+              let parsed = parsePIDFileContents(contents) else {
+            return nil
+        }
+        guard kill(parsed.pid, 0) == 0 else {
+            removePIDFile()
+            return nil
+        }
+        return parsed
     }
 
-    /// Synchronously fetch the live backend's instance stamp from /v1/health
-    /// on the resolved port. Short timeout — this runs in launch cleanup and
-    /// the atexit fallback, so it must never hang. nil on any failure.
-    static func probeHealthInstanceStamp(timeout: TimeInterval = 0.6) -> String? {
-        let endpoint = BackendEndpoint.resolved()
-        let base = endpoint.url.absoluteString.hasSuffix("/")
-            ? String(endpoint.url.absoluteString.dropLast())
-            : endpoint.url.absoluteString
-        guard let url = URL(string: "\(base)/v1/health") else { return nil }
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = timeout
-        config.timeoutIntervalForResource = timeout
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
-        let semaphore = DispatchSemaphore(value: 0)
-        var stamp: String?
-        let task = session.dataTask(with: url) { data, _, _ in
-            defer { semaphore.signal() }
-            guard let data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-            stamp = json["instance_stamp"] as? String
-        }
-        task.resume()
-        _ = semaphore.wait(timeout: .now() + timeout + 0.2)
-        return stamp
+    /// The instance stamp of the backend THIS process spawned (set at spawn,
+    /// next to the PID-file write). Lets the C-level atexit handler — which
+    /// cannot capture context — know which session's record it may reap.
+    private static let sessionStampLock = NSLock()
+    nonisolated(unsafe) private static var _spawnedSessionStamp: String?
+    static var spawnedSessionStamp: String? {
+        get { sessionStampLock.withLock { _spawnedSessionStamp } }
+        set { sessionStampLock.withLock { _spawnedSessionStamp = newValue } }
     }
 
     /// Kill any stale backend from a previous app session. Called from atexit/terminate handlers
@@ -785,37 +779,34 @@ final class BackendProcessManager: @unchecked Sendable {
     /// unit-testable without touching real processes. Static + synchronous so the
     /// C-level atexit handler can call it.
     static func killStaleBackend(
-        readPID: () -> pid_t? = { readPIDFile() },
+        readRecord: () -> (pid: pid_t, stamp: String?)? = { readPIDFileRecord() },
         command: (pid_t) -> String? = { processCommandLine($0) },
         terminate: (pid_t) -> Void = { _ = kill($0, SIGTERM) },
         removePID: () -> Void = { removePIDFile() },
-        // Stamp probe defaults are XCTest-inert (same rule as defaultRunner()):
-        // a test that forgets to inject must never read the real PID file or
-        // probe the real health endpoint.
-        recordedStamp: () -> String? = {
-            NSClassFromString("XCTestCase") != nil ? nil : readPIDFileStamp()
-        },
-        probeStamp: () -> String? = {
-            NSClassFromString("XCTestCase") != nil ? nil : probeHealthInstanceStamp()
-        }
+        // The stamp of the backend THIS session spawned (nil if it never
+        // spawned one). Defaults to the static set at spawn time so the
+        // C-level atexit handler gets it without capturing context; tests
+        // always inject explicitly.
+        ownStamp: String? = spawnedSessionStamp
     ) {
-        guard let pid = readPID() else { return }
+        guard let record = readRecord() else { return }
+        let pid = record.pid
         guard isVoxFlowBackendCommand(command(pid)) else {
             log.warning("PID-file pid \(pid) is not a VoxFlow backend (gone or reused) — not killing; clearing stale PID file")
             removePID()
             return
         }
-        // Strict identity: when the file records an instance stamp AND the
-        // resolved port answers /v1/health, the stamps must agree — a
-        // contradiction means the port is served by a DIFFERENT backend than
-        // the file describes (e.g. another session took over), so the file is
-        // stale/foreign and the recorded pid must not be killed. A failed
-        // probe (hung or not-listening backend) falls back to the cmdline
-        // gate above — the probe only ever REDUCES kills, it never blocks
-        // reaping a wedged backend.
-        if let recorded = recordedStamp(), let live = probeStamp(), recorded != live {
-            log.warning("PID-file stamp \(recorded, privacy: .public) contradicts live backend stamp \(live, privacy: .public) — not killing pid \(pid); clearing stale PID file")
-            removePID()
+        // Own-session binding: both callers of this reaper mean "clean up the
+        // child *I* spawned" (atexit) or "reap a crashed PREVIOUS session's
+        // leftover" (idle-reap, before this session has spawned → ownStamp
+        // nil). When this session HAS spawned and the file records a
+        // DIFFERENT session's stamp, a concurrent session overwrote the
+        // shared PID file — its (possibly live, healthy) backend is not ours
+        // to kill, and its record is not ours to delete. Legacy stamp-less
+        // files and the not-yet-spawned case keep the plain cmdline-gated
+        // behavior, so a wedged crash leftover can always be reaped.
+        if let recorded = record.stamp, let own = ownStamp, recorded != own {
+            log.warning("PID file records another session's backend (stamp \(recorded, privacy: .public), mine \(own, privacy: .public)) — not killing pid \(pid); leaving its record in place")
             return
         }
         log.info("Killing stale backend (pid \(pid)) from PID file")

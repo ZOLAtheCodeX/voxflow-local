@@ -227,13 +227,22 @@ app.include_router(api_router)
 
 
 def _is_loopback_host(host: str) -> bool:
-    """localhost, ::1, or anything in 127.0.0.0/8."""
+    """localhost, ::1 (bracketed or bare), or anything in 127.0.0.0/8.
+
+    Literal forms only, matching the Swift launcher's whitelist
+    (``BackendEndpoint.isLoopback``) — a hosts-file alias that RESOLVES to
+    loopback is still refused here (no DNS at bind time); use
+    ``scripts/run_backend.sh`` for exotic hosts.
+    """
     if host.lower() == "localhost":
         return True
     try:
         import ipaddress
 
-        return ipaddress.ip_address(host).is_loopback
+        # URL parsing yields bare "::1", but VOXFLOW_BACKEND_HOST set from a
+        # Foundation URL.host can carry the bracketed "[::1]" form the Swift
+        # whitelist accepts — normalize before classifying.
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
     except ValueError:
         return False
 

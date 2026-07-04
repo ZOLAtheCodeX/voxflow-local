@@ -213,15 +213,21 @@ struct CockpitWindowView: View {
             Task { await coordinator.insertIntoTarget() }
             return nil
         case .commitThenInsert:
-            // Resign focus so the transcript editor's focus-loss handler
-            // commits the draft (setTranscript), then give SwiftUI one beat
-            // to run that handler before the insert path reads the
-            // transcript. Cooperative sleep only — never Thread.sleep.
-            NSApp.keyWindow?.makeFirstResponder(nil)
-            Task {
-                try? await Task.sleep(for: .milliseconds(120))
-                await coordinator.insertIntoTarget()
+            // Commit the draft DETERMINISTICALLY before inserting: the
+            // focused transcript editor's NSTextView.string IS the draft, so
+            // write it through setTranscript synchronously rather than
+            // resigning focus and racing the editor's async focus-loss
+            // handler (a fixed sleep could still insert stale text under
+            // main-actor load). A focused TextField (e.g. Notion search)
+            // presents as the window's FIELD editor — skip it: no transcript
+            // draft is pending there. The later focus-loss commit becomes an
+            // idempotent no-op-or-duplicate write of the same text.
+            if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+               textView.isEditable, !textView.isFieldEditor {
+                sessionService.setTranscript(textView.string)
             }
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            Task { await coordinator.insertIntoTarget() }
             return nil
         case .copy:
             coordinator.copyToClipboard()
