@@ -133,8 +133,8 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 ## Testing
 
 ```bash
-swift test                                              # ~562 Swift tests
-./.venv/bin/python -m pytest backend/tests              # ~477 Python tests (+26 model/live-Ollama skipped)
+swift test                                              # ~586 Swift tests
+./.venv/bin/python -m pytest backend/tests              # ~510 Python tests (+26 model/live-Ollama skipped)
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
 VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py  # live Ollama acceptance
