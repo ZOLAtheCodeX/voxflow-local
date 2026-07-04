@@ -38,13 +38,18 @@ def _loud_pcm(sample_count: int) -> bytes:
 
 
 @pytest.fixture(autouse=True)
-def reset_mocks():
+def reset_mocks(monkeypatch):
     """Reset mocks before each test to ensure isolation."""
     # Reset transformers.pipeline mock
     sys.modules["transformers"].reset_mock()
     # Reset specific side effects/return values we might have set
     sys.modules["transformers"].pipeline.side_effect = None
     sys.modules["transformers"].pipeline.return_value = MagicMock()
+    # These tests exercise the layers AROUND the VAD gate with square-wave
+    # test audio that real Silero (correctly) classifies as not-speech —
+    # disable the gate by default so they still reach decode. The VAD gate
+    # tests below re-enable it explicitly and inject fakes.
+    monkeypatch.setenv("VOXFLOW_VAD_GATE", "0")
     yield
 
 def test_load_pipeline_failure():
@@ -226,3 +231,79 @@ def test_openai_confidence_heuristic_replaces_hardcoded_value():
     # Empty text
     assert OpenAIAudioClient._estimate_confidence("", 16000, 16000) == 0.0
 
+
+
+# ── VAD decode gate (R6) ─────────────────────────────────────────────────
+
+
+class _FakeVAD:
+    """Injected VAD double — these tests exercise the GATE policy, not the
+    silero model (test_vad_engine.py covers the real model)."""
+
+    def __init__(self, speech: bool, available: bool = True):
+        self._speech = speech
+        self._available = available
+        self.calls = 0
+
+    def analyze(self, pcm, sample_rate):
+        from engines.vad import VADResult
+
+        self.calls += 1
+        return VADResult(
+            speech_detected=self._speech,
+            speech_ratio=0.5 if self._speech else 0.0,
+            speech_ms=1000 if self._speech else 0,
+            available=self._available,
+        )
+
+
+def test_vad_gate_blocks_noise_only_audio(monkeypatch):
+    """Noise passes the RMS gate (noise has energy) but must never reach the
+    model — Whisper hallucinates text from non-speech."""
+    monkeypatch.setenv("VOXFLOW_VAD_GATE", "1")
+    vad = _FakeVAD(speech=False)
+    engine = WhisperEngine(vad=vad)
+
+    result = engine.transcribe(_loud_pcm(16000), 16000, "en")
+
+    assert result.text == ""
+    assert result.confidence == 0.0
+    assert vad.calls == 1
+    sys.modules["transformers"].pipeline.assert_not_called()
+
+
+def test_vad_gate_passes_real_speech_to_decode(monkeypatch):
+    monkeypatch.setenv("VOXFLOW_VAD_GATE", "1")
+    vad = _FakeVAD(speech=True)
+    engine = WhisperEngine(vad=vad)
+    mock_pipe = MagicMock(return_value={"text": "hello world"})
+    sys.modules["transformers"].pipeline.return_value = mock_pipe
+
+    engine.transcribe(_loud_pcm(16000), 16000, "en")
+
+    assert vad.calls == 1
+    sys.modules["transformers"].pipeline.assert_called_once()
+
+
+def test_vad_gate_fails_open_when_unavailable(monkeypatch):
+    """VAD unavailability must never block transcription."""
+    monkeypatch.setenv("VOXFLOW_VAD_GATE", "1")
+    vad = _FakeVAD(speech=True, available=False)
+    engine = WhisperEngine(vad=vad)
+    sys.modules["transformers"].pipeline.return_value = MagicMock(return_value={"text": "x"})
+
+    engine.transcribe(_loud_pcm(16000), 16000, "en")
+
+    sys.modules["transformers"].pipeline.assert_called_once()
+
+
+def test_vad_gate_env_disable(monkeypatch):
+    monkeypatch.setenv("VOXFLOW_VAD_GATE", "0")
+    vad = _FakeVAD(speech=False)
+    engine = WhisperEngine(vad=vad)
+    sys.modules["transformers"].pipeline.return_value = MagicMock(return_value={"text": "x"})
+
+    engine.transcribe(_loud_pcm(16000), 16000, "en")
+
+    assert vad.calls == 0, "disabled gate must not consult the VAD at all"
+    sys.modules["transformers"].pipeline.assert_called_once()

@@ -51,3 +51,56 @@ final class CaptureFeedbackTests: XCTestCase {
             CaptureFeedback.rejectionStatus(reason: .empty, rmsEnergy: CapturedAudio.speechFloor - 0.001).lowercased().contains("mic"))
     }
 }
+
+// ── VAD-refined feedback (R6) ────────────────────────────────────────────
+
+extension CaptureFeedbackTests {
+    /// Silero diagnosis (via /v1/audio/diagnose) sharpens the empty-capture
+    /// message beyond the RMS heuristic: "speech but too quiet" vs "only
+    /// background noise" vs "speech but not recognized".
+
+    func test_refined_speech_too_quiet() {
+        let d = AudioDiagnosis(speechDetected: true, speechMs: 1200, vadAvailable: true)
+        let status = CaptureFeedback.refinedRejectionStatus(reason: .empty, rmsEnergy: 0.012, diagnosis: d)
+        XCTAssertTrue(status.contains("too quiet"), "weak speech must earn the raise-input hint: \(status)")
+        XCTAssertTrue(status.contains("System Settings"), "hint must stay actionable: \(status)")
+    }
+
+    func test_refined_speech_at_normal_level_not_recognized() {
+        let d = AudioDiagnosis(speechDetected: true, speechMs: 900, vadAvailable: true)
+        let status = CaptureFeedback.refinedRejectionStatus(reason: .empty, rmsEnergy: 0.08, diagnosis: d)
+        XCTAssertFalse(status.contains("too quiet"), "normal-level speech must not blame the mic: \(status)")
+        XCTAssertTrue(status.lowercased().contains("not recognized"), "\(status)")
+    }
+
+    func test_refined_no_speech_names_background_noise() {
+        let d = AudioDiagnosis(speechDetected: false, speechMs: 0, vadAvailable: true)
+        let status = CaptureFeedback.refinedRejectionStatus(reason: .empty, rmsEnergy: 0.03, diagnosis: d)
+        XCTAssertTrue(status.lowercased().contains("background noise"), "\(status)")
+    }
+
+    func test_refined_falls_back_when_vad_unavailable() {
+        let d = AudioDiagnosis(speechDetected: true, speechMs: 0, vadAvailable: false)
+        let fallback = CaptureFeedback.rejectionStatus(reason: .empty, rmsEnergy: 0.012)
+        XCTAssertEqual(
+            CaptureFeedback.refinedRejectionStatus(reason: .empty, rmsEnergy: 0.012, diagnosis: d),
+            fallback, "fail-open diagnosis must not change the message")
+    }
+
+    func test_refined_falls_back_without_diagnosis() {
+        let fallback = CaptureFeedback.rejectionStatus(reason: .empty, rmsEnergy: 0.012)
+        XCTAssertEqual(
+            CaptureFeedback.refinedRejectionStatus(reason: .empty, rmsEnergy: 0.012, diagnosis: nil),
+            fallback)
+    }
+
+    func test_refined_ignores_invented_content_rejections() {
+        // Hallucination/placeholder rejections are about model-invented
+        // content — a speech-presence diagnosis is irrelevant there.
+        let d = AudioDiagnosis(speechDetected: true, speechMs: 1000, vadAvailable: true)
+        let fallback = CaptureFeedback.rejectionStatus(reason: .hallucinationFilter, rmsEnergy: 0.03)
+        XCTAssertEqual(
+            CaptureFeedback.refinedRejectionStatus(reason: .hallucinationFilter, rmsEnergy: 0.03, diagnosis: d),
+            fallback)
+    }
+}

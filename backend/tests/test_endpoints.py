@@ -589,3 +589,78 @@ class TestInstanceStamp:
         assert ready.json()["instance_stamp"] == "stamp-abc-123"
         health = await client.get("/v1/health")
         assert health.json()["instance_stamp"] == "stamp-abc-123"
+
+
+class TestAudioDiagnose:
+    """POST /v1/audio/diagnose (R6): the app posts an empty capture's PCM so
+    the status line can distinguish "speech detected but too quiet" from
+    "no speech detected" — sharper than the client-side RMS heuristic."""
+
+    @staticmethod
+    def _b64(pcm: bytes) -> str:
+        import base64 as _b64mod
+
+        return _b64mod.b64encode(pcm).decode()
+
+    @pytest.mark.anyio
+    async def test_diagnose_reports_speech_presence(self, client, monkeypatch):
+        from api import endpoints as ep
+        from engines.vad import VADResult
+
+        class _FakeVAD:
+            def analyze(self, pcm, sample_rate):
+                return VADResult(speech_detected=True, speech_ratio=0.42, speech_ms=1200, available=True)
+
+        monkeypatch.setattr(ep, "shared_vad", lambda: _FakeVAD())
+
+        quiet_speech = (b"\x10\x00" * 16000)  # weak but non-silent
+        resp = await client.post("/v1/audio/diagnose", json={
+            "session_id": "diag-1",
+            "audio_pcm16le": self._b64(quiet_speech),
+            "sample_rate": 16000,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["speech_detected"] is True
+        assert data["speech_ms"] == 1200
+        assert data["vad_available"] is True
+        assert data["rms"] > 0.0
+
+    @pytest.mark.anyio
+    async def test_diagnose_no_speech(self, client, monkeypatch):
+        from api import endpoints as ep
+        from engines.vad import VADResult
+
+        class _FakeVAD:
+            def analyze(self, pcm, sample_rate):
+                return VADResult(speech_detected=False, speech_ratio=0.0, speech_ms=0, available=True)
+
+        monkeypatch.setattr(ep, "shared_vad", lambda: _FakeVAD())
+
+        resp = await client.post("/v1/audio/diagnose", json={
+            "session_id": "diag-2",
+            "audio_pcm16le": self._b64(b"\x00\x00" * 16000),
+            "sample_rate": 16000,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["speech_detected"] is False
+
+    @pytest.mark.anyio
+    async def test_diagnose_rejects_invalid_base64(self, client):
+        resp = await client.post("/v1/audio/diagnose", json={
+            "session_id": "diag-3",
+            "audio_pcm16le": "!!!not-base64!!!",
+            "sample_rate": 16000,
+        })
+        assert resp.status_code == 400
+
+    @pytest.mark.anyio
+    async def test_diagnose_rejects_oversized_payload(self, client):
+        from context import MAX_AUDIO_BASE64_CHARS
+
+        resp = await client.post("/v1/audio/diagnose", json={
+            "session_id": "diag-4",
+            "audio_pcm16le": "A" * (MAX_AUDIO_BASE64_CHARS + 1),
+            "sample_rate": 16000,
+        })
+        assert resp.status_code == 413

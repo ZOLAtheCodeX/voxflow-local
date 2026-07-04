@@ -397,6 +397,43 @@ enum BackendAPIClient {
         return try await performRequest(path: "v1/transcribe", payload: payload)
     }
 
+    /// Speech-presence diagnosis for an empty capture (R6): the backend's
+    /// Silero VAD says whether speech was present, so the status line can
+    /// distinguish "too quiet" from "background noise only". Localhost-only —
+    /// the audio never leaves the machine. Callers treat any thrown error as
+    /// "no diagnosis" and keep the RMS-based message (a cold backend refuses
+    /// the connection fast; this call never triggers a spawn).
+    static func diagnoseAudio(
+        sessionID: String,
+        audioPCM: Data,
+        sampleRate: Int
+    ) async throws -> AudioDiagnosis {
+        struct Payload: Codable {
+            let sessionId: String
+            let audioPcm16le: String
+            let sampleRate: Int
+        }
+        struct Response: Decodable {
+            let speechDetected: Bool
+            let speechMs: Int
+            let vadAvailable: Bool
+        }
+
+        let response: Response = try await performRequest(
+            path: "v1/audio/diagnose",
+            payload: Payload(
+                sessionId: sessionID,
+                audioPcm16le: audioPCM.base64EncodedString(),
+                sampleRate: sampleRate
+            )
+        )
+        return AudioDiagnosis(
+            speechDetected: response.speechDetected,
+            speechMs: response.speechMs,
+            vadAvailable: response.vadAvailable
+        )
+    }
+
     static func cleanup(
         sessionID: String,
         mode: CleanupMode,

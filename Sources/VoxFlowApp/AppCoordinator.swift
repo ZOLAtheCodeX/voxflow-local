@@ -900,7 +900,22 @@ final class AppCoordinator: ObservableObject {
                 peakAmplitude: transcription.peakAmplitude
             )
             state.sessionState = .idle
-            state.statusLine = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)
+            var rejectionStatus = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)
+            // R6: for an EMPTY capture, ask the backend's Silero VAD whether
+            // speech was actually present — "too quiet" vs "background noise
+            // only" beats the RMS guess. Fail-quiet: a cold backend refuses
+            // the connection fast (the call never triggers a spawn) and the
+            // RMS-based message above stands.
+            if reason == .empty,
+               let diagnosis = try? await BackendAPIClient.diagnoseAudio(
+                   sessionID: sessionID,
+                   audioPCM: capturedAudio.pcm,
+                   sampleRate: Int(capturedAudio.sampleRate)
+               ) {
+                rejectionStatus = CaptureFeedback.refinedRejectionStatus(
+                    reason: reason, rmsEnergy: rms, diagnosis: diagnosis)
+            }
+            state.statusLine = rejectionStatus
             state.recordingDuration = 0
             return
         }

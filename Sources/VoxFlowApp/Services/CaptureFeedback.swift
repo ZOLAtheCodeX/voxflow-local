@@ -27,4 +27,43 @@ enum CaptureFeedback {
             return "No speech detected — try again"
         }
     }
+
+    /// Sharpen the empty-capture message with a Silero speech-presence
+    /// diagnosis (R6, `/v1/audio/diagnose`): "speech but too quiet" vs "only
+    /// background noise" vs "speech but not recognized" — the RMS heuristic
+    /// alone cannot tell noise from weak speech. Falls back to
+    /// ``rejectionStatus(reason:rmsEnergy:)`` whenever the diagnosis is
+    /// missing or failed open (`vadAvailable == false`), and for
+    /// invented-content rejections (placeholder/hallucination) where speech
+    /// presence is irrelevant.
+    static func refinedRejectionStatus(
+        reason: TranscriptGate.Rejection,
+        rmsEnergy: Double,
+        diagnosis: AudioDiagnosis?
+    ) -> String {
+        switch reason {
+        case .silence, .empty, .lowConfidence:
+            guard let diagnosis, diagnosis.vadAvailable else {
+                return rejectionStatus(reason: reason, rmsEnergy: rmsEnergy)
+            }
+            if diagnosis.speechDetected {
+                return rmsEnergy < CapturedAudio.speechFloor
+                    ? "Speech detected but too quiet — raise your input level in System Settings → Sound"
+                    : "Speech detected but not recognized — try again"
+            }
+            return "No speech detected — the recording captured only background noise"
+        case .placeholder, .hallucinationFilter:
+            return rejectionStatus(reason: reason, rmsEnergy: rmsEnergy)
+        }
+    }
+}
+
+/// Speech-presence verdict from the backend's Silero VAD
+/// (`POST /v1/audio/diagnose`). `vadAvailable == false` means the VAD failed
+/// open — `speechDetected` is not meaningful and callers must fall back to
+/// the RMS-based message.
+struct AudioDiagnosis: Equatable {
+    let speechDetected: Bool
+    let speechMs: Int
+    let vadAvailable: Bool
 }

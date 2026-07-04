@@ -33,7 +33,7 @@ logger = logging.getLogger("voxflow")
 
 
 class WhisperEngine:
-    def __init__(self) -> None:
+    def __init__(self, vad=None) -> None:
         model_ref = os.environ.get("VOXFLOW_WHISPER_MODEL", "openai/whisper-small")
         self.model_id = resolve_model_ref(model_ref)
         self._pipeline = None
@@ -41,6 +41,24 @@ class WhisperEngine:
         self._load_failed = False
         self._warmed_up = False
         self._lock = Lock()
+        # Injectable for tests; None resolves the shared Silero singleton
+        # lazily at first gate use (never at import/construction).
+        self._vad = vad
+
+    def _vad_analyze(self, pcm: bytes, sample_rate: int):
+        """Run the VAD, failing OPEN on absolutely any problem — a VAD issue
+        (missing dep, mocked ML modules, model failure) must never block
+        transcription."""
+        try:
+            from .vad import VADResult, shared_vad
+
+            vad = self._vad if self._vad is not None else shared_vad()
+            return vad.analyze(pcm, sample_rate)
+        except Exception as exc:
+            logger.warning("VAD gate unavailable (%s) — failing open", exc)
+            from .vad import VADResult
+
+            return VADResult(speech_detected=True, speech_ratio=0.0, speech_ms=0, available=False)
 
     def _load_pipeline(self) -> None:
         if self._pipeline is not None:
@@ -201,6 +219,30 @@ class WhisperEngine:
                 model_loaded_after_request=self.model_loaded,
                 cold_start=False,
             )
+
+        # VAD gate (R6): noise-only audio passes the RMS gate — noise has
+        # energy — but must still never reach the model (Whisper hallucinates
+        # text from non-speech). Silero runs on CPU in tens of ms and, like
+        # the energy gate, sits BEFORE model load. Fail-open: only a
+        # definitive available-and-no-speech verdict blocks decode. Disable
+        # via VOXFLOW_VAD_GATE=0.
+        if os.environ.get("VOXFLOW_VAD_GATE", "1").strip() != "0":
+            vad_started = time.perf_counter()
+            vad_result = self._vad_analyze(pcm, sample_rate)
+            stage_timings_ms["vad_gate"] = int((time.perf_counter() - vad_started) * 1000)
+            if vad_result.available and not vad_result.speech_detected:
+                logger.info(
+                    "VAD gate: no speech detected (RMS %.4f, %d ms audio) — skipping inference",
+                    rms, int(len(pcm) / 2 / sample_rate * 1000),
+                )
+                return STTExecutionResult(
+                    text="",
+                    confidence=0.0,
+                    stage_timings_ms=stage_timings_ms,
+                    model_loaded_before_request=model_loaded_before_request,
+                    model_loaded_after_request=self.model_loaded,
+                    cold_start=False,
+                )
 
         load_started = time.perf_counter()
         self._load_pipeline()

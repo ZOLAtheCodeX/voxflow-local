@@ -30,6 +30,22 @@ class TranscribeResponse(BaseModel):
     cold_start: bool = False
 
 
+class AudioDiagnoseRequest(BaseModel):
+    session_id: str
+    audio_pcm16le: str
+    sample_rate: int = Field(default=16000, ge=8000, le=192000)
+
+
+class AudioDiagnoseResponse(BaseModel):
+    # Speech-presence diagnosis for an empty capture (R6): lets the app say
+    # "speech detected but too quiet" vs "no speech detected".
+    speech_detected: bool
+    speech_ratio: float
+    speech_ms: int
+    rms: float
+    vad_available: bool  # False = VAD failed open; speech_detected is not meaningful
+
+
 class CleanupRequest(BaseModel):
     session_id: str
     mode: str

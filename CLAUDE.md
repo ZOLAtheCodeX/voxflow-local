@@ -35,6 +35,7 @@ backend/app/                    FastAPI server, decomposed in Phase 2
   schemas.py                    All Pydantic request/response models
   engines/                      ML engines (Phase 2 + 3)
     whisper.py                  WhisperEngine (local HF pipeline) + OpenAIAudioClient (cloud fallback)
+    vad.py                      SileroVAD (R6) — speech-presence gate for whisper decode + /v1/audio/diagnose; model bundled in the silero-vad wheel (offline); fail-open
     llm_backend.py              TextLLMBackend Protocol + OllamaBackend + select_backend + Ollama admin helpers (list/pull/recommend)
     polish.py                   PolishEngine — guardrail + apply_tone(light_cleanup()) regex fallback
     translate.py                TranslateEngine (TranslateGemma / Marian)
@@ -88,6 +89,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | `VOXFLOW_OLLAMA_KEEP_ALIVE` | How long Ollama keeps the polish model resident after a request (frees RAM between sessions; set `24h` for always-warm) | `15m` |
 | `VOXFLOW_POLISH_BACKEND` | Polish selector (only `ollama` recognised post-3.5) | `ollama` |
 | `VOXFLOW_POLISH_MEMORY_GUARD` | `0` disables skipping local polish providers under OS memory pressure | on |
+| `VOXFLOW_VAD_GATE` | `0` disables the Silero speech-presence gate in front of whisper-backend decode | on |
 | `VOXFLOW_SIGN_IDENTITY` | Code-signing identity override | auto-detected Apple Development cert |
 | `VOXFLOW_OFFLINE` | Disable HF downloads | `1` |
 | `VOXFLOW_ADOPT_FOREIGN_BACKEND` | `1` = app pairs with a manually run backend instead of reaping stamp-less listeners on 8765 (dev only) | unset |
@@ -120,6 +122,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - Rate limiter: 120 req/60 s per IP, single-worker assumption, lock-guarded (Phase 5.3).
 - PII redaction: credit cards Luhn-validated before `[ACCOUNT_NUMBER]` redaction (Phase 5.2).
 - Whisper short-audio fast path: clips < 20 s skip the chunking + stride padding via per-call `chunk_length_s=0` (Phase 5.1).
+- Silero VAD (R6): `engines/vad.py` gates whisper-backend decode after the RMS energy gate (noise has energy; VAD tells noise from speech) and serves `POST /v1/audio/diagnose`, which the app calls on an EMPTY capture to refine the status line ("speech but too quiet" / "background noise only" / "speech but not recognized" — see `CaptureFeedback.refinedRejectionStatus`). Fail-open everywhere: VAD unavailability must never block transcription or change a message. Model ships inside the silero-vad wheel (verified offline-loadable).
 - WebSocket `/v1/events` enforces a 60 s idle timeout with clean close frame (Phase 5.4).
 - Polish engine executes the BYOM provider chain (R3): availability failures fall to the next provider, guardrail rejections fall straight to the regex floor, the floor is unconditional. Under OS memory pressure (`kern.memorystatus_vm_pressure_level` ≥ 2, fail-open) LOCAL providers are skipped so the resident LLM never competes with live capture — cloud entries still run; floor reports `degraded_reason="memory_pressure"`; disable via `VOXFLOW_POLISH_MEMORY_GUARD=0`. `run()` returns `PolishOutcome` (text, guardrail_triggered, degraded_reason, served_by, model_id, fallback_depth); `polish()` is the 3-tuple compat wrapper. Cloud-bound payloads pass `redact_sensitive_text` first. Guardrail is word-level with tone-aware floors (R2.2).
 - BYOM config: `~/Library/Application Support/VoxFlow/providers.json` (written by Swift `ProviderConfigStore`, read by the backend registry at launch; `VOXFLOW_PROVIDERS_CONFIG` dev override). Per-task chains: `polish`, `smart_action` — each task gets its OWN PolishEngine (`smart_action_polish_engine` in context.py). API keys live in the Keychain (`voxflow.provider.<id>`); the app injects them at backend launch as `VOXFLOW_PROVIDER_KEY_*` env vars named by `api_key_env` — never in the JSON file.

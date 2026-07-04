@@ -40,6 +40,8 @@ from engines.llm_backend import (
     pull_ollama_model_stream,
     recommend_ollama_model,
 )
+from engines.vad import shared_vad
+from engines.whisper import WhisperEngine
 
 from nlp import (
     is_whisper_hallucination,
@@ -53,6 +55,8 @@ from routing import (
 )
 
 from schemas import (
+    AudioDiagnoseRequest,
+    AudioDiagnoseResponse,
     ProviderTestRequest,
     ProviderTestResponse,
     CleanupRequest,
@@ -164,6 +168,43 @@ def providers_test(payload: ProviderTestRequest) -> ProviderTestResponse:
         return ProviderTestResponse(provider_id=spec.id, reachable=True, detail="API key on file (verified at first request)")
 
     return ProviderTestResponse(provider_id=spec.id, reachable=False, detail=f"Unknown kind {spec.kind}")
+
+
+@router.post("/v1/audio/diagnose", response_model=AudioDiagnoseResponse)
+async def audio_diagnose(payload: AudioDiagnoseRequest) -> AudioDiagnoseResponse:
+    """Speech-presence diagnosis for an empty capture (R6).
+
+    The app posts the PCM of a capture that yielded no transcript; Silero
+    VAD distinguishes "speech present but too quiet" (user should raise the
+    input level) from "no speech at all" — sharper than the client-side RMS
+    heuristic. Localhost-only like every endpoint; audio never leaves the
+    machine. When the VAD cannot run, ``vad_available`` is False and callers
+    must fall back to their RMS message.
+    """
+    if len(payload.audio_pcm16le) > MAX_AUDIO_BASE64_CHARS:
+        raise HTTPException(status_code=413, detail="Audio payload too large")
+    try:
+        audio_bytes = base64.b64decode(payload.audio_pcm16le, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid audio payload: {exc}") from exc
+    if len(audio_bytes) > MAX_AUDIO_PAYLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Decoded audio exceeds size limit")
+    if len(audio_bytes) % 2 != 0:
+        raise HTTPException(status_code=400, detail="PCM16 audio must have even byte length")
+
+    # Same normalized RMS the transcribe path records in audit receipts, so
+    # the numbers are comparable across surfaces.
+    rms = WhisperEngine._rms_energy(audio_bytes)
+    # Tiny CPU-bound model (~tens of ms) — off the event loop, but not worth
+    # the ML semaphore that guards the big decoders.
+    result = await run_blocking(shared_vad().analyze, audio_bytes, payload.sample_rate)
+    return AudioDiagnoseResponse(
+        speech_detected=result.speech_detected,
+        speech_ratio=result.speech_ratio,
+        speech_ms=result.speech_ms,
+        rms=rms,
+        vad_available=result.available,
+    )
 
 
 @router.post("/v1/transcribe", response_model=TranscribeResponse)
