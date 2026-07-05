@@ -37,14 +37,14 @@ jobs:
     name: Ruff (non-blocking)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Non-blocking for now: surfaces real dead-code / undefined-name
       # regressions on every PR without failing the build. Promote to a hard
       # gate (drop continue-on-error) once the tree stays clean for a few PRs.
       - name: Ruff
         continue-on-error: true
-        uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
+        uses: astral-sh/ruff-action@0ce1b0bf8b818ef400413f810f8a11cdbda0034b # v4.0.0
         with:
           args: "check backend/app --output-format=github"
 
