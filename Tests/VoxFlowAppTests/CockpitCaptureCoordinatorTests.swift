@@ -32,11 +32,14 @@ private final class FakeTranscriber: ChunkTranscribing, @unchecked Sendable {
     /// Number of upcoming transcribe calls that should throw (backend dead,
     /// WhisperKit failure) — decremented per call.
     var failuresRemaining = 0
+    /// PCM byte counts of each transcribed chunk — pins the carry semantics.
+    private(set) var receivedPCMCounts: [Int] = []
     func transcribe(_ audio: CapturedAudio) async throws -> TranscribeResponse {
         if failuresRemaining > 0 {
             failuresRemaining -= 1
             throw URLError(.cannotConnectToHost)
         }
+        receivedPCMCounts.append(audio.pcm.count)
         // TranscribeResponse has no defaults — all 9 fields required (BackendAPIClient.swift:3).
         return TranscribeResponse(
             text: nextText, isFinal: true, latencyMs: 1, confidenceEstimate: 0.9,
@@ -52,8 +55,7 @@ private final class FakeTranscriber: ChunkTranscribing, @unchecked Sendable {
 
 @MainActor
 final class CockpitCaptureCoordinatorTests: XCTestCase {
-    private func makeAudio(silent: Bool) -> CapturedAudio {
-        let samples = 8000
+    private func makeAudio(silent: Bool, samples: Int = 8000) -> CapturedAudio {
         var data = Data(count: samples * 2)
         // rmsEnergy = |sample|/Int16.max; isSilent = rmsEnergy < 0.003.
         // Set the HIGH byte of each little-endian Int16 → 0x4000 = 16384 → ~0.5 amplitude, robustly non-silent.
@@ -138,6 +140,35 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         coord.startRecording(targetApp: nil)
         await coord.flushNow()
         XCTAssertEqual(session.currentSession?.transcript, "the WHEREFORE clause")
+        await coord.stopRecording()
+    }
+
+    /// Session 29 review: a non-silent chunk under minChunkBytes was
+    /// consumed by stopCapture and then DISCARDED — permanent syllable-scale
+    /// loss whenever the OS delivered short (e.g. after an IO overload). It
+    /// is now carried into the next flush instead.
+    func test_subminimum_chunk_is_carried_into_next_flush() async {
+        // 0.125 s non-silent chunk — under the 0.3 s minimum.
+        let tiny = makeAudio(silent: false, samples: 2000)
+        let capture = FakeCapture(nextAudio: tiny)
+        let transcriber = FakeTranscriber(); transcriber.nextText = "syllable and sentence"
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        await coord.flushNow()
+        XCTAssertEqual(transcriber.receivedPCMCounts, [],
+                       "sub-minimum chunk must not be transcribed alone")
+
+        // Next window delivers a normal-size chunk; the carried syllable
+        // rides in front of it.
+        let normal = makeAudio(silent: false, samples: 16_000)
+        capture.nextAudio = normal
+        await coord.flushNow()
+
+        XCTAssertEqual(transcriber.receivedPCMCounts, [tiny.pcm.count + normal.pcm.count],
+                       "carry must be prepended to the next chunk")
+        XCTAssertEqual(session.currentSession?.transcript, "syllable and sentence")
         await coord.stopRecording()
     }
 

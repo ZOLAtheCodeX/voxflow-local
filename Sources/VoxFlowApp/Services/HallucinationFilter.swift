@@ -14,6 +14,14 @@ enum HallucinationFilter {
         "everyone", "everybody", "guys", "there"
     ]
 
+    /// Words a pure YouTube-outro ghost is made of. On long audio the
+    /// thank+watching/listening filter fires only when EVERY word is from
+    /// this set — any outside word ("pitch", "kids") proves a real sentence.
+    private static let outroVocabulary: Set<String> = [
+        "thank", "thanks", "you", "so", "much", "for", "watching",
+        "listening", "everyone", "everybody", "guys", "all"
+    ]
+
     static func isLikelyHallucination(_ text: String, shortAudio: Bool) -> Bool {
         let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !stripped.isEmpty else { return true }
@@ -35,17 +43,18 @@ enum HallucinationFilter {
             
         guard !words.isEmpty else { return true }
         
-        // 1. If it's just 1 or 2 words, check if they are known standalone hallucinations
-        if words.count <= 2 {
-            if words.allSatisfy({ alwaysFilteredSingleWords.contains($0) }) {
-                return true
-            }
-            if shortAudio && words.allSatisfy({ alwaysFilteredSingleWords.contains($0) || shortOnlySingleWords.contains($0) }) {
+        // 1. If it's just 1 or 2 words, check if they are known standalone
+        // hallucinations. Session 29 review: greetings are SHORT-ONLY now —
+        // a user dictating an email opener ("Hello everyone") in a padded
+        // (>= 3 s) capture was eaten; the 1-2 word noise ghost on long audio
+        // is the coverage crush's job (TranscriptionConfidence), not ours.
+        if shortAudio && words.count <= 2 {
+            if words.allSatisfy({ alwaysFilteredSingleWords.contains($0) || shortOnlySingleWords.contains($0) }) {
                 return true
             }
             // "thank you" (short only)
-            if shortAudio && words == ["thank", "you"] { return true }
-            // "hello everyone", "hi guys", etc. (always filtered)
+            if words == ["thank", "you"] { return true }
+            // "hello everyone", "hi guys", etc.
             if words.count == 2 && alwaysFilteredSingleWords.contains(words[0]) && greetingTargets.contains(words[1]) { return true }
         }
         
@@ -59,10 +68,15 @@ enum HallucinationFilter {
         // F3: Tighten exact matches instead of substring contains to avoid over-filtering "I'm watching the kids".
         // Thank-you family requires a watching/listening co-occurrence so real
         // gratitude ("Thank you for the coffee") passes; bare "thank you so
-        // much" is short-audio-only. Contract: Tests/Fixtures/hallucination_parity.json.
+        // much" is short-audio-only. Session 29: on LONG audio the outro must
+        // be PURE outro vocabulary — "Thanks for listening to my pitch today"
+        // is a real sentence ("pitch"/"today" prove it), while "Thank you for
+        // watching everybody" remains the classic long-silence ghost.
+        // Contract: Tests/Fixtures/hallucination_parity.json.
         if words.count <= 8 {
             if (words[0] == "thank" || words[0] == "thanks"),
-               words.contains("watching") || words.contains("listening") { return true }
+               words.contains("watching") || words.contains("listening"),
+               shortAudio || words.allSatisfy({ Self.outroVocabulary.contains($0) }) { return true }
             if shortAudio && words == ["thank", "you", "so", "much"] { return true }
             if words.starts(with: ["subscribe", "to", "my", "channel"]) { return true }
             if words.starts(with: ["subscribe", "to", "the", "channel"]) { return true }

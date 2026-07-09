@@ -10,12 +10,16 @@ Layers (mirrors the Swift order):
 1. Empty / whitespace-only -> filtered.
 2. Whole string enclosed in []/()/** containing a noise cue -> filtered.
 3. No alphanumeric tokens at all (music notes, ellipsis) -> filtered.
-4. 1-2 tokens: greeting words always; filler words short-audio-only;
-   greeting + target pair ("hello everyone") always.
+4. 1-2 tokens, SHORT AUDIO ONLY (session 29): greeting/filler words and
+   greeting + target pairs ("hello everyone"). On long audio a user may be
+   dictating a real greeting line; the 1-2 word long-noise ghost is the
+   coverage crush's job (TranscriptionConfidence / _estimate_confidence).
 5. Short audio: 3+ identical repeated tokens -> filtered.
 6. <= 8 tokens: YouTube outro families. Thank-you family requires a
    watching/listening co-occurrence so real gratitude ("thank you for the
-   coffee") passes; bare "thank you so much" is short-audio-only.
+   coffee") passes; bare "thank you so much" is short-audio-only. On LONG
+   audio the thank-you outro must be PURE outro vocabulary — an outside
+   word ("pitch", "kids") proves a real sentence (session 29).
 """
 
 from __future__ import annotations
@@ -41,6 +45,13 @@ _OUTRO_EXACT = (
     ("i", "ll", "see", "you", "in", "the", "next", "one"),
     ("see", "you", "next", "time"),
 )
+
+# Words a pure YouTube-outro ghost is made of — the long-audio thank-you
+# filter fires only when EVERY token is from this set.
+_OUTRO_VOCABULARY = frozenset({
+    "thank", "thanks", "you", "so", "much", "for", "watching",
+    "listening", "everyone", "everybody", "guys", "all",
+})
 
 # Mirrors Swift's CharacterSet.alphanumerics.inverted tokenization for the
 # inputs Whisper actually emits (ASCII + common punctuation).
@@ -72,12 +83,10 @@ def is_whisper_hallucination(text: str, short_audio: bool = True) -> bool:
     if not words:
         return True
 
-    if len(words) <= 2:
-        if all(w in _ALWAYS_SINGLE for w in words):
+    if short_audio and len(words) <= 2:
+        if all(w in _ALWAYS_SINGLE or w in _SHORT_ONLY_SINGLE for w in words):
             return True
-        if short_audio and all(w in _ALWAYS_SINGLE or w in _SHORT_ONLY_SINGLE for w in words):
-            return True
-        if short_audio and words == ["thank", "you"]:
+        if words == ["thank", "you"]:
             return True
         if len(words) == 2 and words[0] in _ALWAYS_SINGLE and words[1] in _GREETING_TARGETS:
             return True
@@ -86,7 +95,11 @@ def is_whisper_hallucination(text: str, short_audio: bool = True) -> bool:
         return True
 
     if len(words) <= 8:
-        if words[0] in ("thank", "thanks") and ("watching" in words or "listening" in words):
+        if (
+            words[0] in ("thank", "thanks")
+            and ("watching" in words or "listening" in words)
+            and (short_audio or all(w in _OUTRO_VOCABULARY for w in words))
+        ):
             return True
         if short_audio and words == ["thank", "you", "so", "much"]:
             return True

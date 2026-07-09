@@ -68,6 +68,15 @@ struct ProviderSpecModel: Codable, Identifiable, Equatable, Sendable {
 final class ProviderConfigStore: ObservableObject {
     @Published private(set) var providers: [ProviderSpecModel] = []
     @Published private(set) var chains: [String: [String]] = [:]
+    /// True when providers.json existed but would not decode: the bad file
+    /// was quarantined aside (.corrupt) and defaults seeded. Before session
+    /// 29 the corrupt file was silently overwritten — the user's BYOM config
+    /// destroyed with Keychain keys orphaned.
+    @Published private(set) var recoveredFromCorruptConfig = false
+    /// True while the latest save failed — Settings would otherwise show
+    /// providers/chains the backend (which reads this file at launch) never
+    /// sees, silently reverting at next app launch.
+    @Published private(set) var saveFailing = false
 
     static let tasks = ["polish", "smart_action"]
 
@@ -105,6 +114,20 @@ final class ProviderConfigStore: ObservableObject {
             providers = loaded.providers
             chains = loaded.chains
         } else {
+            // Distinguish "fresh install" from "file exists but won't decode":
+            // the latter is the user's real config in a state we can't read —
+            // quarantine it aside instead of overwriting it with defaults.
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                let quarantine = fileURL.appendingPathExtension("corrupt")
+                try? FileManager.default.removeItem(at: quarantine)
+                do {
+                    try FileManager.default.moveItem(at: fileURL, to: quarantine)
+                    recoveredFromCorruptConfig = true
+                    log.error("providers.json was unreadable — moved to \(quarantine.lastPathComponent) and seeded defaults")
+                } catch {
+                    log.error("providers.json unreadable AND quarantine failed: \(error.localizedDescription)")
+                }
+            }
             providers = [ProviderSpecModel(id: "ollama", kind: .ollama)]
             chains = Dictionary(uniqueKeysWithValues: Self.tasks.map { ($0, ["ollama"]) })
             save()
@@ -186,8 +209,14 @@ final class ProviderConfigStore: ObservableObject {
         do {
             let data = try encoder.encode(schema)
             try data.write(to: fileURL, options: .atomic)
+            if saveFailing { saveFailing = false }
         } catch {
             log.error("providers.json save failed: \(error.localizedDescription)")
+            saveFailing = true
+            // Self-heal a missing parent (freed disk, restored permissions)
+            // so the next mutation's save can succeed without a relaunch.
+            try? FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         }
     }
 }

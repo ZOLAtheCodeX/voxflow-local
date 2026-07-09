@@ -18,6 +18,7 @@ block transcription or misreport silence.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Callable
@@ -42,25 +43,50 @@ def _default_loader() -> Any:
 
 
 class SileroVAD:
-    def __init__(self, loader: Callable[[], Any] = _default_loader) -> None:
+    # Session 29 review: a sticky load failure silently lost the noise gate
+    # AND the empty-capture diagnosis refinement for the process lifetime —
+    # even when the cause (memory-pressure spike) was transient. After the
+    # cooldown, the next call may attempt ONE reload (parity with
+    # WhisperEngine._LOAD_RETRY_COOLDOWN_S).
+    _LOAD_RETRY_COOLDOWN_S = 60.0
+
+    def __init__(self, loader: Callable[[], Any] = _default_loader, clock=time.monotonic) -> None:
         self._loader = loader
         self._model: Any = None
         self._load_failed = False
+        self._load_failed_at: float | None = None
+        self._clock = clock
         self._lock = Lock()
 
+    def _load_retry_due(self) -> bool:
+        return (
+            self._load_failed_at is not None
+            and (self._clock() - self._load_failed_at) >= self._LOAD_RETRY_COOLDOWN_S
+        )
+
     def _load(self) -> Any:
-        if self._model is not None or self._load_failed:
+        if self._model is not None:
+            return self._model
+        if self._load_failed and not self._load_retry_due():
             return self._model
         with self._lock:
-            if self._model is not None or self._load_failed:
+            if self._model is not None:
                 return self._model
+            if self._load_failed:
+                if not self._load_retry_due():
+                    return self._model
+                logger.info("VAD load-failure cooldown elapsed — retrying model load")
+                self._load_failed = False
+                self._load_failed_at = None
             try:
                 self._model = self._loader()
                 logger.info("Loaded Silero VAD model")
             except Exception as exc:
-                # Sticky, like WhisperEngine's _load_failed: retrying a
-                # deterministic load failure per call would just burn time.
+                # Bounded-sticky: retrying a deterministic load failure per
+                # call would burn time, but a cooldown-gated retry recovers
+                # from transient causes without a backend restart.
                 self._load_failed = True
+                self._load_failed_at = self._clock()
                 logger.error("Failed to load Silero VAD model: %s", exc)
         return self._model
 

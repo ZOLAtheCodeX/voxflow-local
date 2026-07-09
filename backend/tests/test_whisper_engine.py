@@ -67,6 +67,52 @@ def test_load_pipeline_failure():
     assert engine._load_failed is True
     sys.modules["transformers"].pipeline.assert_called_once()
 
+def test_load_failure_retries_after_cooldown():
+    """Session 29 review: the sticky _load_failed flag had NO production
+    retry path — one transient load failure (memory-pressure spike at boot)
+    killed whisper-mode STT for the process lifetime until a manual backend
+    restart. After the cooldown, the next request re-attempts the load once;
+    another failure re-arms the cooldown."""
+    fake_now = [1000.0]
+    engine = WhisperEngine(clock=lambda: fake_now[0])
+
+    sys.modules["transformers"].pipeline.side_effect = Exception("pressure spike")
+    engine._load_pipeline()
+    assert engine._load_failed is True
+    assert sys.modules["transformers"].pipeline.call_count == 1
+
+    # Inside the cooldown: no retry.
+    fake_now[0] += 30.0
+    engine._load_pipeline()
+    assert sys.modules["transformers"].pipeline.call_count == 1
+
+    # Past the cooldown: one retry — and this time the load succeeds.
+    fake_now[0] += 31.0
+    mock_pipeline_instance = MagicMock()
+    sys.modules["transformers"].pipeline.side_effect = None
+    sys.modules["transformers"].pipeline.return_value = mock_pipeline_instance
+    engine._load_pipeline()
+    assert sys.modules["transformers"].pipeline.call_count == 2
+    assert engine._pipeline is mock_pipeline_instance
+    assert engine._load_failed is False
+
+
+def test_load_failure_within_cooldown_stays_failed_after_retry_failure():
+    """A failed retry re-arms the cooldown — no hot retry loop."""
+    fake_now = [1000.0]
+    engine = WhisperEngine(clock=lambda: fake_now[0])
+    sys.modules["transformers"].pipeline.side_effect = Exception("still failing")
+
+    engine._load_pipeline()
+    fake_now[0] += 61.0
+    engine._load_pipeline()  # retry, fails again
+    assert sys.modules["transformers"].pipeline.call_count == 2
+
+    fake_now[0] += 30.0  # inside the RE-armed cooldown
+    engine._load_pipeline()
+    assert sys.modules["transformers"].pipeline.call_count == 2
+
+
 def test_load_pipeline_success():
     """Test that WhisperEngine loads pipeline successfully."""
     engine = WhisperEngine()

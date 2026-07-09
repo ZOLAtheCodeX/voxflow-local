@@ -241,6 +241,49 @@ final class CockpitCoordinatorTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - ⌘↩ insert failure (session 29 review)
+
+    /// The insert result used to be discarded: cockpit closed and the session
+    /// reset identically on success and failure, so a failed insert was easy
+    /// to miss and the transcript was only recoverable via app relaunch. On
+    /// failure the cockpit stays open with the session intact (the text is
+    /// in the clipboard via insertText's own fallback).
+    func test_insert_failure_keeps_cockpit_open_and_session_intact() async {
+        final class FailingInsertService: TextInserting {
+            func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
+                InsertResult(method: .failed, success: false, fallbackUsed: true, errorCode: "INSERT_FAILED")
+            }
+        }
+        let state = AppState()
+        let sessionDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("voxflow-cockpit-test-\(UUID().uuidString)")
+        let sessionService = LongFormSessionService(autoSaveDirectory: sessionDir)
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")
+        let insertion = TextInsertionCoordinator(
+            state: state, insertService: FailingInsertService(),
+            audit: InsertionAuditLog(fileURL: auditURL))
+        let coord = CockpitCoordinator(
+            state: state,
+            sessionService: sessionService,
+            actionService: SmartActionService(backend: StubSmartActionBackend()),
+            textInsertionCoordinator: insertion,
+            snippetStore: nil
+        )
+        coord.open()
+        sessionService.start()
+        sessionService.appendChunk("the transcript that must survive")
+        sessionService.stop()
+
+        await coord.insertIntoTarget()
+
+        XCTAssertTrue(state.cockpitVisible, "failure must not close the cockpit")
+        XCTAssertEqual(sessionService.currentSession?.transcript,
+                       "the transcript that must survive")
+        XCTAssertTrue(state.statusLine.contains("Insert failed"),
+                      "got: \(state.statusLine)")
+    }
+
     private func makeCoordinator() -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
         makeCoordinator(backend: StubSmartActionBackend())
     }

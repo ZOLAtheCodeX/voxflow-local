@@ -52,12 +52,18 @@ final class WhisperKitSTTService: ChunkTranscribing {
 
     /// Primary decode options. Anti-hallucination thresholds made explicit
     /// (they match WhisperKit's current defaults by design — pinned so an
-    /// upstream default change can't silently weaken the gate).
+    /// upstream default change can't silently weaken the gate). Session 29
+    /// trims: wordTimestamps OFF (per-word DTW alignment is consumed nowhere
+    /// downstream — only segment start/end/noSpeechProb feed confidence —
+    /// so it was pure decode failure surface + latency) and 3 temperature
+    /// fallbacks instead of 5 (up to 6 full passes on exactly the marginal
+    /// clips that already struggle; high-T passes mostly produced garbage
+    /// the gate then had to catch).
     nonisolated static func makeDecodeOptions(promptTokens: [Int]?) -> DecodingOptions {
         DecodingOptions(
             language: "en",
-            temperatureFallbackCount: 5,
-            wordTimestamps: true,
+            temperatureFallbackCount: 3,
+            wordTimestamps: false,
             promptTokens: promptTokens,
             compressionRatioThreshold: 2.4,
             logProbThreshold: -1.0,

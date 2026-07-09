@@ -65,6 +65,21 @@ final class WhisperKitSTTServiceTests: XCTestCase {
             segmentCount: 0, rmsEnergy: CapturedAudio.silenceFloor - 0.0001))
     }
 
+    /// Primary decode options (session 29 review): word-timestamp alignment
+    /// is consumed NOWHERE downstream (grep-verified — only segment-level
+    /// start/end/noSpeechProb feed TranscriptionConfidence), so it is pure
+    /// decode failure surface + latency; temperatureFallbackCount 5 meant up
+    /// to 6 full decode passes on exactly the marginal clips that already
+    /// struggle. Quality thresholds stay pinned.
+    func testPrimaryDecodeOptionsAreLean() {
+        let options = WhisperKitSTTService.makeDecodeOptions(promptTokens: nil)
+        XCTAssertFalse(options.wordTimestamps)
+        XCTAssertEqual(options.temperatureFallbackCount, 3)
+        XCTAssertEqual(options.noSpeechThreshold, 0.6)
+        XCTAssertEqual(options.compressionRatioThreshold, 2.4)
+        XCTAssertEqual(options.logProbThreshold, -1.0)
+    }
+
     /// The retry must VARY the decode, not replay it byte-identically: a
     /// deterministic decode failure (gappy PCM) reproduces under identical
     /// options, so the second attempt drops the vocabulary prompt (a known

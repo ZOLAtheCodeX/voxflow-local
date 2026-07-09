@@ -30,9 +30,12 @@ final class HallucinationFilterTests: XCTestCase {
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello.", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hi", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hey", shortAudio: true))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hi", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hey.", shortAudio: false))
+        // Session 29: greetings are SHORT-ONLY — a padded (>= 3 s) capture of
+        // a deliberate greeting line must insert; long-noise 1-2 word ghosts
+        // are the coverage crush's job.
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hello", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hi", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("hey.", shortAudio: false))
     }
 
     func testRepeatedWordFiltered() {
@@ -96,13 +99,15 @@ final class HallucinationFilterTests: XCTestCase {
     }
 
     func testGreetingPunctuationVariantsFiltered() {
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello!", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello?", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello,", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello;", shortAudio: false))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello...", shortAudio: false))
+        // Punctuation-insensitive on SHORT audio (session 29: greetings are
+        // short-only; long-audio variants pass to the coverage crush).
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello!", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello?", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello,", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hello;", shortAudio: true))
+        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("hello...", shortAudio: true))
         XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hi!", shortAudio: true))
-        XCTAssertTrue(HallucinationFilter.isLikelyHallucination("Hey?", shortAudio: false))
+        XCTAssertFalse(HallucinationFilter.isLikelyHallucination("Hey?", shortAudio: false))
     }
 
     func testShortOnlyPunctuationVariantsFiltered() {

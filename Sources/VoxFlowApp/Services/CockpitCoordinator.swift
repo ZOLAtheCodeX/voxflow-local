@@ -216,7 +216,18 @@ final class CockpitCoordinator: ObservableObject {
         // cockpit, not the app the user was dictating into.
         let targetApp: NSRunningApplication? = session.targetApp?.processIdentifier
             .flatMap { NSRunningApplication(processIdentifier: $0) }
-        _ = await insertionCoordinator.insertText(text, statusSuffix: "cockpit", targetApp: targetApp)
+        let inserted = await insertionCoordinator.insertText(
+            text, statusSuffix: "cockpit", targetApp: targetApp)
+        // Close + reset ONLY on success — mirroring the Notion branch above.
+        // The old unconditional close made failure look identical to success
+        // in the window the user is watching, and tore down the session so
+        // the transcript was only recoverable via app relaunch (session 29
+        // review). On failure the text IS in the clipboard (insertText's
+        // fallback); the cockpit stays open with the transcript intact.
+        guard inserted else {
+            state.statusLine = "Insert failed — copied to clipboard; cockpit kept open"
+            return
+        }
         state.cockpitVisible = false
         sessionService.reset()
     }

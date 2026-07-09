@@ -13,6 +13,16 @@ final class CapturedAudioTests: XCTestCase {
         XCTAssertEqual(audio.durationSeconds, 1.0, accuracy: 0.0001)
     }
 
+    /// Session 29 review: the 10 MB cap silently discarded further audio and
+    /// the flag was write-only — a capture that hit the cap was decoded and
+    /// inserted as if complete. The flag now rides the returned audio.
+    func testBufferLimitFlagIsCarried() {
+        let truncated = CapturedAudio(
+            pcm: Data(count: 32000), sampleRate: 16000, bufferLimitReached: true)
+        XCTAssertTrue(truncated.bufferLimitReached)
+        XCTAssertFalse(CapturedAudio(pcm: Data(), sampleRate: 16000).bufferLimitReached)
+    }
+
     /// Wall-clock span (first buffer → stop) carried alongside the PCM so
     /// coverage shortfall (dropped buffers, stalled device) is computable —
     /// PCM duration alone can't distinguish a full capture from a truncated

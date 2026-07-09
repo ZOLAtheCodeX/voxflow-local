@@ -206,12 +206,21 @@ final class SettingsCoordinator: SettingsCoordinating {
 
         state.privateAPIBaseURL = trimmedBaseURL
         state.privateAPIModel = trimmedModel
-        state.privateAPIKeyConfigured = !trimmedKey.isEmpty
 
         UserDefaults.standard.set(trimmedBaseURL, forKey: privateAPIBaseURLKey)
         UserDefaults.standard.set(trimmedModel, forKey: privateAPIModelKey)
-        KeychainService.save(account: Self.keychainPrivateAPIKeyAccount, value: trimmedKey)
+        // "Configured" must mean the key is actually IN the keychain — the
+        // old unconditional flag showed configured while a failed save had
+        // destroyed the previous key (session 29 review). Failed cloud calls
+        // then looked like a provider problem, not a local one.
+        let keySaved = KeychainService.save(
+            account: Self.keychainPrivateAPIKeyAccount, value: trimmedKey)
+        state.privateAPIKeyConfigured = !trimmedKey.isEmpty && keySaved
 
+        guard keySaved else {
+            state.statusLine = "Failed to store API key in Keychain — key NOT saved"
+            return
+        }
         restartBackendWithCurrentConfiguration(status: "Private API configuration updated")
     }
 
@@ -224,9 +233,14 @@ final class SettingsCoordinator: SettingsCoordinating {
         state.openAISTTModel = trimmedSTTModel.isEmpty ? "whisper-1" : trimmedSTTModel
 
         UserDefaults.standard.set(state.openAIBaseURL, forKey: openAIBaseURLKey)
-        KeychainService.save(account: Self.keychainOpenAIAPIKeyAccount, value: trimmedAPIKey)
+        let keySaved = KeychainService.save(
+            account: Self.keychainOpenAIAPIKeyAccount, value: trimmedAPIKey)
         UserDefaults.standard.set(state.openAISTTModel, forKey: openAISTTModelKey)
 
+        guard keySaved else {
+            state.statusLine = "Failed to store API key in Keychain — key NOT saved"
+            return
+        }
         restartBackendWithCurrentConfiguration(status: "OpenAI speech configuration updated")
     }
 

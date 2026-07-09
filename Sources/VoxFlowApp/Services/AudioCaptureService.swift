@@ -19,16 +19,23 @@ struct CapturedAudio {
     /// (session 29). nil when unmeasured (tests, no buffer ever arrived).
     let expectedDurationSeconds: Double?
 
+    /// True when the capture hit the ~5-minute PCM cap and later audio was
+    /// dropped — the flag used to be write-only and the truncated capture
+    /// was decoded/inserted as if complete (session 29 review).
+    let bufferLimitReached: Bool
+
     init(
         pcm: Data,
         sampleRate: Double,
         firstBufferLatencyMs: Int? = nil,
-        expectedDurationSeconds: Double? = nil
+        expectedDurationSeconds: Double? = nil,
+        bufferLimitReached: Bool = false
     ) {
         self.pcm = pcm
         self.sampleRate = sampleRate
         self.firstBufferLatencyMs = firstBufferLatencyMs
         self.expectedDurationSeconds = expectedDurationSeconds
+        self.bufferLimitReached = bufferLimitReached
     }
 
     /// Below this RMS the capture is treated as dead-air silence (no usable
@@ -393,7 +400,7 @@ final class AudioCaptureService: AudioCapturing {
         // `ingest`, and release the live handler — a capture that has stopped
         // must never fire its cue, and the closure (with its captured coordinator
         // machinery) must not linger in shared state across the idle period.
-        let (captured, firstBufferLatencyMs, expectedDuration) = state.withLock { state -> (Data, Int?, Double?) in
+        let (captured, firstBufferLatencyMs, expectedDuration, limitReached) = state.withLock { state -> (Data, Int?, Double?, Bool) in
             state.generation &+= 1
             state.onCaptureLive = nil
             // Wall-clock from FIRST buffer to now — the span the PCM should
@@ -403,14 +410,15 @@ final class AudioCaptureService: AudioCapturing {
                     max(0, Double(startedAt.elapsedMilliseconds() - firstLatency) / 1000.0)
                 }
             }
-            return (state.pcmBuffer, state.firstBufferLatencyMs, expected)
+            return (state.pcmBuffer, state.firstBufferLatencyMs, expected, state.bufferLimitReached)
         }
 
         return CapturedAudio(
             pcm: captured,
             sampleRate: Self.targetSampleRate,
             firstBufferLatencyMs: firstBufferLatencyMs,
-            expectedDurationSeconds: expectedDuration
+            expectedDurationSeconds: expectedDuration,
+            bufferLimitReached: limitReached
         )
     }
 }

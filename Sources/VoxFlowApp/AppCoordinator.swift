@@ -641,9 +641,16 @@ final class AppCoordinator: ObservableObject {
             let backendReady = state.backendReadiness.readyForDictation
             let whisperReady = state.backendReadiness.whisperKitReady
             log.warning("startCapture blocked: no STT backend ready (backend=\(backendReady), whisperKit=\(whisperReady))")
-            state.statusLine = state.sttBackend == .whisperKit
-                ? "WhisperKit not ready — wait for model load"
-                : "Backend not ready — wait for model warmup"
+            // Post-crash-cap honesty (session 29 review): "wait for model
+            // warmup" is a lie when the backend gave up restarting — waiting
+            // cannot help. Surface the real reason when the manager has one.
+            if state.sttBackend == .whisperKit {
+                state.statusLine = "WhisperKit not ready — wait for model load"
+            } else if let failure = backendManager.lastStartupFailureReason {
+                state.statusLine = "Backend unavailable: \(failure)"
+            } else {
+                state.statusLine = "Backend not ready — wait for model warmup"
+            }
             return
         }
 
@@ -651,7 +658,9 @@ final class AppCoordinator: ObservableObject {
         if state.workflowNeedsBackend && !state.backendReadiness.readyForDictation {
             let modeName = state.workflowMode.displayName
             log.warning("startCapture blocked: \(modeName) requires backend but backend not ready")
-            state.statusLine = "\(modeName) requires backend — wait for model warmup"
+            state.statusLine = backendManager.lastStartupFailureReason
+                .map { "\(modeName) requires backend — \($0)" }
+                ?? "\(modeName) requires backend — wait for model warmup"
             return
         }
 
@@ -730,6 +739,13 @@ final class AppCoordinator: ObservableObject {
                     guard let self, self.state.sessionState == .recording else { return }
                     self.log.warning("Capture timeout reached (\(Self.maxCaptureDuration)s) — auto-stopping")
                     await self.finishCaptureAndTranscribe(commandLane: commandLane)
+                    // The stop cue mid-speech is easy to miss; without this
+                    // note the insert LOOKS complete while everything after
+                    // the cutoff vanished (session 29 review). Appended after
+                    // the pipeline so the insert/review message stays first.
+                    self.state.statusLine += String(
+                        format: " — %.0f s limit reached; speech after the cutoff was not captured",
+                        Self.maxCaptureDuration)
                 }
             }
         } catch {
@@ -831,7 +847,10 @@ final class AppCoordinator: ObservableObject {
     private func prepareForTranscription(commandLane: Bool) {
         if !commandLane {
             fnTriggeredCaptureInProgress = false
-            cueSoundService.playStopCue()
+            // NOTE: the stop cue plays in stopAndValidateAudio, AFTER the tap
+            // is removed — played here it raced the still-recording engine
+            // and its onset could land in the capture tail through the
+            // speakers (session 29 review).
         }
 
         captureLiveWatchdog.cancel()
@@ -850,6 +869,12 @@ final class AppCoordinator: ObservableObject {
 
     private func stopAndValidateAudio(commandLane: Bool) throws -> CapturedAudio? {
         let capturedAudio = try audioCapture.stopCapture()
+        // Cue AFTER the tap is gone: played any earlier, the Basso onset can
+        // bleed into the capture tail via the speakers. The pipeline Task
+        // starts immediately after the user's stop, so the delay is ~ms.
+        if !commandLane {
+            cueSoundService.playStopCue()
+        }
         let source = Self.captureSourceLabel(commandLane: commandLane)
         let durationSec = capturedAudio.durationSeconds
         // Guard: discard very short captures that cause Whisper hallucination
@@ -1047,6 +1072,9 @@ final class AppCoordinator: ObservableObject {
         ) {
             state.statusLine += coverageWarning
         }
+        if capturedAudio.bufferLimitReached {
+            state.statusLine += " — capture length limit reached; later audio was dropped"
+        }
     }
 
     private func appendTranscriptionDiagnostics(_ transcription: TranscribeResponse, to trace: CapturePipelineTraceBuilder) {
@@ -1126,6 +1154,18 @@ final class AppCoordinator: ObservableObject {
         state.sessionState = .error
         state.errorMessage = "Transcription failed: \(error.localizedDescription)"
         state.statusLine = "Error. Retry capture."
+
+        // Connection-level failure = the backend died AFTER the bounded
+        // warmup polling window closed, so the cached readiness is stale-true
+        // and every retry would loop into the same dead socket (session 29
+        // review). Refresh now so the next attempt sees reality (and the
+        // warmup path can respawn if configured to run).
+        if let urlError = error as? URLError,
+           [.cannotConnectToHost, .networkConnectionLost, .timedOut].contains(urlError.code) {
+            Task { @MainActor [weak self] in
+                await self?.refreshBackendReadiness()
+            }
+        }
     }
 
     /// The engine started but no audio buffer arrived within the stall

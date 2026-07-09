@@ -33,17 +33,31 @@ logger = logging.getLogger("voxflow")
 
 
 class WhisperEngine:
-    def __init__(self, vad=None) -> None:
+    # A load failure blocks retries for this long, then the next request may
+    # attempt ONE reload. Session 29 review: the flag used to be sticky for
+    # the process lifetime, so a transient failure (memory-pressure spike at
+    # boot) killed whisper-mode STT until a manual backend restart.
+    _LOAD_RETRY_COOLDOWN_S = 60.0
+
+    def __init__(self, vad=None, clock=time.monotonic) -> None:
         model_ref = os.environ.get("VOXFLOW_WHISPER_MODEL", "openai/whisper-small")
         self.model_id = resolve_model_ref(model_ref)
         self._pipeline = None
         self._active_model_id = ""
         self._load_failed = False
+        self._load_failed_at: float | None = None
+        self._clock = clock
         self._warmed_up = False
         self._lock = Lock()
         # Injectable for tests; None resolves the shared Silero singleton
         # lazily at first gate use (never at import/construction).
         self._vad = vad
+
+    def _load_retry_due(self) -> bool:
+        return (
+            self._load_failed_at is not None
+            and (self._clock() - self._load_failed_at) >= self._LOAD_RETRY_COOLDOWN_S
+        )
 
     def _vad_analyze(self, pcm: bytes, sample_rate: int):
         """Run the VAD, failing OPEN on absolutely any problem — a VAD issue
@@ -63,14 +77,18 @@ class WhisperEngine:
     def _load_pipeline(self) -> None:
         if self._pipeline is not None:
             return
-        if self._load_failed:
+        if self._load_failed and not self._load_retry_due():
             return
 
         with self._lock:
             if self._pipeline is not None:
                 return
             if self._load_failed:
-                return
+                if not self._load_retry_due():
+                    return
+                logger.info("Whisper load-failure cooldown elapsed — retrying model load")
+                self._load_failed = False
+                self._load_failed_at = None
             try:
                 from transformers import pipeline
 
@@ -87,6 +105,7 @@ class WhisperEngine:
             except Exception as exc:
                 logger.error("Failed to load Whisper model %s: %s", self.model_id, exc)
                 self._load_failed = True
+                self._load_failed_at = self._clock()
 
     def warmup_inference(self, sample_rate: int = 16000, duration_ms: int = 250) -> int:
         if self._pipeline is None or self._warmed_up:
@@ -112,6 +131,7 @@ class WhisperEngine:
     def retry_load(self) -> None:
         """Reset failure state to allow retrying model load."""
         self._load_failed = False
+        self._load_failed_at = None
         self._warmed_up = False
         self._load_pipeline()
 

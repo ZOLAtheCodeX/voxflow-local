@@ -335,9 +335,12 @@ class TestIsWhisperHallucination:
     def test_normal_speech(self):
         assert is_whisper_hallucination("I need to schedule a meeting for tomorrow") is False
 
-    def test_hello_always_filtered(self):
+    def test_hello_filtered_short_only(self):
+        # Session 29: greetings are SHORT-ONLY — a padded (>= 3 s) capture of
+        # a deliberate greeting line must insert; long-noise 1-2 word ghosts
+        # are the coverage crush's job (_estimate_confidence).
         assert is_whisper_hallucination("hello") is True
-        assert is_whisper_hallucination("hello", short_audio=False) is True
+        assert is_whisper_hallucination("hello", short_audio=False) is False
         assert is_whisper_hallucination("Hi") is True
         assert is_whisper_hallucination("hey.") is True
 
@@ -359,10 +362,11 @@ class TestIsWhisperHallucination:
         assert is_whisper_hallucination("Hi!") is True
         assert is_whisper_hallucination("Hey?") is True
 
-    def test_greeting_variants_filtered_on_long_audio(self):
-        assert is_whisper_hallucination("hello!", short_audio=False) is True
-        assert is_whisper_hallucination("Hello?", short_audio=False) is True
-        assert is_whisper_hallucination("Hey,", short_audio=False) is True
+    def test_greeting_variants_pass_on_long_audio(self):
+        # Session 29: short-only now — see test_hello_filtered_short_only.
+        assert is_whisper_hallucination("hello!", short_audio=False) is False
+        assert is_whisper_hallucination("Hello?", short_audio=False) is False
+        assert is_whisper_hallucination("Hey,", short_audio=False) is False
 
     def test_short_only_punctuation_variants(self):
         assert is_whisper_hallucination("Thanks!", short_audio=True) is True
@@ -372,7 +376,7 @@ class TestIsWhisperHallucination:
 
     def test_quoted_greeting_variants_filtered(self):
         assert is_whisper_hallucination('"hello"') is True
-        assert is_whisper_hallucination('"Hello"', short_audio=False) is True
+        assert is_whisper_hallucination('"Hello"', short_audio=False) is False  # session 29: short-only
         assert is_whisper_hallucination("'hey'") is True
 
     def test_multi_word_phrases_not_affected(self):

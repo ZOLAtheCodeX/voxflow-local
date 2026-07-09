@@ -5,6 +5,7 @@ import os
 import sys
 import asyncio
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from threading import Lock
 
@@ -267,10 +268,20 @@ def get_ml_semaphore() -> asyncio.Semaphore:
     return _ml_semaphore
 
 
+# Dedicated ML executor (session 29 stability review): the semaphore alone
+# was the concurrency bound, but a cancelled request (esc mid-transcription,
+# client timeout) releases its permit while the decode thread runs on — an
+# immediate re-dictation then put >2 concurrent ML evaluations on a 16 GB
+# machine. The 2-worker pool is a hard cap that survives cancellation: an
+# orphaned decode occupies a worker until it finishes, and new work queues
+# behind it instead of piling on.
+_ML_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="voxflow-ml")
+
+
 async def run_blocking(func, *args, **kwargs):
     from functools import partial
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+    return await loop.run_in_executor(_ML_EXECUTOR, partial(func, *args, **kwargs))
 
 
 # Rate limit globals

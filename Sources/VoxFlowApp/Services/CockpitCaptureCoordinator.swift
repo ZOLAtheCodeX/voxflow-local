@@ -24,6 +24,11 @@ final class CockpitCaptureCoordinator {
     /// session lost 17 minutes with zero signal). Reset on success.
     private var consecutiveTranscriptionFailures = 0
     private static let maxConsecutiveTranscriptionFailures = 3
+    /// Non-silent audio under minChunkBytes, carried into the next flush.
+    /// stopCapture has already consumed it from the engine — discarding it
+    /// (the old behavior) was a permanent syllable-scale loss whenever the
+    /// OS delivered short, e.g. right after an IO overload (session 29).
+    private var carryPCM = Data()
     /// Fired on the audio thread when the ⌘R start's FIRST buffer arrives —
     /// the same first-buffer gating as the palette path, so the "mic is live"
     /// signal doesn't lead the hardware by ~150 ms and front-clip the first
@@ -124,7 +129,27 @@ final class CockpitCaptureCoordinator {
     }
 
     private func transcribeAndAppend(_ audio: CapturedAudio, force: Bool) async {
-        guard !audio.isSilent, (force || audio.pcm.count >= minChunkBytes) else { return }
+        // Prepend any carried-over sub-minimum audio from the previous flush
+        // so the syllable it holds lands in front of this chunk's words.
+        var merged = audio
+        if !carryPCM.isEmpty {
+            merged = CapturedAudio(
+                pcm: carryPCM + audio.pcm,
+                sampleRate: audio.sampleRate,
+                firstBufferLatencyMs: audio.firstBufferLatencyMs,
+                bufferLimitReached: audio.bufferLimitReached
+            )
+            carryPCM = Data()
+        }
+        // Still under the minimum (and not the forced final flush): stash it
+        // for the next window instead of discarding. Bounded — a carry is by
+        // definition < minChunkBytes, and it merges or drops next flush.
+        if !force, merged.pcm.count < minChunkBytes {
+            if !merged.isSilent { carryPCM = merged.pcm }
+            return
+        }
+        guard !merged.isSilent else { return }
+        let audio = merged
         do {
             let response = try await transcriber.transcribe(audio)
             let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)

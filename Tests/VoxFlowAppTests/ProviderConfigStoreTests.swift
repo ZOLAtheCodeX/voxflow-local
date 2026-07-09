@@ -20,6 +20,50 @@ final class ProviderConfigStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempURL.deletingLastPathComponent())
     }
 
+    /// Session 29 review: a merely-corrupt providers.json was silently
+    /// overwritten with defaults — permanently destroying the user's
+    /// provider/chain config and orphaning Keychain keys. The bad file is
+    /// quarantined aside first so the config is recoverable.
+    func testCorruptConfigIsQuarantinedNotDestroyed() throws {
+        try FileManager.default.createDirectory(
+            at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let corruptBytes = Data("{not valid json".utf8)
+        try corruptBytes.write(to: tempURL)
+
+        let store = ProviderConfigStore(fileURL: tempURL)
+
+        XCTAssertEqual(store.providers.map(\.id), ["ollama"], "defaults after corruption")
+        XCTAssertTrue(store.recoveredFromCorruptConfig)
+        let quarantine = tempURL.appendingPathExtension("corrupt")
+        XCTAssertEqual(try Data(contentsOf: quarantine), corruptBytes,
+                       "original bytes must survive in the quarantine file")
+    }
+
+    func testMissingConfigSeedsDefaultsWithoutQuarantine() {
+        let store = ProviderConfigStore(fileURL: tempURL)
+        XCTAssertFalse(store.recoveredFromCorruptConfig)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: tempURL.appendingPathExtension("corrupt").path))
+    }
+
+    /// A failed save used to be log-only: Settings showed a provider the
+    /// backend (which reads the file at launch) would never see, and the
+    /// "added" config reverted at next launch.
+    func testFailedSavePublishesSaveFailing() {
+        // A path under a regular FILE can never be created — every save fails.
+        let blocker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voxflow-blocker-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: blocker.path, contents: Data("x".utf8))
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        let impossible = blocker.appendingPathComponent("providers.json")
+
+        let store = ProviderConfigStore(fileURL: impossible)
+        XCTAssertTrue(store.saveFailing, "the seed save already failed")
+
+        store.add(ProviderSpecModel(id: "lmstudio", kind: .openaiCompat))
+        XCTAssertTrue(store.saveFailing)
+    }
+
     func testSeededDefaultHasOllamaAndChains() {
         let store = ProviderConfigStore(fileURL: tempURL)
         XCTAssertEqual(store.providers.map(\.id), ["ollama"])
