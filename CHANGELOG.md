@@ -7,6 +7,27 @@ All notable changes to VoxFlow Local are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Capture-loss forensics: rejected captures are retained as WAV clips
+  (newest 8, local-only, `~/Library/Logs/VoxFlow/rejected_audio/`, disable
+  with `VOXFLOW_KEEP_REJECTED_AUDIO=0`) so a failed dictation is both
+  diagnosable and recoverable; reject receipts point at the clip
+  (`audio_file`) and the status line notes "(audio kept)". Receipts also
+  gained per-insert audio stats, wall-clock coverage
+  (`expected_audio_seconds`), partial-decode tail gaps
+  (`tail_gap_seconds`), and `device_changed` entries for captures lost to
+  a mid-capture input switch.
+- Mid-capture stall detection: if the input device stops delivering
+  buffers for 2 s while recording, the capture stops and transcribes what
+  arrived instead of letting you speak into a dead engine; material
+  coverage shortfall is called out in the status line.
+- Quiet-boundary cockpit flush: long-form chunk cuts defer (bounded, up
+  to 2 s) until the audio tail goes quiet, so 5 s seams land between
+  words instead of through them; sub-minimum chunks carry into the next
+  flush instead of being dropped.
+- Ollama wedged-warm circuit breaker: two consecutive timeout-shaped
+  polish failures skip the provider for 120 s
+  (`degraded_reason: provider_wedged`) instead of stalling every
+  dictation 30 s until a manual `ollama stop`.
 - Silero VAD speech-presence detection (~2 MB, bundled offline in the
   wheel): a gate in front of whisper-backend decode stops noise-only audio
   from ever reaching the model (Whisper hallucinates text from non-speech;
@@ -22,6 +43,31 @@ All notable changes to VoxFlow Local are documented here. The format follows
   still run, and the provenance pill shows the degradation
   (`degraded_reason: memory_pressure`). Disable with
   `VOXFLOW_POLISH_MEMORY_GUARD=0`.
+
+### Fixed
+- A stability review (four parallel review agents, 23 verified findings,
+  all fixed) closed every known silent dictation-loss path: Fn-hold flags
+  flicker truncating mid-utterance (release grace window + queued
+  re-press), the weak-speech empty-decode retry gate, short confident
+  utterances rejected on coverage geometry, cockpit sessions left
+  "recording" on a dead engine after a device change, failed cockpit
+  chunks vanishing without retention or receipts, paste under secure
+  event input reporting success while the text landed nowhere, silent
+  long-form auto-save failures (cockpit now warns), Keychain save
+  failures leaving the UI claiming a key is configured, corrupt
+  providers.json silently wiped (now quarantined aside), the unmessaged
+  60 s capture cutoff, and backend crash-restart storms (backoff, a
+  persistent cap, and respawns deferred while a capture is in flight).
+- Hallucination filter: greetings are short-audio-only (a padded
+  "Hello everyone" email opener now inserts) and long-audio thank-you
+  outros require pure outro vocabulary, so real sentences like "Thanks
+  for listening to my pitch today" pass — Swift and Python in lockstep
+  via the shared parity fixture.
+- Backend: whisper/VAD model-load failures retry after a 60 s cooldown
+  instead of staying dead for the process lifetime; ML inference runs on
+  a dedicated 2-worker pool so cancelled requests can't stack orphan
+  decodes; readiness probes are TTL-cached and stale readiness
+  self-heals after connection-level failures.
 
 ### Security
 - transformers bumped 4.56 → 5.3.0 (with huggingface-hub 0.34 → 1.22),
