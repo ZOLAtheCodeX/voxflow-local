@@ -428,6 +428,7 @@ struct TranscriptCandidate: Identifiable {
     var audioSeconds: Double? = nil
     var rmsEnergy: Double? = nil
     var peakAmplitude: Double? = nil
+    var tailGapSeconds: Double? = nil
 
     func text(for mode: CleanupMode) -> String {
         switch mode {

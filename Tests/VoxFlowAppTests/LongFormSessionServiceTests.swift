@@ -27,6 +27,38 @@ final class LongFormSessionServiceTests: XCTestCase {
         XCTAssertEqual(service.currentSession?.transcript, "hello world")
     }
 
+    /// Session 29 review: auto-save failures were log-only — the documented
+    /// "auto-save every ~5 s" crash-recovery contract could silently void
+    /// (disk full, sandbox denial) while the user dictated for 30 minutes
+    /// believing the safety net was live. Two consecutive failures publish
+    /// `persistenceFailing` so the cockpit can warn.
+    func test_repeated_save_failures_publish_persistenceFailing() {
+        // A path UNDER a regular file can never be created as a directory,
+        // so every save fails deterministically.
+        let fileBlocking = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voxflow-blocker-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: fileBlocking.path, contents: Data("x".utf8))
+        let impossible = fileBlocking.appendingPathComponent("sessions")
+
+        let service = LongFormSessionService(autoSaveDirectory: impossible)
+        service.start()
+        service.setTranscript("first")   // save #1 fails
+        XCTAssertFalse(service.persistenceFailing,
+                       "one failure may be transient — no warning yet")
+        service.setTranscript("second")  // save #2 fails
+        XCTAssertTrue(service.persistenceFailing)
+
+        try? FileManager.default.removeItem(at: fileBlocking)
+    }
+
+    func test_successful_save_clears_persistenceFailing() {
+        let dir = tempDir()
+        let service = LongFormSessionService(autoSaveDirectory: dir)
+        service.start()
+        service.setTranscript("hello")
+        XCTAssertFalse(service.persistenceFailing)
+    }
+
     func test_reset_returns_to_idle() {
         let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()

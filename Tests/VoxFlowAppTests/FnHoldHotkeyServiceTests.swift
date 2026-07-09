@@ -105,6 +105,56 @@ final class FnHoldHotkeyServiceTests: XCTestCase {
         )!
 
         service.handleFlagsChanged(releaseEvent)
-        XCTAssertEqual(releaseCount, 1, "Release should trigger immediately on releasing Fn alone")
+        // Session 29: release is grace-delayed (a flags flicker mid-hold used
+        // to truncate the capture instantly), so it fires after the grace
+        // window re-confirms fn is really up.
+        XCTAssertEqual(releaseCount, 0, "Release must not fire inside the grace window")
+        for _ in 0..<200 where releaseCount == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(releaseCount, 1, "Release should fire after the grace window")
+    }
+
+    private func flagsEvent(_ flags: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .flagsChanged, location: .zero, modifierFlags: flags,
+            timestamp: 0.0, windowNumber: 0, context: nil, characters: "",
+            charactersIgnoringModifiers: "", isARepeat: false, keyCode: 63)!
+    }
+
+    /// Session 29 review: while holding fn and dictating, a brushed modifier
+    /// (or flags glitch) made isFnAlone momentarily false → onRelease fired
+    /// instantly → capture truncated mid-utterance; the blocked re-press then
+    /// swallowed the remainder (matches the field receipts: 0.4-0.8 s captures
+    /// 1.2-1.6 s after a previous one). A flicker that resolves back to
+    /// fn-alone within the grace window must be a non-event.
+    func testFlickerDuringHoldDoesNotFireReleaseOrRePress() async throws {
+        let service = FnHoldHotkeyService(activationDelay: 0.05, releaseGraceDelay: 0.08)
+        var pressCount = 0
+        var releaseCount = 0
+        service.register(onPress: { pressCount += 1 }, onRelease: { releaseCount += 1 })
+
+        service.handleFlagsChanged(flagsEvent(.function))
+        for _ in 0..<200 where pressCount == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(pressCount, 1)
+
+        // Flicker: fn+command for one flags event, then back to fn-alone
+        // well inside the grace window.
+        service.handleFlagsChanged(flagsEvent([.function, .command]))
+        service.handleFlagsChanged(flagsEvent(.function))
+
+        // Well past the grace window: the flicker must have been absorbed.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(releaseCount, 0, "flicker must not truncate the capture")
+        XCTAssertEqual(pressCount, 1, "flicker must not re-fire press")
+
+        // The eventual REAL release still works.
+        service.handleFlagsChanged(flagsEvent([]))
+        for _ in 0..<200 where releaseCount == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(releaseCount, 1)
     }
 }

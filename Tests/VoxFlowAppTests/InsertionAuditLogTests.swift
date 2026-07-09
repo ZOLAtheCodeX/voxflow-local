@@ -40,12 +40,16 @@ final class InsertionAuditLogTests: XCTestCase {
         let log = InsertionAuditLog(fileURL: tempURL)
         log.recordInsertion(
             text: "hello world", targetApp: "Notes", source: "quick_dictation",
-            confidence: 0.91, audioSeconds: 11.7, rmsEnergy: 0.0679, peakAmplitude: 0.703)
+            confidence: 0.91, audioSeconds: 11.7, rmsEnergy: 0.0679, peakAmplitude: 0.703,
+            tailGapSeconds: 3.2)
         let line = try String(contentsOf: tempURL, encoding: .utf8)
         let obj = try JSONSerialization.jsonObject(with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
         XCTAssertEqual(obj?["audio_seconds"] as? Double, 11.7)
         XCTAssertEqual(obj?["rms"] as? Double, 0.0679)
         XCTAssertEqual(obj?["peak_amplitude"] as? Double, 0.703)
+        // Partial-decode forensics: seconds of speech-bearing audio after the
+        // last transcribed segment (session 29 tail-loss class).
+        XCTAssertEqual(obj?["tail_gap_seconds"] as? Double, 3.2)
     }
 
     /// Paths with no captured audio (snippets, cockpit re-inserts) omit the

@@ -37,7 +37,8 @@ final class InsertionAuditLog {
         confidence: Double?,
         audioSeconds: Double? = nil,
         rmsEnergy: Double? = nil,
-        peakAmplitude: Double? = nil
+        peakAmplitude: Double? = nil,
+        tailGapSeconds: Double? = nil
     ) {
         var entry: [String: Any] = [
             "event": "insert",
@@ -55,6 +56,9 @@ final class InsertionAuditLog {
         if let audioSeconds { entry["audio_seconds"] = audioSeconds }
         if let rmsEnergy { entry["rms"] = rmsEnergy }
         if let peakAmplitude { entry["peak_amplitude"] = peakAmplitude }
+        // Seconds of speech-bearing audio after the last transcribed segment
+        // (partial decode / tail loss, session 29). Absent = full coverage.
+        if let tailGapSeconds { entry["tail_gap_seconds"] = tailGapSeconds }
         append(entry)
     }
 
@@ -72,7 +76,8 @@ final class InsertionAuditLog {
         meanNoSpeechProb: Double? = nil,
         segmentCount: Int? = nil,
         peakAmplitude: Double? = nil,
-        audioFile: String? = nil
+        audioFile: String? = nil,
+        expectedAudioSeconds: Double? = nil
     ) {
         var entry: [String: Any] = [
             "event": "reject",
@@ -106,6 +111,9 @@ final class InsertionAuditLog {
         // Path of the retained WAV (RejectedAudioStore), so triage lands on
         // the actual audio instead of inferring from rms/peak (session 29).
         if let audioFile { entry["audio_file"] = audioFile }
+        // Wall-clock span the PCM should cover — audio_seconds well below it
+        // means the device dropped buffers mid-capture (coverage shortfall).
+        if let expectedAudioSeconds { entry["expected_audio_seconds"] = expectedAudioSeconds }
         append(entry)
     }
 

@@ -256,9 +256,20 @@ final class BackendProcessManagerTests: XCTestCase {
         XCTAssertEqual(fake.queriedPorts, [8765])
     }
 
+    /// Spin-wait for an async (backoff-scheduled) respawn to land.
+    private func waitForRunCount(
+        _ runner: BackendProcessRunnerFake, _ expected: Int, timeout: TimeInterval = 2.0
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while runner.ranProcesses.count < expected, Date() < deadline {
+            usleep(10_000)
+        }
+    }
+
     func testCrashRestartRelaunchesThroughRunnerSeamOnly() {
         let runner = BackendProcessRunnerFake()
         let manager = BackendProcessManager(runner: runner)
+        manager.crashRestartDelayOverride = 0
         let config = BackendLaunchConfiguration(
             sttBackend: "whisper",
             sttModel: "tiny",
@@ -277,6 +288,68 @@ final class BackendProcessManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.crashRestartCount, 1)
         // The relaunch attempt went through the seam — and ONLY the seam.
+        waitForRunCount(runner, 1)
+        XCTAssertEqual(runner.ranProcesses.count, 1)
+    }
+
+    /// Session 29 review: restarts were immediate — a fast-crashing child
+    /// (broken venv, corrupted model dir) burned 4 back-to-back python+torch
+    /// boots, hundreds of MB of page-ins each, exactly the IO-overload class
+    /// implicated in capture losses. Backoff spaces them out.
+    func testCrashRestartDelayScheduleBacksOff() {
+        XCTAssertEqual(BackendProcessManager.crashRestartDelay(forAttempt: 1), 1.0)
+        XCTAssertEqual(BackendProcessManager.crashRestartDelay(forAttempt: 2), 5.0)
+        XCTAssertEqual(BackendProcessManager.crashRestartDelay(forAttempt: 3), 30.0)
+        XCTAssertEqual(BackendProcessManager.crashRestartDelay(forAttempt: 7), 30.0)
+    }
+
+    /// The crash cap used to reset on EVERY warmup trigger (app activation,
+    /// cockpit open, settings change), so "crashed 3 times — restart
+    /// manually" was decorative: each activation re-armed a fresh 4-spawn
+    /// storm. Warmup start attempts no longer reset the count; only the
+    /// explicit restart path does.
+    func testWarmupStartDoesNotResetCrashCap() {
+        let runner = BackendProcessRunnerFake()
+        let manager = BackendProcessManager(runner: runner)
+        manager.crashRestartCount = 3
+        let config = BackendLaunchConfiguration(
+            sttBackend: "whisper", sttModel: "tiny", whisperModel: "tiny",
+            translateModel: "none", translateBackend: "none",
+            privateAPIBaseURL: "", privateAPIModel: "", privateAPIKey: "",
+            openAIBaseURL: "", openAIAPIKey: "", openAISTTModel: "")
+
+        manager.startIfNeeded(configuration: config)
+        XCTAssertEqual(manager.crashRestartCount, 3,
+                       "warmup start must not re-arm the crash cap")
+
+        manager.restart(configuration: config)
+        XCTAssertEqual(manager.crashRestartCount, 0,
+                       "the explicit restart path is the reset")
+    }
+
+    /// A crash mid-capture must not respawn python+torch WHILE the user is
+    /// dictating on a 16 GB machine — the import storm competes with live
+    /// audio IO (the active capture-loss theory). Respawn defers until the
+    /// capture ends.
+    func testRespawnDefersWhileCaptureActive() {
+        let runner = BackendProcessRunnerFake()
+        let manager = BackendProcessManager(runner: runner)
+        manager.crashRestartDelayOverride = 0.02
+        manager.setCaptureActive(true)
+        let config = BackendLaunchConfiguration(
+            sttBackend: "whisper", sttModel: "tiny", whisperModel: "tiny",
+            translateModel: "none", translateBackend: "none",
+            privateAPIBaseURL: "", privateAPIModel: "", privateAPIKey: "",
+            openAIBaseURL: "", openAIAPIKey: "", openAISTTModel: "")
+
+        manager.handleUnexpectedExit(statusCode: 1, configuration: config)
+
+        usleep(150_000) // several defer cycles
+        XCTAssertEqual(runner.ranProcesses.count, 0,
+                       "respawn must wait out the in-flight capture")
+
+        manager.setCaptureActive(false)
+        waitForRunCount(runner, 1)
         XCTAssertEqual(runner.ranProcesses.count, 1)
     }
 

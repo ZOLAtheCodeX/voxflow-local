@@ -9,10 +9,21 @@ struct CockpitTopBarView: View {
         HStack(spacing: VF.spacingSmall) {
             recordingPill
             modelPill
+            persistenceWarningPill
             Spacer()
             targetPill
         }
         .font(VF.captionFont)
+    }
+
+    /// Session 29: auto-save failures were silent — the user could dictate
+    /// for half an hour with the crash-recovery contract void. Visible the
+    /// moment two consecutive saves fail; disappears on the next success.
+    @ViewBuilder private var persistenceWarningPill: some View {
+        if sessionService.persistenceFailing {
+            pill("session not saving to disk", tint: VF.colorError)
+                .accessibilityLabel("Warning: session auto-save is failing")
+        }
     }
 
     @ViewBuilder private var recordingPill: some View {

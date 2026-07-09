@@ -15,10 +15,21 @@ final class FnHoldHotkeyService: @unchecked Sendable {
     private var isFnAlonePressed = false
     private var hasTriggeredPress = false
     private var pendingPressWorkItem: DispatchWorkItem?
+    private var pendingReleaseWorkItem: DispatchWorkItem?
     private let activationDelay: TimeInterval
+    private let releaseGraceDelay: TimeInterval
 
-    init(activationDelay: TimeInterval = 0.12) {
+    /// `releaseGraceDelay`: release-side debounce. A flags flicker mid-hold
+    /// (brushed modifier while fn stays down) used to fire onRelease
+    /// INSTANTLY — truncating the capture mid-utterance — and the follow-up
+    /// re-press was then swallowed by the .transcribing guard, losing the
+    /// rest of the utterance (session 29; matches the 0.4-0.8 s receipts
+    /// fired 1.2-1.6 s after a previous capture). Release now fires only if
+    /// fn is still up when the grace window closes; a flicker that resolves
+    /// back to fn-alone is a non-event and the capture continues seamlessly.
+    init(activationDelay: TimeInterval = 0.12, releaseGraceDelay: TimeInterval = 0.15) {
         self.activationDelay = activationDelay
+        self.releaseGraceDelay = releaseGraceDelay
     }
 
     func register(onPress: @escaping () -> Void, onRelease: @escaping () -> Void) {
@@ -59,6 +70,8 @@ final class FnHoldHotkeyService: @unchecked Sendable {
 
         pendingPressWorkItem?.cancel()
         pendingPressWorkItem = nil
+        pendingReleaseWorkItem?.cancel()
+        pendingReleaseWorkItem = nil
         globalMonitor = nil
         localMonitor = nil
         onPress = nil
@@ -81,6 +94,14 @@ final class FnHoldHotkeyService: @unchecked Sendable {
 
         isFnAlonePressed = fnAloneNow
         if fnAloneNow {
+            // Back to fn-alone. If a release is pending (grace window open),
+            // this is a flicker resolving — absorb it: no release, no
+            // re-press, the capture continues.
+            if let pendingReleaseWorkItem {
+                pendingReleaseWorkItem.cancel()
+                self.pendingReleaseWorkItem = nil
+                return
+            }
             schedulePressTrigger()
             return
         }
@@ -89,8 +110,23 @@ final class FnHoldHotkeyService: @unchecked Sendable {
         pendingPressWorkItem = nil
 
         guard hasTriggeredPress else { return }
-        hasTriggeredPress = false
-        onRelease?()
+        scheduleReleaseTrigger()
+    }
+
+    /// Release fires only if fn is STILL up when the grace window closes —
+    /// a mid-hold flags flicker used to truncate the capture instantly.
+    private func scheduleReleaseTrigger() {
+        pendingReleaseWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, !self.isFnAlonePressed, self.hasTriggeredPress else { return }
+            self.pendingReleaseWorkItem = nil
+            self.hasTriggeredPress = false
+            self.onRelease?()
+        }
+
+        pendingReleaseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + releaseGraceDelay, execute: workItem)
     }
 
     private func schedulePressTrigger() {

@@ -12,10 +12,23 @@ struct CapturedAudio {
     /// to correlate against. nil when not measured (tests, backend STT path).
     let firstBufferLatencyMs: Int?
 
-    init(pcm: Data, sampleRate: Double, firstBufferLatencyMs: Int? = nil) {
+    /// Wall-clock seconds from the FIRST delivered buffer to stopCapture —
+    /// what the PCM duration SHOULD be if no buffers were dropped. A material
+    /// shortfall (durationSeconds << expectedDurationSeconds) means audio was
+    /// lost mid-capture (IO overload, stalled device) — previously invisible
+    /// (session 29). nil when unmeasured (tests, no buffer ever arrived).
+    let expectedDurationSeconds: Double?
+
+    init(
+        pcm: Data,
+        sampleRate: Double,
+        firstBufferLatencyMs: Int? = nil,
+        expectedDurationSeconds: Double? = nil
+    ) {
         self.pcm = pcm
         self.sampleRate = sampleRate
         self.firstBufferLatencyMs = firstBufferLatencyMs
+        self.expectedDurationSeconds = expectedDurationSeconds
     }
 
     /// Below this RMS the capture is treated as dead-air silence (no usable
@@ -102,6 +115,10 @@ final class AudioCaptureService: AudioCapturing {
         // because the tap callback runs on the audio thread.
         var captureStartedAt: ContinuousClock.Instant?
         var firstBufferLatencyMs: Int?
+        // Stamp of the most recent delivered buffer (current generation only),
+        // so a mid-capture stall — buffers stop flowing while "recording" — is
+        // detectable from outside (session 29: stalls silently truncated).
+        var lastBufferAt: ContinuousClock.Instant?
         // Fired once when the first real buffer lands, so the caller can gate the
         // "mic is live, speak now" cue on actual hardware readiness. Held under
         // the lock because it's set on the main thread and read on the audio thread.
@@ -128,6 +145,7 @@ final class AudioCaptureService: AudioCapturing {
         maxBytes: Int = maxBufferBytes
     ) -> (@Sendable () -> Void)? {
         guard state.generation == generation else { return nil }
+        state.lastBufferAt = ContinuousClock.now
         let isFirstBuffer = state.firstBufferLatencyMs == nil
         if isFirstBuffer {
             state.firstBufferLatencyMs = state.captureStartedAt?.elapsedMilliseconds() ?? 0
@@ -227,6 +245,16 @@ final class AudioCaptureService: AudioCapturing {
         state.withLock { $0.bufferLimitReached }
     }
 
+    /// Seconds since the last delivered buffer, or nil before the first
+    /// buffer arrives (the CaptureLiveWatchdog owns that phase). Polled by
+    /// the coordinator's recording timer to catch MID-capture stalls — the
+    /// device stopping delivery without an AVAudioEngineConfigurationChange
+    /// used to leave the user speaking into a dead engine (session 29).
+    var secondsSinceLastBuffer: Double? {
+        state.withLock { $0.lastBufferAt }
+            .map { Double($0.elapsedMilliseconds()) / 1000.0 }
+    }
+
     func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws {
         deviceChangedDuringCapture = false
         let captureGeneration: UInt64 = state.withLock {
@@ -234,6 +262,7 @@ final class AudioCaptureService: AudioCapturing {
             $0.bufferLimitReached = false
             $0.captureStartedAt = nil
             $0.firstBufferLatencyMs = nil
+            $0.lastBufferAt = nil
             $0.onCaptureLive = onCaptureLive
             $0.generation &+= 1
             return $0.generation
@@ -364,16 +393,24 @@ final class AudioCaptureService: AudioCapturing {
         // `ingest`, and release the live handler — a capture that has stopped
         // must never fire its cue, and the closure (with its captured coordinator
         // machinery) must not linger in shared state across the idle period.
-        let (captured, firstBufferLatencyMs) = state.withLock { state in
+        let (captured, firstBufferLatencyMs, expectedDuration) = state.withLock { state -> (Data, Int?, Double?) in
             state.generation &+= 1
             state.onCaptureLive = nil
-            return (state.pcmBuffer, state.firstBufferLatencyMs)
+            // Wall-clock from FIRST buffer to now — the span the PCM should
+            // cover if no buffers were dropped mid-capture.
+            let expected: Double? = state.captureStartedAt.flatMap { startedAt in
+                state.firstBufferLatencyMs.map { firstLatency in
+                    max(0, Double(startedAt.elapsedMilliseconds() - firstLatency) / 1000.0)
+                }
+            }
+            return (state.pcmBuffer, state.firstBufferLatencyMs, expected)
         }
 
         return CapturedAudio(
             pcm: captured,
             sampleRate: Self.targetSampleRate,
-            firstBufferLatencyMs: firstBufferLatencyMs
+            firstBufferLatencyMs: firstBufferLatencyMs,
+            expectedDurationSeconds: expectedDuration
         )
     }
 }

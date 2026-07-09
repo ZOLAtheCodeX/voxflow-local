@@ -13,6 +13,32 @@ final class CaptureFeedbackTests: XCTestCase {
         XCTAssertTrue(status.lowercased().contains("mic"), "weak-input empty should point at the microphone, got: \(status)")
     }
 
+    /// Session 29 review: a capture whose PCM covers materially less time
+    /// than the wall-clock recording span lost audio to dropped buffers or a
+    /// stalled device — previously indistinguishable from a full capture in
+    /// code, receipts, and status line.
+    func testCoverageWarningFiresOnMaterialShortfall() {
+        // Spoke ~10 s wall-clock; only 4 s of PCM arrived.
+        XCTAssertNotNil(CaptureFeedback.coverageWarning(
+            durationSeconds: 4.0, expectedSeconds: 10.0))
+    }
+
+    func testCoverageWarningQuietOnNormalCapture() {
+        XCTAssertNil(CaptureFeedback.coverageWarning(
+            durationSeconds: 9.7, expectedSeconds: 10.0))
+    }
+
+    func testCoverageWarningQuietOnShortCaptures() {
+        // Sub-3 s spans are dominated by start/stop slop — not judgeable.
+        XCTAssertNil(CaptureFeedback.coverageWarning(
+            durationSeconds: 1.0, expectedSeconds: 2.0))
+    }
+
+    func testCoverageWarningQuietWithoutExpectedSpan() {
+        XCTAssertNil(CaptureFeedback.coverageWarning(
+            durationSeconds: 5.0, expectedSeconds: nil))
+    }
+
     func testLowConfidenceWithWeakInputPromptsMicCheck() {
         let status = CaptureFeedback.rejectionStatus(reason: .lowConfidence, rmsEnergy: 0.004)
         XCTAssertTrue(status.lowercased().contains("mic"), "weak-input low-confidence should point at the microphone, got: \(status)")

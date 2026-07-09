@@ -132,17 +132,34 @@ final class AccessibilityInsertService: TextInserting {
             return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
         }
 
-        if await simulatePaste(text: text, targetApp: targetApp) {
-            // simulatePaste only proves the Cmd+V event was POSTED. Under
-            // secure event input the target never receives it, so nothing
-            // landed — recording would poison the next spacing decision.
-            if !IsSecureEventInputEnabled() {
-                recordPriorInsertion(text, targetApp: targetApp)
-            }
-            return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
+        let posted = await simulatePaste(text: text, targetApp: targetApp)
+        let result = Self.pasteOutcome(
+            posted: posted, secureInputActive: IsSecureEventInputEnabled())
+        if result.success {
+            recordPriorInsertion(text, targetApp: targetApp)
         }
+        return result
+    }
 
-        return InsertResult(method: .failed, success: false, fallbackUsed: true, errorCode: "INSERT_FAILED")
+    /// Maps the paste attempt to an honest result. `posted` only proves the
+    /// Cmd+V event was POSTED — under secure event input the target never
+    /// receives it, so nothing landed (and the paste path restored the
+    /// previous clipboard, so the text isn't there either). Reporting that
+    /// as success wrote an "Inserted" receipt for text that went nowhere
+    /// (session 29 review) — the exact inverse of the ghost-text bug this
+    /// forensics stack exists to catch. Failure here routes the caller into
+    /// its copy-to-clipboard fallback with a truthful status line.
+    nonisolated static func pasteOutcome(posted: Bool, secureInputActive: Bool) -> InsertResult {
+        guard posted else {
+            return InsertResult(
+                method: .failed, success: false, fallbackUsed: true, errorCode: "INSERT_FAILED")
+        }
+        guard !secureInputActive else {
+            return InsertResult(
+                method: .failed, success: false, fallbackUsed: true,
+                errorCode: "SECURE_INPUT_BLOCKED")
+        }
+        return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
     }
 
     /// Remember what we just inserted so the next insertion into the same target

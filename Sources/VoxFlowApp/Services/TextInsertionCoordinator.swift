@@ -95,7 +95,8 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 confidence: state.transcriptCandidate?.confidence,
                 audioSeconds: state.transcriptCandidate?.audioSeconds,
                 rmsEnergy: state.transcriptCandidate?.rmsEnergy,
-                peakAmplitude: state.transcriptCandidate?.peakAmplitude
+                peakAmplitude: state.transcriptCandidate?.peakAmplitude,
+                tailGapSeconds: state.transcriptCandidate?.tailGapSeconds
             )
             state.sessionState = .idle
         } else {
@@ -141,7 +142,8 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 confidence: state.transcriptCandidate?.confidence,
                 audioSeconds: state.transcriptCandidate?.audioSeconds,
                 rmsEnergy: state.transcriptCandidate?.rmsEnergy,
-                peakAmplitude: state.transcriptCandidate?.peakAmplitude
+                peakAmplitude: state.transcriptCandidate?.peakAmplitude,
+                tailGapSeconds: state.transcriptCandidate?.tailGapSeconds
             )
             return true
         } else {

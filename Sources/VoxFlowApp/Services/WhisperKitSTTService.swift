@@ -37,15 +37,78 @@ final class WhisperKitSTTService: ChunkTranscribing {
         (modelsDir as NSString).appendingPathComponent("whisperkit-coreml__\(modelName)")
     }
 
-    /// A capture with real energy that WhisperKit decoded to ZERO segments is an
-    /// intermittent decoder/ANE glitch (observed live: peak 0.26–0.69, multi-second,
-    /// seg=0), NOT silence — worth one retry on the in-memory audio. Genuine
-    /// near-silence (peak below the threshold) is correctly left empty, and a decode
-    /// that already produced segments is never retried (the happy path is untouched).
+    /// A non-silent capture that WhisperKit decoded to ZERO segments is worth
+    /// one retry on the in-memory audio. Gate on RMS vs the dead-air silence
+    /// floor, NOT peak: the old raw-peak >= 0.15 gate excluded exactly the
+    /// weak-speech class the gain normalizer targets (field-observed valid
+    /// speech at rms ~0.016 peaks well under 0.15), so the captures most
+    /// likely to empty were the ones the retry refused (session 29 review).
+    /// A decode that already produced segments is never retried.
     nonisolated static func shouldRetryEmptyDecode(
-        segmentCount: Int, peakAmplitude: Double, threshold: Double = 0.15
+        segmentCount: Int, rmsEnergy: Double, silenceFloor: Double = CapturedAudio.silenceFloor
     ) -> Bool {
-        segmentCount == 0 && peakAmplitude >= threshold
+        segmentCount == 0 && rmsEnergy >= silenceFloor
+    }
+
+    /// Primary decode options. Anti-hallucination thresholds made explicit
+    /// (they match WhisperKit's current defaults by design — pinned so an
+    /// upstream default change can't silently weaken the gate).
+    nonisolated static func makeDecodeOptions(promptTokens: [Int]?) -> DecodingOptions {
+        DecodingOptions(
+            language: "en",
+            temperatureFallbackCount: 5,
+            wordTimestamps: true,
+            promptTokens: promptTokens,
+            compressionRatioThreshold: 2.4,
+            logProbThreshold: -1.0,
+            noSpeechThreshold: 0.6
+        )
+    }
+
+    /// Partial-decode detection (session 29 tail-loss class): seconds of
+    /// SPEECH-BEARING audio after the last transcribed segment, or nil when
+    /// the tail is short (< `minGapSeconds`) or quiet. An early-EOT decode
+    /// (transcript covers only the head) used to be silently accepted; the
+    /// energy-ratio check keeps trailing silence — a user dawdling before
+    /// pressing stop — from false-positive warnings. Ratio-based, so it is
+    /// invariant to the uniform gain normalization applied upstream.
+    nonisolated static func untranscribedSpeechTail(
+        samples: [Float],
+        sampleRate: Double,
+        lastSegmentEnd: Double,
+        minGapSeconds: Double = 2.0
+    ) -> Double? {
+        guard sampleRate > 0, !samples.isEmpty, lastSegmentEnd >= 0 else { return nil }
+        let clipSeconds = Double(samples.count) / sampleRate
+        let gap = clipSeconds - lastSegmentEnd
+        guard gap >= minGapSeconds else { return nil }
+
+        func rms(_ slice: ArraySlice<Float>) -> Double {
+            guard !slice.isEmpty else { return 0 }
+            let sum = slice.reduce(0.0) { $0 + Double($1) * Double($1) }
+            return (sum / Double(slice.count)).squareRoot()
+        }
+        let tailStart = min(samples.count, Int(lastSegmentEnd * sampleRate))
+        let tailRMS = rms(samples[tailStart...])
+        let clipRMS = rms(samples[...])
+        // Speech-bearing = the tail carries energy comparable to the clip's
+        // own speech level AND is above dead air in absolute terms.
+        guard clipRMS > 0, tailRMS >= 0.6 * clipRMS,
+              tailRMS >= CapturedAudio.silenceFloor else { return nil }
+        return gap
+    }
+
+    /// The seg=0 retry must VARY the decode, not replay it byte-identically —
+    /// a deterministic failure (gappy PCM) reproduces under identical inputs.
+    /// Drop the vocabulary prompt (a known continuation-hallucination
+    /// amplifier, per VocabularyBiasing's own notes) and word-timestamp
+    /// alignment (consumed nowhere downstream; pure failure surface). The
+    /// quality thresholds stay pinned: the retry varies inputs, not gates.
+    nonisolated static func retryDecodeOptions(from options: DecodingOptions) -> DecodingOptions {
+        var retry = options
+        retry.promptTokens = nil
+        retry.wordTimestamps = false
+        return retry
     }
 
     func load(modelFolder: String) async throws {
@@ -75,44 +138,38 @@ final class WhisperKitSTTService: ChunkTranscribing {
 
         let started = ContinuousClock.now
         let conversionStarted = ContinuousClock.now
-        let (floatSamples, appliedGainDB, peakAmplitude) = await Task.detached { () -> ([Float], Double, Double) in
+        let (floatSamples, appliedGainDB, peakAmplitude, rawRMS) = await Task.detached { () -> ([Float], Double, Double, Double) in
             // Boost weak input toward a healthy level BEFORE WhisperKit — low
             // amplitude is the dominant empty-transcription cause. The stored
             // PCM / audit rms are untouched, so instrumentation keeps the TRUE
-            // input level; only the decoder's copy is normalized. Peak is the
-            // raw (pre-gain) max amplitude, to spot transient-in-silence clips.
+            // input level; only the decoder's copy is normalized. Peak and rms
+            // are raw (pre-gain): peak spots transient-in-silence clips, rms
+            // drives the seg=0 retry gate.
             let raw = Self.convertPCMInt16ToFloat(audio.pcm)
             let peak = Double(raw.map { abs($0) }.max() ?? 0)
+            let sumSquares = raw.reduce(0.0) { $0 + Double($1) * Double($1) }
+            let rms = raw.isEmpty ? 0 : (sumSquares / Double(raw.count)).squareRoot()
             let (normalized, gainDB) = AudioGain.normalize(raw)
-            return (normalized, gainDB, peak)
+            return (normalized, gainDB, peak, rms)
         }.value
         let conversionLatencyMs = conversionStarted.elapsedMilliseconds()
 
-        // Anti-hallucination thresholds made explicit (they match WhisperKit's
-        // current defaults by design — pinned here so an upstream default
-        // change can't silently weaken the gate). noSpeechThreshold marks a
-        // segment silent when noSpeechProb exceeds it AND avgLogprob falls
-        // below logProbThreshold; segment noSpeechProb also feeds
-        // TranscriptionConfidence regardless of this gate.
-        let decodeOptions = DecodingOptions(
-            language: "en",
-            temperatureFallbackCount: 5,
-            wordTimestamps: true,
-            promptTokens: vocabularyPromptTokens(),
-            compressionRatioThreshold: 2.4,
-            logProbThreshold: -1.0,
-            noSpeechThreshold: 0.6
-        )
+        // noSpeechThreshold marks a segment silent when noSpeechProb exceeds
+        // it AND avgLogprob falls below logProbThreshold; segment noSpeechProb
+        // also feeds TranscriptionConfidence regardless of this gate.
+        let decodeOptions = Self.makeDecodeOptions(promptTokens: vocabularyPromptTokens())
         let inferenceStarted = ContinuousClock.now
         var results: [TranscriptionResult] = try await pipe.transcribe(
             audioArray: floatSamples, decodeOptions: decodeOptions)
-        // seg=0 retry: real-energy audio that decoded to nothing is an
-        // intermittent decoder glitch, not silence — retry once on the audio
-        // already in memory before giving up (no re-recording for the user).
+        // seg=0 retry: non-silent audio that decoded to nothing gets one more
+        // attempt on the audio already in memory (no re-recording for the
+        // user) — with VARIED options, since a deterministic failure would
+        // reproduce under an identical replay.
         if Self.shouldRetryEmptyDecode(
-            segmentCount: results.flatMap(\.segments).count, peakAmplitude: peakAmplitude) {
-            log.info("WhisperKit returned 0 segments on audio with peak \(String(format: "%.2f", peakAmplitude)) — retrying decode once")
-            results = try await pipe.transcribe(audioArray: floatSamples, decodeOptions: decodeOptions)
+            segmentCount: results.flatMap(\.segments).count, rmsEnergy: rawRMS) {
+            log.info("WhisperKit returned 0 segments on audio with rms \(String(format: "%.4f", rawRMS)) — retrying decode once with varied options")
+            results = try await pipe.transcribe(
+                audioArray: floatSamples, decodeOptions: Self.retryDecodeOptions(from: decodeOptions))
         }
         let inferenceLatencyMs = inferenceStarted.elapsedMilliseconds()
 
@@ -145,6 +202,16 @@ final class WhisperKitSTTService: ChunkTranscribing {
         let meanNoSpeechProb = noSpeechProbs.isEmpty
             ? nil : noSpeechProbs.reduce(0, +) / Double(noSpeechProbs.count)
 
+        // Partial-decode flag: speech-bearing audio after the last transcribed
+        // segment means the decoder stopped early and words were lost.
+        let speechTailGap: Double? = allSegments.map({ Double($0.end) }).max().flatMap { lastEnd in
+            Self.untranscribedSpeechTail(
+                samples: floatSamples,
+                sampleRate: audio.sampleRate,
+                lastSegmentEnd: lastEnd
+            )
+        }
+
         // NOTE: hallucination filtering is intentionally NOT done here. The
         // single ingress `TranscriptGate.evaluate` applies the identical
         // `HallucinationFilter` (and the confidence rules) for EVERY transcript
@@ -176,7 +243,8 @@ final class WhisperKitSTTService: ChunkTranscribing {
             appliedGainDB: appliedGainDB,
             meanNoSpeechProb: meanNoSpeechProb,
             segmentCount: allSegments.count,
-            peakAmplitude: peakAmplitude
+            peakAmplitude: peakAmplitude,
+            speechTailGapSeconds: speechTailGap
         )
     }
 

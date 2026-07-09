@@ -17,6 +17,24 @@ final class AudioCaptureIngestTests: XCTestCase {
         return state
     }
 
+    /// Session 29 review: nothing monitored buffer continuity after the first
+    /// buffer — a mid-capture stall silently truncated the dictation. Ingest
+    /// now stamps every delivered buffer so the coordinator's timer can spot
+    /// a stall (stamp going stale) while the user is still speaking. Stale
+    /// generations must NOT stamp — an old tap block firing late would mask a
+    /// real stall on the current capture.
+    func testIngestStampsLastBufferForCurrentGenerationOnly() {
+        var state = makeState(generation: 3)
+        XCTAssertNil(state.lastBufferAt)
+
+        _ = AudioCaptureService.ingest(state: &state, chunk: Data([0, 0]), generation: 3)
+        let stamped = state.lastBufferAt
+        XCTAssertNotNil(stamped)
+
+        _ = AudioCaptureService.ingest(state: &state, chunk: Data([0, 0]), generation: 2)
+        XCTAssertEqual(state.lastBufferAt, stamped, "a stale-generation buffer must not refresh the stamp")
+    }
+
     func testFirstBufferAppendsRecordsLatencyAndReturnsLiveCallbackOnce() {
         var state = makeState(generation: 1)
         state.onCaptureLive = {}

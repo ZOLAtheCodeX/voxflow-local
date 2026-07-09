@@ -325,3 +325,107 @@ class TestPolishEngineChains:
         assert out.served_by == "ollama"
         assert out.fallback_depth == 0
 
+
+
+# ── Wedged-warm circuit breaker (session 29 stability review) ─────────
+
+class _FakeClock:
+    """Injectable monotonic clock; tests advance it explicitly."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _WedgedBackend:
+    """Simulates the wedged-warm MLX runner: every polish call burns the
+    full timeout (advancing the fake clock) and returns nothing. The Ollama
+    server still answers /api/tags, so availability probes can't see this —
+    only elapsed-time accounting can."""
+
+    def __init__(self, clock: _FakeClock, burn_seconds: float = 30.0) -> None:
+        self.clock = clock
+        self.burn_seconds = burn_seconds
+        self.calls = 0
+        self.name = "ollama"
+
+    def polish(self, text, tone, system_prompt=None, model=None, timeout=None):
+        self.calls += 1
+        self.clock.now += self.burn_seconds
+        return ""
+
+
+class TestWedgedProviderCircuitBreaker:
+    """A wedged-warm runner has no fingerprint except burning the full
+    timeout per request. Without a breaker, EVERY polished dictation paid
+    the 30 s stall until the user manually ran `ollama stop` (documented
+    live failure: ~28% of requests during thrash). Two consecutive
+    timeout-shaped failures open the breaker; a cooldown later, one probe
+    request is allowed through."""
+
+    def test_two_timeout_failures_open_the_breaker(self):
+        clock = _FakeClock()
+        wedged = _WedgedBackend(clock)
+        engine = PolishEngine(chain=[(_spec("ollama"), wedged)], clock=clock)
+
+        engine.run("first dictation to polish today", "neutral")
+        engine.run("second dictation to polish today", "neutral")
+        assert wedged.calls == 2
+
+        out = engine.run("third dictation to polish today", "neutral")
+        assert wedged.calls == 2, "breaker must skip the wedged provider"
+        assert out.served_by == "regex"
+        assert out.degraded_reason == "provider_wedged"
+
+    def test_cooldown_allows_a_probe_request(self):
+        clock = _FakeClock()
+        wedged = _WedgedBackend(clock)
+        engine = PolishEngine(chain=[(_spec("ollama"), wedged)], clock=clock)
+        engine.run("first dictation to polish today", "neutral")
+        engine.run("second dictation to polish today", "neutral")
+        engine.run("third dictation to polish today", "neutral")
+        assert wedged.calls == 2
+
+        clock.now += 121.0  # past the cooldown
+        engine.run("fourth dictation to polish today", "neutral")
+        assert wedged.calls == 3, "cooldown expiry must allow one probe through"
+
+    def test_success_resets_the_failure_count(self):
+        clock = _FakeClock()
+
+        class _FlakyBackend:
+            name = "ollama"
+
+            def __init__(self):
+                self.calls = 0
+
+            def polish(self, text, tone, system_prompt=None, model=None, timeout=None):
+                self.calls += 1
+                if self.calls == 1:
+                    clock.now += 30.0  # one wedge-shaped failure
+                    return ""
+                return "This is the polished sentence we expected to receive."
+
+        flaky = _FlakyBackend()
+        engine = PolishEngine(chain=[(_spec("ollama"), flaky)], clock=clock)
+        # "uh" filler so the successful response is real polish, not an echo
+        # (an echo diverts to the regex floor and would hide the reset).
+        engine.run("uh this is the polished sentence we expected to receive", "neutral")
+        out = engine.run("uh this is the polished sentence we expected to receive", "neutral")
+        assert out.served_by == "ollama"
+        # A later single wedge must not trip a breaker armed by the old failure.
+        engine.run("uh this is the polished sentence we expected to receive", "neutral")
+        assert flaky.calls == 3
+
+    def test_fast_failures_never_trip_the_breaker(self):
+        """Connection-refused costs milliseconds and needs no breaker — the
+        chain already falls through instantly. Only timeout-shaped (slow)
+        failures indicate a wedge."""
+        clock = _FakeClock()
+        fast_dead = _ChainBackend("ollama", "")  # empty response, no clock burn
+        engine = PolishEngine(chain=[(_spec("ollama"), fast_dead)], clock=clock)
+        for _ in range(4):
+            engine.run("dictation to polish while ollama is down", "neutral")
+        assert len(fast_dead.received) == 4, "fast failures must keep probing"

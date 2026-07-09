@@ -22,6 +22,13 @@ final class SystemClock: SessionClock {
 final class LongFormSessionService: ObservableObject {
     @Published private(set) var state: LongFormState = .idle
     @Published private(set) var currentSession: LongFormSession?
+    /// True after 2+ consecutive auto-save failures — the documented crash
+    /// recovery contract ("auto-save every ~5 s") is NOT holding, and the
+    /// user must be warned instead of dictating for half an hour under a
+    /// silently-void safety net (session 29 review). Cleared by the next
+    /// successful save.
+    @Published private(set) var persistenceFailing = false
+    private var consecutiveSaveFailures = 0
 
     let clock: SessionClock
     private let autoSaveDirectory: URL
@@ -129,8 +136,18 @@ final class LongFormSessionService: ObservableObject {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
             try encoder.encode(session).write(to: url, options: .atomic)
+            consecutiveSaveFailures = 0
+            if persistenceFailing { persistenceFailing = false }
         } catch {
             log.error("auto-save failed: \(error.localizedDescription)")
+            consecutiveSaveFailures += 1
+            // A single failure may be transient; two in a row means the
+            // safety net is down — surface it. Re-attempt directory creation
+            // so a fixed cause (freed disk, restored permissions) self-heals
+            // on the next tick without an app restart.
+            if consecutiveSaveFailures >= 2 { persistenceFailing = true }
+            try? FileManager.default.createDirectory(
+                at: autoSaveDirectory, withIntermediateDirectories: true)
         }
     }
 

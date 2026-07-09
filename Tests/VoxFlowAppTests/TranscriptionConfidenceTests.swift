@@ -38,13 +38,42 @@ final class TranscriptionConfidenceTests: XCTestCase {
 
     func testTwoWordsFromLongNoiseIsCrushed() {
         // "hello world" from 6s of noise — multi-word ghost that the old
-        // exp(avgLogprob) estimate scored 0.3-0.6.
+        // exp(avgLogprob) estimate scored 0.3-0.6. Noise-invented segments
+        // carry elevated noSpeechProb (the model's own doubt) — that doubt is
+        // what keeps the crush armed now that attested speech is exempt.
         let conf = TranscriptionConfidence.estimate(
-            segments: [segment(0.0, 0.7)],
+            segments: [segment(0.0, 0.7, noSpeech: 0.4)],
             text: "hello world",
             audioDurationSeconds: 6.0
         )
         XCTAssertLessThanOrEqual(conf, 0.1, "Two-word ghost from long audio must be <= 0.1, got \(conf)")
+    }
+
+    /// Session 29 review: a clear, loud "Approved." (0.8 s of speech the model
+    /// attests with near-zero noSpeechProb) in a 3 s capture was deterministically
+    /// crushed to 0.1 and rejected by the gate — coverage geometry alone decided,
+    /// and the one signal distinguishing real speech from invented (noSpeechProb)
+    /// was ignored. Model-attested speech with substantial spoken time is exempt.
+    func testAttestedQuickWordEscapesCrush() {
+        let conf = TranscriptionConfidence.estimate(
+            segments: [segment(0.4, 1.2, noSpeech: 0.02)],
+            text: "approved",
+            audioDurationSeconds: 3.0
+        )
+        XCTAssertGreaterThan(conf, 0.15,
+                             "Model-attested quick word must escape the crush, got \(conf)")
+    }
+
+    /// A sub-0.5 s blip stays crushed even when noSpeechProb is low — blip
+    /// ghosts are the classic noise-invention shape, and the exemption must
+    /// not resurrect them.
+    func testLowNoSpeechBlipIsStillCrushed() {
+        let conf = TranscriptionConfidence.estimate(
+            segments: [segment(0.0, 0.3, noSpeech: 0.05)],
+            text: "hello",
+            audioDurationSeconds: 5.0
+        )
+        XCTAssertLessThanOrEqual(conf, 0.1, "Blip ghost must stay crushed, got \(conf)")
     }
 
     func testLegitimateSingleWordWithStrongCoverageSurvives() {

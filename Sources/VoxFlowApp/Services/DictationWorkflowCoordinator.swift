@@ -17,6 +17,7 @@ struct DictationWorkflowRequest {
     var audioSeconds: Double? = nil
     var rmsEnergy: Double? = nil
     var peakAmplitude: Double? = nil
+    var tailGapSeconds: Double? = nil
 }
 
 @MainActor
@@ -59,7 +60,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 targetProcessIdentifier: request.targetApp?.processIdentifier,
                 audioSeconds: request.audioSeconds,
                 rmsEnergy: request.rmsEnergy,
-                peakAmplitude: request.peakAmplitude
+                peakAmplitude: request.peakAmplitude,
+                tailGapSeconds: request.tailGapSeconds
             )
             state.transcriptCandidate = candidate
             pushToSessionMemory(candidate)
@@ -126,7 +128,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 polishProvenance: PolishProvenance.inApp,
                 audioSeconds: request.audioSeconds,
                 rmsEnergy: request.rmsEnergy,
-                peakAmplitude: request.peakAmplitude
+                peakAmplitude: request.peakAmplitude,
+                tailGapSeconds: request.tailGapSeconds
             )
             state.transcriptCandidate = candidate
             state.selectedMode = .raw
@@ -213,7 +216,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             polishProvenance: polishProvenance,
             audioSeconds: request.audioSeconds,
             rmsEnergy: request.rmsEnergy,
-            peakAmplitude: request.peakAmplitude
+            peakAmplitude: request.peakAmplitude,
+            tailGapSeconds: request.tailGapSeconds
         )
         state.transcriptCandidate = candidate
         state.selectedMode = defaultMode

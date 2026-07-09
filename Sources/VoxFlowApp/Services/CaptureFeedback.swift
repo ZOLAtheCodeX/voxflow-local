@@ -28,6 +28,21 @@ enum CaptureFeedback {
         }
     }
 
+    /// Coverage-shortfall warning (session 29): the PCM covers materially
+    /// less time than the wall-clock recording span, i.e. audio was LOST
+    /// mid-capture (dropped IO buffers under memory pressure, stalled
+    /// device). Returns a status-line suffix, or nil when coverage is
+    /// healthy, the span is too short to judge (start/stop slop dominates
+    /// under ~3 s), or the expected span was not measured.
+    static func coverageWarning(durationSeconds: Double, expectedSeconds: Double?) -> String? {
+        guard let expectedSeconds, expectedSeconds >= 3.0 else { return nil }
+        let coverage = durationSeconds / expectedSeconds
+        guard coverage < 0.85 else { return nil }
+        return String(
+            format: " — audio device dropped ~%.0f s of the recording",
+            max(0, expectedSeconds - durationSeconds))
+    }
+
     /// Sharpen the empty-capture message with a Silero speech-presence
     /// diagnosis (R6, `/v1/audio/diagnose`): "speech but too quiet" vs "only
     /// background noise" vs "speech but not recognized" — the RMS heuristic

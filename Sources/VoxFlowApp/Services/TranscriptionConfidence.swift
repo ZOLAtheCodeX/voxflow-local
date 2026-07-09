@@ -33,15 +33,23 @@ enum TranscriptionConfidence {
 
         var confidence = min(0.95, max(0.05, coverage))
 
-        if wordCount <= 2, audioDurationSeconds > 2.0, coverage < 0.3 {
+        // Lone-word crush (the ghost signature: a word invented from long
+        // noise) — EXCEPT when the model itself strongly attests speech
+        // (near-zero mean noSpeechProb) over substantial spoken time. A
+        // clear, loud "Approved." in a 3 s capture is coverage-poor but
+        // speech-certain; crushing it on geometry alone deterministically
+        // rejected legitimate quick dictations (session 29 review). Blip
+        // segments (< 0.5 s) never qualify: blips are the classic
+        // noise-invention shape regardless of noSpeechProb.
+        let meanNoSpeech = segments.isEmpty
+            ? nil : segments.reduce(0.0) { $0 + $1.noSpeechProb } / Double(segments.count)
+        let attestedSpeech = (meanNoSpeech ?? 1.0) < 0.15 && spoken >= 0.5
+        if wordCount <= 2, audioDurationSeconds > 2.0, coverage < 0.3, !attestedSpeech {
             confidence = min(confidence, 0.1)
         }
 
-        if !segments.isEmpty {
-            let meanNoSpeech = segments.reduce(0.0) { $0 + $1.noSpeechProb } / Double(segments.count)
-            if meanNoSpeech > 0.5 {
-                confidence = min(confidence, 0.1)
-            }
+        if let meanNoSpeech, meanNoSpeech > 0.5 {
+            confidence = min(confidence, 0.1)
         }
 
         return (confidence * 1000).rounded() / 1000

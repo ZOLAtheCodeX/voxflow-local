@@ -202,6 +202,31 @@ final class BackendProcessManager: @unchecked Sendable {
     var crashRestartCount: Int = 0
     private var intentionalShutdown = false
     private static let maxCrashRestarts = 3
+    /// Test seam: overrides the crash-restart backoff delay (and the
+    /// capture-defer poll interval) so tests don't sleep real seconds.
+    var crashRestartDelayOverride: TimeInterval?
+    /// Set from the app while a capture/transcription is in flight — a crash
+    /// respawn (python + torch import, hundreds of MB of page-ins) must not
+    /// land mid-dictation on a 16 GB machine (session 29: IO overloads from
+    /// memory pressure are the active capture-loss theory). Mutated only on
+    /// the work queue.
+    private var _captureActive = false
+
+    /// Exponential-ish backoff between crash restarts. Immediate respawn
+    /// meant a fast-crashing child burned back-to-back python+torch boots.
+    nonisolated static func crashRestartDelay(forAttempt attempt: Int) -> TimeInterval {
+        switch attempt {
+        case ..<2: return 1.0
+        case 2: return 5.0
+        default: return 30.0
+        }
+    }
+
+    func setCaptureActive(_ active: Bool) {
+        workQueue.async { [weak self] in
+            self?._captureActive = active
+        }
+    }
 
     var lastStartupFailureReason: String? {
         syncOnWorkQueue { _lastStartupFailureReason }
@@ -229,16 +254,20 @@ final class BackendProcessManager: @unchecked Sendable {
         }
     }
 
+    // NOTE: startIfNeeded/Async deliberately do NOT reset crashRestartCount.
+    // They are the warmup triggers (app activation, cockpit open, settings
+    // observers) — resetting there made the crash cap decorative: every
+    // activation re-armed a fresh restart storm against a persistently
+    // crashing child (session 29 review). Only the explicit restart paths
+    // (Settings action, reconfigure) reset the cap.
     func startIfNeeded(configuration: BackendLaunchConfiguration) {
         syncOnWorkQueue {
-            crashRestartCount = 0
             startIfNeededOnWorkQueue(configuration: configuration)
         }
     }
 
     func startIfNeededAsync(configuration: BackendLaunchConfiguration) {
         workQueue.async { [weak self] in
-            self?.crashRestartCount = 0
             self?.startIfNeededOnWorkQueue(configuration: configuration)
         }
     }
@@ -390,10 +419,27 @@ final class BackendProcessManager: @unchecked Sendable {
             return
         }
         self.crashRestartCount += 1
-        log.warning("Backend crashed (exit \(statusCode)); auto-restart \(self.crashRestartCount)/\(Self.maxCrashRestarts)")
+        let delay = crashRestartDelayOverride ?? Self.crashRestartDelay(forAttempt: crashRestartCount)
+        log.warning("Backend crashed (exit \(statusCode)); auto-restart \(self.crashRestartCount)/\(Self.maxCrashRestarts) in \(String(format: "%.0f", delay))s")
         self.process = nil
         self.clearPipeHandlers()
-        self.startIfNeededOnWorkQueue(configuration: configuration)
+        scheduleCrashRestart(configuration: configuration, delay: delay)
+    }
+
+    /// Backoff-scheduled respawn that additionally waits out an in-flight
+    /// capture — the torch-import page-in storm must not compete with live
+    /// audio IO. Re-polls while capture is active; proceeds once it ends.
+    private func scheduleCrashRestart(configuration: BackendLaunchConfiguration, delay: TimeInterval) {
+        workQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.intentionalShutdown else { return }
+            if self._captureActive {
+                self.scheduleCrashRestart(
+                    configuration: configuration,
+                    delay: self.crashRestartDelayOverride ?? 3.0)
+                return
+            }
+            self.startIfNeededOnWorkQueue(configuration: configuration)
+        }
     }
 
     private func stopOnWorkQueue() {

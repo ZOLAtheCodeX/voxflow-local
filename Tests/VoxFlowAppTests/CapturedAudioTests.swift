@@ -13,6 +13,18 @@ final class CapturedAudioTests: XCTestCase {
         XCTAssertEqual(audio.durationSeconds, 1.0, accuracy: 0.0001)
     }
 
+    /// Wall-clock span (first buffer → stop) carried alongside the PCM so
+    /// coverage shortfall (dropped buffers, stalled device) is computable —
+    /// PCM duration alone can't distinguish a full capture from a truncated
+    /// one (session 29).
+    func testExpectedDurationSecondsIsCarried() {
+        let audio = CapturedAudio(
+            pcm: Data(count: 32000), sampleRate: 16000,
+            firstBufferLatencyMs: 136, expectedDurationSeconds: 10.0)
+        XCTAssertEqual(audio.expectedDurationSeconds, 10.0)
+        XCTAssertNil(CapturedAudio(pcm: Data(), sampleRate: 16000).expectedDurationSeconds)
+    }
+
     func testDurationSecondsHalfSecond() {
         let audio = CapturedAudio(pcm: Data(count: 16000), sampleRate: 16000)
         XCTAssertEqual(audio.durationSeconds, 0.5, accuracy: 0.0001)

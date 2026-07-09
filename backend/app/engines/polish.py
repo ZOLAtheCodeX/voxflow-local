@@ -15,9 +15,11 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from threading import Lock
+from typing import Callable
 
 from nlp import apply_tone, light_cleanup, replace_spoken_punctuation
 from privacy import redact_sensitive_text
@@ -53,11 +55,24 @@ class PolishOutcome:
 
 
 class PolishEngine:
+    # Wedged-warm circuit breaker (session 29 stability review): a wedged MLX
+    # runner answers /api/tags fine (so availability probes stay green) while
+    # every chat request burns the full 30 s timeout — without a breaker each
+    # polished dictation stalled 30 s until the user manually ran
+    # `ollama stop` (~28% of requests during documented thrash). A failure is
+    # "wedge-shaped" when the provider returned nothing AND consumed most of
+    # its timeout budget; two in a row open the breaker for the cooldown, and
+    # expiry lets one probe request through (half-open).
+    _WEDGE_TRIP_COUNT = 2
+    _WEDGE_COOLDOWN_S = 120.0
+    _WEDGE_TIMEOUT_FRACTION = 0.8
+
     def __init__(
         self,
         backend: TextLLMBackend | None = None,
         *,
         chain: list[tuple[ProviderSpec | None, TextLLMBackend]] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if chain is not None:
             self._chain = chain
@@ -65,6 +80,10 @@ class PolishEngine:
             resolved = backend or select_backend()
             self._chain = [(None, resolved)]
         self._lock = Lock()
+        self._clock = clock
+        # Keyed by chain depth (stable identity even for spec-less entries).
+        self._wedge_failures: dict[int, int] = {}
+        self._breaker_open_until: dict[int, float] = {}
 
     @property
     def _backend(self) -> TextLLMBackend:
@@ -145,6 +164,7 @@ class PolishEngine:
         memory_skipped = False
 
         redacted_text: str | None = None
+        wedge_skipped = False
         for depth, (spec, backend) in enumerate(self._chain):
             is_cloud = bool(spec and spec.is_cloud)
             if not is_cloud and pressure >= 2:
@@ -155,6 +175,11 @@ class PolishEngine:
                     )
                 memory_skipped = True
                 continue
+            with self._lock:
+                open_until = self._breaker_open_until.get(depth, 0.0)
+            if self._clock() < open_until:
+                wedge_skipped = True
+                continue
             if is_cloud:
                 if redacted_text is None:
                     redacted_text = redact_sensitive_text(text)
@@ -162,6 +187,7 @@ class PolishEngine:
             else:
                 send_text = text
 
+            started = self._clock()
             try:
                 candidate = backend.polish(
                     send_text,
@@ -185,7 +211,9 @@ class PolishEngine:
                 candidate = ""
 
             if not candidate:
+                self._record_empty_result(depth, spec, backend, elapsed=self._clock() - started)
                 continue  # availability failure -> next provider
+            self._record_success(depth)
 
             served_by = spec.id if spec else getattr(backend, "name", "backend")
             model_id = (spec.model if spec else None) or getattr(backend, "model", None)
@@ -206,11 +234,51 @@ class PolishEngine:
                 )
             return PolishOutcome(candidate, False, None, served_by=served_by, model_id=model_id, fallback_depth=depth)
 
+        if memory_skipped:
+            floor_reason = "memory_pressure"
+        elif wedge_skipped:
+            floor_reason = "provider_wedged"
+        else:
+            floor_reason = "backend_unavailable"
         return PolishOutcome(
-            apply_tone(light_cleanup(text), tone), False,
-            "memory_pressure" if memory_skipped else "backend_unavailable",
+            apply_tone(light_cleanup(text), tone), False, floor_reason,
             served_by="regex", model_id=None, fallback_depth=len(self._chain),
         )
+
+    def _record_empty_result(
+        self,
+        depth: int,
+        spec: ProviderSpec | None,
+        backend: TextLLMBackend,
+        *,
+        elapsed: float,
+    ) -> None:
+        """Classify an empty polish result: timeout-shaped (burned most of the
+        provider's timeout budget → wedge evidence) vs fast (connection
+        refused → the chain already handles it cheaply, no breaker needed)."""
+        budget = (spec.timeout if spec and spec.timeout else None) or getattr(backend, "timeout", 30.0)
+        if elapsed < budget * self._WEDGE_TIMEOUT_FRACTION:
+            return
+        with self._lock:
+            failures = self._wedge_failures.get(depth, 0) + 1
+            self._wedge_failures[depth] = failures
+            if failures >= self._WEDGE_TRIP_COUNT:
+                self._breaker_open_until[depth] = self._clock() + self._WEDGE_COOLDOWN_S
+                # Half-open on expiry: the next request probes once; another
+                # wedge-shaped failure re-opens immediately (count stays high).
+                self._wedge_failures[depth] = failures - 1
+                logger.warning(
+                    "Polish provider %s wedged (%d consecutive timeout-shaped failures) — "
+                    "skipping it for %.0f s; run `ollama stop <model>` to recover the runner",
+                    (spec.id if spec else getattr(backend, "name", "?")),
+                    failures,
+                    self._WEDGE_COOLDOWN_S,
+                )
+
+    def _record_success(self, depth: int) -> None:
+        with self._lock:
+            self._wedge_failures.pop(depth, None)
+            self._breaker_open_until.pop(depth, None)
 
     @staticmethod
     def _is_echo(original: str, candidate: str) -> bool:

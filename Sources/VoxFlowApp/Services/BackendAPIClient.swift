@@ -19,6 +19,9 @@ struct TranscribeResponse: Codable {
     var meanNoSpeechProb: Double? = nil
     var segmentCount: Int? = nil
     var peakAmplitude: Double? = nil
+    // Seconds of speech-bearing audio after the last transcribed segment
+    // (in-app WhisperKit path) — the partial-decode / tail-loss flag.
+    var speechTailGapSeconds: Double? = nil
 }
 
 struct CleanupResponse: Codable {
@@ -255,11 +258,18 @@ enum BackendAPIClient {
         throw BackendError.httpError(statusCode: http.statusCode, detail: detail)
     }
 
-    private static func performRequest<Response: Decodable, Payload: Encodable>(path: String, payload: Payload) async throws -> Response {
+    private static func performRequest<Response: Decodable, Payload: Encodable>(
+        path: String,
+        payload: Payload,
+        timeoutInterval: TimeInterval? = nil
+    ) async throws -> Response {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(payload)
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
 
         let (data, response) = try await session.data(for: request)
         try checkHTTPStatus(response, data: data)
@@ -463,7 +473,13 @@ enum BackendAPIClient {
             allowRaw: allowRaw
         )
 
-        return try await performRequest(path: "v1/cleanup", payload: payload)
+        // 45 s: comfortably above the backend's worst honest case (30 s
+        // provider timeout + floor fallback + response), well under the
+        // session's 120 s. The user is WAITING on this call mid-dictation —
+        // a hung connection must fail into the in-app cleanup fallback, not
+        // stall the pipeline for two minutes (session 29 stability review;
+        // the server-side wedge breaker handles the chronic case).
+        return try await performRequest(path: "v1/cleanup", payload: payload, timeoutInterval: 45)
     }
 
     static func translate(

@@ -6,6 +6,7 @@ private final class FakeCapture: AudioCapturing {
     var startCount = 0
     var stopCount = 0
     var failNextStart = false
+    var failNextStop = false
     var nextAudio: CapturedAudio
     /// Whether each startCapture call carried a live callback — pins which
     /// starts gate on the first buffer (the initial ⌘R start) and which
@@ -19,14 +20,25 @@ private final class FakeCapture: AudioCapturing {
         lastLiveCallback = onCaptureLive
         if failNextStart { failNextStart = false; throw AudioCaptureError.captureNotRunning }
     }
-    func stopCapture() throws -> CapturedAudio { stopCount += 1; return nextAudio }
+    func stopCapture() throws -> CapturedAudio {
+        stopCount += 1
+        if failNextStop { failNextStop = false; throw AudioCaptureError.deviceChanged }
+        return nextAudio
+    }
 }
 
 private final class FakeTranscriber: ChunkTranscribing, @unchecked Sendable {
     var nextText: String = ""
+    /// Number of upcoming transcribe calls that should throw (backend dead,
+    /// WhisperKit failure) — decremented per call.
+    var failuresRemaining = 0
     func transcribe(_ audio: CapturedAudio) async throws -> TranscribeResponse {
+        if failuresRemaining > 0 {
+            failuresRemaining -= 1
+            throw URLError(.cannotConnectToHost)
+        }
         // TranscribeResponse has no defaults — all 9 fields required (BackendAPIClient.swift:3).
-        TranscribeResponse(
+        return TranscribeResponse(
             text: nextText, isFinal: true, latencyMs: 1, confidenceEstimate: 0.9,
             processingTimeMs: 1, stageTimingsMs: nil,
             modelLoadedBeforeRequest: nil, modelLoadedAfterRequest: nil, coldStart: nil)
@@ -127,6 +139,108 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         await coord.flushNow()
         XCTAssertEqual(session.currentSession?.transcript, "the WHEREFORE clause")
         await coord.stopRecording()
+    }
+
+    // MARK: - Session 29 review: cockpit chunk-loss paths
+
+    /// A mid-session stopCapture throw (device change) used to log-and-return,
+    /// leaving the session visibly .recording with a DEAD engine — everything
+    /// spoken afterward was lost silently, for as long as the user didn't
+    /// notice. The session must end cleanly with the transcript so far
+    /// preserved and an explicit interruption marker.
+    func test_stopCapture_throw_ends_session_with_interruption_marker() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "before the change"
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.flushNow()   // appends "before the change"
+
+        capture.failNextStop = true
+        await coord.flushNow()   // AirPods disconnect mid-session
+
+        if case .recording = session.state {
+            XCTFail("session must not stay .recording on a dead engine")
+        }
+        let transcript = session.currentSession?.transcript ?? ""
+        XCTAssertTrue(transcript.contains("before the change"),
+                      "prior chunks must survive the interruption")
+        XCTAssertTrue(transcript.contains("interrupted"),
+                      "the transcript must say WHY recording ended, got: \(transcript)")
+    }
+
+    /// A chunk transcription failure used to be log-only: the audio local was
+    /// discarded, no receipt, session kept recording as if nothing happened.
+    /// Now: WAV retained, rejection receipt written, session continues (one
+    /// failure is transient).
+    func test_transcription_failure_retains_audio_and_writes_receipt() async throws {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.failuresRemaining = 1
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cockpit-audit-\(UUID().uuidString).jsonl")
+        let wavDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cockpit-wav-\(UUID().uuidString)")
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            audit: InsertionAuditLog(fileURL: auditURL),
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 4, enabled: true))
+        coord.startRecording(targetApp: nil)
+
+        await coord.flushNow()
+
+        if case .recording = session.state {} else {
+            XCTFail("a single transcription failure must not end the session")
+        }
+        let receipt = try String(contentsOf: auditURL, encoding: .utf8)
+        XCTAssertTrue(receipt.contains("transcription_error"))
+        let wavs = (try? FileManager.default.contentsOfDirectory(atPath: wavDir.path)) ?? []
+        XCTAssertEqual(wavs.filter { $0.hasSuffix(".wav") }.count, 1,
+                       "the failed chunk's audio must be retained")
+        await coord.stopRecording()
+    }
+
+    /// Backend death mid-session: without a failure limit, a 20-minute
+    /// session kept "recording" while every 5 s chunk silently vanished.
+    /// Three consecutive failures end the session with a marker.
+    func test_three_consecutive_transcription_failures_stop_session() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.failuresRemaining = 3
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        await coord.flushNow()
+        await coord.flushNow()
+        if case .recording = session.state {} else {
+            XCTFail("two failures must not yet end the session")
+        }
+        await coord.flushNow()
+
+        if case .recording = session.state {
+            XCTFail("three consecutive failures must end the session")
+        }
+        XCTAssertTrue((session.currentSession?.transcript ?? "").contains("interrupted"))
+    }
+
+    /// The restart-failure path used to discard the audio chunk it had JUST
+    /// successfully collected — stopping the session without transcribing
+    /// the bytes in hand.
+    func test_restart_failure_still_appends_in_hand_chunk() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "last words"
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStart = true
+        await coord.flushNow(force: true)
+
+        if case .recording = session.state {
+            XCTFail("session must end after a restart failure")
+        }
+        XCTAssertTrue((session.currentSession?.transcript ?? "").contains("last words"),
+                      "the in-hand chunk must be transcribed before the session ends")
     }
 
     /// Audit S12: when the mid-chunk capture restart fails, the engine must

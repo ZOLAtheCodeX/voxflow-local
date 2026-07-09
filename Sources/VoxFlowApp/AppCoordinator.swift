@@ -179,6 +179,7 @@ final class AppCoordinator: ObservableObject {
         session: cockpitSessionService,
         dictionary: cockpitDictionary,
         audit: insertionAudit,
+        rejectedAudio: rejectedAudio,
         // Same first-buffer cue gating as the palette path — ⌘R otherwise
         // invites speech ~150 ms before the engine delivers, clipping the
         // first word of the session.
@@ -209,7 +210,7 @@ final class AppCoordinator: ObservableObject {
     /// threaded onto the workflow request → candidate → insert receipt so
     /// partial decodes are detectable on successful inserts (session 29).
     private var lastCaptureAudioStats:
-        (audioSeconds: Double, rmsEnergy: Double, peakAmplitude: Double?)?
+        (audioSeconds: Double, rmsEnergy: Double, peakAmplitude: Double?, tailGapSeconds: Double?)?
     /// Wall-clock of the last decode, to record idle gap on rejects — tests the
     /// "healthy-level miss after the pipeline's been idle" (cold) hypothesis.
     private var lastDecodeAt: Date?
@@ -218,6 +219,9 @@ final class AppCoordinator: ObservableObject {
     private var transcriptionTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     private static let maxCaptureDuration: TimeInterval = 60
+    /// Mid-capture buffer-stall cutoff: CoreAudio delivers ~12 buffers/s, so
+    /// 2 s of nothing means the device stopped, not that the user paused.
+    private static let midCaptureStallTimeout: TimeInterval = 2.0
     private var warmupTask: Task<Void, Never>?
     private var selectToneStyleTask: Task<Void, Never>?
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
@@ -584,12 +588,27 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Fn pressed while the previous capture is still transcribing: queue a
+    /// restart instead of dropping the press. The old drop stranded the user
+    /// — fn held, speaking, no capture, and the eventual release a no-op —
+    /// losing the remainder of the utterance (session 29). The queued press
+    /// fires the moment the pipeline settles (WhisperKit p50 ~0.7 s), and is
+    /// cleared if fn comes up first.
+    private var pendingFnCaptureRestart = false
+
     private func handleFnHoldPress() {
+        let wasTranscribing = state.sessionState == .transcribing
         startCapture()
         fnTriggeredCaptureInProgress = state.sessionState == .recording
+        if wasTranscribing, !fnTriggeredCaptureInProgress {
+            pendingFnCaptureRestart = true
+            log.info("Fn press during transcription — queued capture restart")
+        }
     }
 
     private func handleFnHoldRelease() async {
+        // Fn came up: whatever was queued is moot.
+        pendingFnCaptureRestart = false
         guard fnTriggeredCaptureInProgress else { return }
         fnTriggeredCaptureInProgress = false
         await finishCaptureAndTranscribe()
@@ -644,6 +663,9 @@ final class AppCoordinator: ObservableObject {
         }
 
         state.resetForNewCapture()
+        // A backend crash-respawn (python + torch import) must not land while
+        // audio is flowing — the manager defers it until this clears.
+        backendManager.setCaptureActive(true)
         capturedTargetApp = NSWorkspace.shared.frontmostApplication
         focusMonitor.freeze()
         sessionCounter += 1
@@ -685,7 +707,21 @@ final class AppCoordinator: ObservableObject {
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.state.recordingDuration += 0.1
+                    guard let self else { return }
+                    self.state.recordingDuration += 0.1
+                    // Mid-capture stall: buffers stopped flowing while the UI
+                    // says "recording" (device died without a configuration-
+                    // change notification). Stop now and transcribe what DID
+                    // arrive instead of letting the user speak into a dead
+                    // engine until the 60 s timeout (session 29). The first-
+                    // buffer phase is the CaptureLiveWatchdog's job — this
+                    // readout is nil until a buffer has arrived.
+                    if self.state.sessionState == .recording,
+                       let stall = self.audioCapture.secondsSinceLastBuffer,
+                       stall > Self.midCaptureStallTimeout {
+                        self.log.error("No audio buffer for \(String(format: "%.1f", stall))s mid-capture — stopping and transcribing what arrived")
+                        await self.finishCaptureAndTranscribe(commandLane: commandLane)
+                    }
                 }
             }
             captureTimeoutTimer?.invalidate()
@@ -729,6 +765,14 @@ final class AppCoordinator: ObservableObject {
         transcriptionTask = task
         await task.value
         if transcriptionTask == task { transcriptionTask = nil }
+        backendManager.setCaptureActive(false)
+
+        // A fn press queued during this pipeline (user still holding fn and
+        // speaking) restarts capture now that the state machine has settled.
+        if pendingFnCaptureRestart {
+            pendingFnCaptureRestart = false
+            handleFnHoldPress()
+        }
     }
 
     private func runTranscriptionPipeline(
@@ -874,7 +918,8 @@ final class AppCoordinator: ObservableObject {
         lastCaptureAudioStats = (
             audioSeconds: capturedAudio.durationSeconds,
             rmsEnergy: capturedAudio.rmsEnergy,
-            peakAmplitude: transcription.peakAmplitude
+            peakAmplitude: transcription.peakAmplitude,
+            tailGapSeconds: transcription.speechTailGapSeconds
         )
         // Idle gap since the previous decode (for the cold-pipeline hypothesis);
         // updated every decode so the value on a reject = gap since last capture.
@@ -920,7 +965,8 @@ final class AppCoordinator: ObservableObject {
                 meanNoSpeechProb: transcription.meanNoSpeechProb,
                 segmentCount: transcription.segmentCount,
                 peakAmplitude: transcription.peakAmplitude,
-                audioFile: retainedAudio?.path
+                audioFile: retainedAudio?.path,
+                expectedAudioSeconds: capturedAudio.expectedDurationSeconds
             )
             state.sessionState = .idle
             var rejectionStatus = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)
@@ -985,6 +1031,22 @@ final class AppCoordinator: ObservableObject {
         }
 
         try await processWorkflow(sessionID: sessionID, rawText: rawText, trace: trace)
+
+        // Capture-quality warnings, appended AFTER the workflow set its own
+        // status so the insert/review message stays first and the user learns
+        // words may be missing instead of trusting a silently-truncated insert.
+        // Tail gap = the DECODER stopped early (session 29 tail-loss class);
+        // coverage shortfall = the DEVICE dropped audio mid-capture.
+        if let gap = transcription.speechTailGapSeconds {
+            state.statusLine += String(
+                format: " — may be incomplete (last ~%.0f s not transcribed)", gap)
+        }
+        if let coverageWarning = CaptureFeedback.coverageWarning(
+            durationSeconds: capturedAudio.durationSeconds,
+            expectedSeconds: capturedAudio.expectedDurationSeconds
+        ) {
+            state.statusLine += coverageWarning
+        }
     }
 
     private func appendTranscriptionDiagnostics(_ transcription: TranscribeResponse, to trace: CapturePipelineTraceBuilder) {
@@ -1110,6 +1172,10 @@ final class AppCoordinator: ObservableObject {
         timer?.invalidate()
         captureTimeoutTimer?.invalidate()
         captureTimeoutTimer = nil
+        // An explicit cancel voids any fn-press restart queued during the
+        // pipeline — the user asked for silence, not a fresh capture.
+        pendingFnCaptureRestart = false
+        backendManager.setCaptureActive(false)
 
         if state.sessionState == .transcribing {
             transcriptionTask?.cancel()
@@ -1611,7 +1677,8 @@ final class AppCoordinator: ObservableObject {
                 targetApp: self.capturedTargetApp,
                 audioSeconds: self.lastCaptureAudioStats?.audioSeconds,
                 rmsEnergy: self.lastCaptureAudioStats?.rmsEnergy,
-                peakAmplitude: self.lastCaptureAudioStats?.peakAmplitude
+                peakAmplitude: self.lastCaptureAudioStats?.peakAmplitude,
+                tailGapSeconds: self.lastCaptureAudioStats?.tailGapSeconds
             )
 
             try await self.dictationWorkflow.processDictation(request) { name, startedAt, detail in
