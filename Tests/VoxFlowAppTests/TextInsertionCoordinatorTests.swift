@@ -59,6 +59,33 @@ final class TextInsertionCoordinatorTests: XCTestCase {
                        "source was \(obj?["source"] as? String ?? "nil")")
     }
 
+    /// Tail-loss forensics (session 29): the insert receipt carries the
+    /// capture's duration/rms/peak from the candidate, so a transcript that
+    /// only covers the head of a long dictation (decoder early-stop) is
+    /// detectable post-hoc — previously only rejects logged audio stats.
+    @MainActor
+    func testInsertReceiptCarriesCandidateAudioStats() async throws {
+        let state = AppState()
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
+        let sut = TextInsertionCoordinator(
+            state: state, insertService: ScriptedInsertService(),
+            audit: InsertionAuditLog(fileURL: auditURL))
+
+        state.transcriptCandidate = TranscriptCandidate(
+            rawText: "raw", lightText: "light", polishText: "polish",
+            selectedMode: .raw, audioSeconds: 11.7, rmsEnergy: 0.0679, peakAmplitude: 0.703)
+
+        _ = await sut.insertText("light", statusSuffix: "Inserted", targetApp: nil)
+
+        let line = try String(contentsOf: auditURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(
+            with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["audio_seconds"] as? Double, 11.7)
+        XCTAssertEqual(obj?["rms"] as? Double, 0.0679)
+        XCTAssertEqual(obj?["peak_amplitude"] as? Double, 0.703)
+    }
+
     @MainActor
     func testInsertBlockedWhenPrivacyPreviewActive() async {
         let (sut, state) = makeSUT()

@@ -144,6 +144,49 @@ final class AudioCaptureService: AudioCapturing {
     private var deviceChangedDuringCapture = false
     private var configurationObserver: NSObjectProtocol?
 
+    /// Per-capture conversion scratch, allocated ONCE at startCapture and
+    /// reused by every tap callback. The tap runs inside the audio IO cycle:
+    /// per-callback allocations page-fault under memory pressure, and a
+    /// page-faulted IO cycle blows its deadline and DROPS input buffers —
+    /// observed live as CoreAudio overload reports (io_cycle_usage 1.0,
+    /// ~19.6 ms of page faults vs a ~10.7 ms budget) coinciding with
+    /// empty-decode capture losses (session 29).
+    private final class TapScratch {
+        let output: AVAudioPCMBuffer
+        let int16: UnsafeMutableBufferPointer<Int16>
+
+        init?(targetFormat: AVAudioFormat, frameCapacity: AVAudioFrameCount) {
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: targetFormat, frameCapacity: frameCapacity) else { return nil }
+            output = buffer
+            int16 = .allocate(capacity: Int(frameCapacity))
+        }
+
+        deinit { int16.deallocate() }
+    }
+
+    /// Scale float samples to Int16 range, clamp to ±Int16.max, and convert
+    /// into `scratch` — all via vDSP, scaling IN PLACE in `floatData` (the
+    /// converter rewrites it next callback anyway) so the hot path allocates
+    /// nothing but the returned chunk. Returns nil (never writes out of
+    /// bounds) when `frameLength` exceeds the scratch capacity.
+    nonisolated static func int16Chunk(
+        scalingInPlace floatData: UnsafeMutablePointer<Float>,
+        frameLength: Int,
+        scratch: UnsafeMutableBufferPointer<Int16>
+    ) -> Data? {
+        guard frameLength > 0, frameLength <= scratch.count,
+              let int16Ptr = scratch.baseAddress else { return nil }
+        let vLen = vDSP_Length(frameLength)
+        var scale = Float(Int16.max)
+        var lo = -Float(Int16.max)
+        var hi = Float(Int16.max)
+        vDSP_vsmul(floatData, 1, &scale, floatData, 1, vLen)
+        vDSP_vclip(floatData, 1, &lo, &hi, floatData, 1, vLen)
+        vDSP_vfix16(floatData, 1, int16Ptr, 1, vLen)
+        return Data(bytes: int16Ptr, count: frameLength * MemoryLayout<Int16>.size)
+    }
+
     init() {
         // AVAudioEngine stops itself silently when the input device changes
         // (AirPods connect/disconnect). Observe the engine's configuration
@@ -198,6 +241,9 @@ final class AudioCaptureService: AudioCapturing {
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0 else {
+            throw AudioCaptureError.converterSetupFailed
+        }
 
         // Target format: 16 kHz, mono, 32-bit float (for AVAudioConverter)
         guard let targetFormat = AVAudioFormat(
@@ -214,17 +260,36 @@ final class AudioCaptureService: AudioCapturing {
             throw AudioCaptureError.converterSetupFailed
         }
 
+        // Preallocate the conversion scratch once per capture, sized with 4×
+        // headroom over the requested tap buffer (the OS is free to deliver
+        // larger blocks under load — exactly when allocation-freedom matters).
+        let ratio = Self.targetSampleRate / inputFormat.sampleRate
+        let expectedOutputFrames = AVAudioFrameCount((4096.0 * ratio).rounded(.up))
+        guard let scratch = TapScratch(
+            targetFormat: targetFormat,
+            frameCapacity: expectedOutputFrames * 4 + 64
+        ) else {
+            throw AudioCaptureError.converterSetupFailed
+        }
+
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             guard let self else { return }
 
-            // Calculate output frame count based on sample rate ratio
-            let ratio = Self.targetSampleRate / inputFormat.sampleRate
-            let outputFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-            guard outputFrameCount > 0 else { return }
+            guard buffer.frameLength > 0 else { return }
 
-            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else {
-                return
+            // Hot path: reuse the per-capture output buffer. An oversized OS
+            // delivery (beyond the 4× headroom) falls back to a fresh buffer —
+            // correctness over allocation-freedom on that rare block.
+            let neededFrames = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up))
+            let outputBuffer: AVAudioPCMBuffer
+            if neededFrames <= scratch.output.frameCapacity {
+                outputBuffer = scratch.output
+                outputBuffer.frameLength = 0
+            } else {
+                guard let fresh = AVAudioPCMBuffer(
+                    pcmFormat: targetFormat, frameCapacity: neededFrames) else { return }
+                outputBuffer = fresh
             }
 
             // Convert (resample) the input buffer to 16kHz mono float
@@ -242,35 +307,27 @@ final class AudioCaptureService: AudioCapturing {
 
             if error != nil || outputBuffer.frameLength == 0 { return }
 
-            // Convert float32 samples to Int16 PCM via vDSP (vectorized)
             guard let floatData = outputBuffer.floatChannelData else { return }
             let frameLength = Int(outputBuffer.frameLength)
-            guard frameLength > 0 else { return }
 
-            let vLen = vDSP_Length(frameLength)
-            var scale = Float(Int16.max)
-            var lo = -Float(Int16.max)
-            var hi = Float(Int16.max)
-
-            // Build Int16 array via vDSP: scale → clamp → convert
-            let int16Samples = [Int16](unsafeUninitializedCapacity: frameLength) { buf, count in
-                guard let int16Ptr = buf.baseAddress else { count = 0; return }
-                let scaled = [Float](unsafeUninitializedCapacity: frameLength) { fbuf, fcount in
-                    guard let fptr = fbuf.baseAddress else { fcount = 0; return }
-                    vDSP_vsmul(floatData[0], 1, &scale, fptr, 1, vLen)
-                    vDSP_vclip(fptr, 1, &lo, &hi, fptr, 1, vLen)
-                    vDSP_vfix16(fptr, 1, int16Ptr, 1, vLen)
-                    fcount = frameLength
-                }
-                count = scaled.count == frameLength ? frameLength : 0
+            // Float32 → Int16 via vDSP, scaling in place, into the reused
+            // scratch. The fallback (fresh output buffer beyond scratch size)
+            // pays a one-off temp allocation and stays correct.
+            let chunk: Data?
+            if outputBuffer === scratch.output, frameLength <= scratch.int16.count {
+                chunk = Self.int16Chunk(
+                    scalingInPlace: floatData[0], frameLength: frameLength, scratch: scratch.int16)
+            } else {
+                let temp = UnsafeMutableBufferPointer<Int16>.allocate(capacity: frameLength)
+                defer { temp.deallocate() }
+                chunk = Self.int16Chunk(
+                    scalingInPlace: floatData[0], frameLength: frameLength, scratch: temp)
             }
 
-            guard int16Samples.count == frameLength else {
+            guard let chunk else {
                 self.logger.error("vDSP float-to-Int16 conversion failed — discarding chunk")
                 return
             }
-
-            let chunk = int16Samples.withUnsafeBufferPointer { Data(buffer: $0) }
 
             // Ingest under the lock (generation-guarded), then invoke the live
             // handler OUTSIDE the lock — never run caller code while holding

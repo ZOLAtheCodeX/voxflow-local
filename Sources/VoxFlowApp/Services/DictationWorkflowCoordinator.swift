@@ -12,6 +12,11 @@ struct DictationWorkflowRequest {
     let sttBackend: STTBackend
     let lastTranscriptionConfidence: Double
     let targetApp: NSRunningApplication?
+    /// Capture audio stats (true input level, pre-gain) threaded onto the
+    /// candidate so insert receipts can expose partial decodes (session 29).
+    var audioSeconds: Double? = nil
+    var rmsEnergy: Double? = nil
+    var peakAmplitude: Double? = nil
 }
 
 @MainActor
@@ -51,7 +56,10 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 selectedMode: .raw,
                 confidence: request.lastTranscriptionConfidence,
                 timestamp: Date(),
-                targetProcessIdentifier: request.targetApp?.processIdentifier
+                targetProcessIdentifier: request.targetApp?.processIdentifier,
+                audioSeconds: request.audioSeconds,
+                rmsEnergy: request.rmsEnergy,
+                peakAmplitude: request.peakAmplitude
             )
             state.transcriptCandidate = candidate
             pushToSessionMemory(candidate)
@@ -115,7 +123,10 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 targetProcessIdentifier: request.targetApp?.processIdentifier,
                 // Both modes came from the in-app TextCleanupService (backend cold).
                 lightProvenance: PolishProvenance.inApp,
-                polishProvenance: PolishProvenance.inApp
+                polishProvenance: PolishProvenance.inApp,
+                audioSeconds: request.audioSeconds,
+                rmsEnergy: request.rmsEnergy,
+                peakAmplitude: request.peakAmplitude
             )
             state.transcriptCandidate = candidate
             state.selectedMode = .raw
@@ -199,7 +210,10 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             timestamp: Date(),
             targetProcessIdentifier: request.targetApp?.processIdentifier,
             lightProvenance: lightProvenance,
-            polishProvenance: polishProvenance
+            polishProvenance: polishProvenance,
+            audioSeconds: request.audioSeconds,
+            rmsEnergy: request.rmsEnergy,
+            peakAmplitude: request.peakAmplitude
         )
         state.transcriptCandidate = candidate
         state.selectedMode = defaultMode

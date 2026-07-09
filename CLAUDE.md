@@ -90,6 +90,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | `VOXFLOW_POLISH_BACKEND` | Polish selector (only `ollama` recognised post-3.5) | `ollama` |
 | `VOXFLOW_POLISH_MEMORY_GUARD` | `0` disables skipping local polish providers under OS memory pressure | on |
 | `VOXFLOW_VAD_GATE` | `0` disables the Silero speech-presence gate in front of whisper-backend decode | on |
+| `VOXFLOW_KEEP_REJECTED_AUDIO` | `0` disables retaining rejected-capture audio (bounded 8-clip WAV ring at `~/Library/Logs/VoxFlow/rejected_audio/`, path stamped into the reject receipt as `audio_file`) | on |
 | `VOXFLOW_SIGN_IDENTITY` | Code-signing identity override | auto-detected Apple Development cert |
 | `VOXFLOW_OFFLINE` | Disable HF downloads | `1` |
 | `VOXFLOW_ADOPT_FOREIGN_BACKEND` | `1` = app pairs with a manually run backend instead of reaping stamp-less listeners on 8765 (dev only) | unset |
@@ -133,7 +134,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 ## Testing
 
 ```bash
-swift test                                              # ~586 Swift tests
+swift test                                              # ~602 Swift tests
 ./.venv/bin/python -m pytest backend/tests              # ~510 Python tests (+26 model/live-Ollama skipped)
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks

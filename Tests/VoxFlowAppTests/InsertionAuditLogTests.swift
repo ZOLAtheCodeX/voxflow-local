@@ -32,6 +32,35 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertNotNil(obj?["ts"])
     }
 
+    /// Tail-loss forensics (session 29): successful inserts carried no audio
+    /// stats, so a transcript covering only the head of a 12 s dictation was
+    /// indistinguishable from a complete one. Inserts now carry the same
+    /// duration/rms/peak the reject path already logs.
+    func testInsertReceiptCarriesAudioStats() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordInsertion(
+            text: "hello world", targetApp: "Notes", source: "quick_dictation",
+            confidence: 0.91, audioSeconds: 11.7, rmsEnergy: 0.0679, peakAmplitude: 0.703)
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["audio_seconds"] as? Double, 11.7)
+        XCTAssertEqual(obj?["rms"] as? Double, 0.0679)
+        XCTAssertEqual(obj?["peak_amplitude"] as? Double, 0.703)
+    }
+
+    /// Paths with no captured audio (snippets, cockpit re-inserts) omit the
+    /// stats rather than writing zeros a later analysis would mistake for a
+    /// silent capture.
+    func testInsertReceiptOmitsAudioStatsWhenAbsent() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordInsertion(text: "hi", targetApp: nil, source: "snippet", confidence: nil)
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertNil(obj?["audio_seconds"])
+        XCTAssertNil(obj?["rms"])
+        XCTAssertNil(obj?["peak_amplitude"])
+    }
+
     func testRecordsGateRejection() throws {
         let log = InsertionAuditLog(fileURL: tempURL)
         log.recordRejection(text: "hello", reason: "hallucination_filter", confidence: 0.05, durationSeconds: 3.2, source: "quick_dictation")
@@ -39,6 +68,22 @@ final class InsertionAuditLogTests: XCTestCase {
         let obj = try JSONSerialization.jsonObject(with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
         XCTAssertEqual(obj?["event"] as? String, "reject")
         XCTAssertEqual(obj?["reason"] as? String, "hallucination_filter")
+    }
+
+    /// The reject receipt points at the retained WAV (session 29), so a
+    /// "read insertions.jsonl first" triage lands directly on the audio.
+    func testRejectionReceiptCarriesRetainedAudioPath() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordRejection(
+            text: "", reason: "empty", confidence: 0, durationSeconds: 11.7,
+            source: "quick_dictation",
+            audioFile: "/tmp/reject-20260708T202419.000Z-empty-abc.wav")
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(
+            with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(
+            obj?["audio_file"] as? String,
+            "/tmp/reject-20260708T202419.000Z-empty-abc.wav")
     }
 
     func testNonFiniteValueIsPreservedNotDropped() throws {

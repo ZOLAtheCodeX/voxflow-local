@@ -96,6 +96,10 @@ final class AppCoordinator: ObservableObject {
     private(set) var settings: SettingsCoordinating!
     private(set) lazy var onboarding: OnboardingCoordinating = OnboardingCoordinator(state: state)
     private(set) lazy var insertionAudit = InsertionAuditLog()
+    /// Bounded WAV ring for rejected captures — the audio is the evidence the
+    /// empty-decode investigation was missing, and the user's lost dictation
+    /// (session 29). VOXFLOW_KEEP_REJECTED_AUDIO=0 disables.
+    private lazy var rejectedAudio = RejectedAudioStore()
     // R5.4: experimental assistant handoff — transcript via STDIN to a
     // user-configured CLI, preview-gated, never auto-executed.
     private(set) lazy var assistantHandoff = AssistantHandoffService(
@@ -201,6 +205,11 @@ final class AppCoordinator: ObservableObject {
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
     private var lastTranscriptionConfidence: Double = 0.0
+    /// Audio stats of the last decoded capture (true input level, pre-gain),
+    /// threaded onto the workflow request → candidate → insert receipt so
+    /// partial decodes are detectable on successful inserts (session 29).
+    private var lastCaptureAudioStats:
+        (audioSeconds: Double, rmsEnergy: Double, peakAmplitude: Double?)?
     /// Wall-clock of the last decode, to record idle gap on rejects — tests the
     /// "healthy-level miss after the pipeline's been idle" (cold) hypothesis.
     private var lastDecodeAt: Date?
@@ -862,6 +871,11 @@ final class AppCoordinator: ObservableObject {
         let rawText = cockpitDictionary.apply(
             to: transcription.text.trimmingCharacters(in: .whitespacesAndNewlines))
         lastTranscriptionConfidence = transcription.confidenceEstimate
+        lastCaptureAudioStats = (
+            audioSeconds: capturedAudio.durationSeconds,
+            rmsEnergy: capturedAudio.rmsEnergy,
+            peakAmplitude: transcription.peakAmplitude
+        )
         // Idle gap since the previous decode (for the cold-pipeline hypothesis);
         // updated every decode so the value on a reject = gap since last capture.
         let secondsSinceLastCapture = lastDecodeAt.map { Date().timeIntervalSince($0) }
@@ -884,6 +898,14 @@ final class AppCoordinator: ObservableObject {
         ) {
             let rms = capturedAudio.rmsEnergy
             log.info("TranscriptGate rejected transcript (\(reason.rawValue), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s, rms=\(String(format: "%.4f", rms))) — discarding")
+            // Retain the capture BEFORE it goes out of scope: the WAV is both
+            // the diagnostic evidence (gappy? garbled? quiet?) and the user's
+            // only path to recovering a rejected dictation (session 29).
+            let retainedAudio = rejectedAudio.store(
+                pcm: capturedAudio.pcm,
+                sampleRate: capturedAudio.sampleRate,
+                reason: reason.rawValue
+            )
             insertionAudit.recordRejection(
                 text: rawText,
                 reason: reason.rawValue,
@@ -897,7 +919,8 @@ final class AppCoordinator: ObservableObject {
                 appliedGainDB: transcription.appliedGainDB,
                 meanNoSpeechProb: transcription.meanNoSpeechProb,
                 segmentCount: transcription.segmentCount,
-                peakAmplitude: transcription.peakAmplitude
+                peakAmplitude: transcription.peakAmplitude,
+                audioFile: retainedAudio?.path
             )
             state.sessionState = .idle
             var rejectionStatus = CaptureFeedback.rejectionStatus(reason: reason, rmsEnergy: rms)
@@ -915,6 +938,8 @@ final class AppCoordinator: ObservableObject {
                 rejectionStatus = CaptureFeedback.refinedRejectionStatus(
                     reason: reason, rmsEnergy: rms, diagnosis: diagnosis)
             }
+            // Recovery is only real if the user knows the clip exists.
+            if retainedAudio != nil { rejectionStatus += " (audio kept)" }
             state.statusLine = rejectionStatus
             state.recordingDuration = 0
             return
@@ -1006,13 +1031,30 @@ final class AppCoordinator: ObservableObject {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
+    /// Audit reason for a capture-pipeline error that silently DISCARDS a
+    /// dictation. deviceChanged is the one such case today: the capture is
+    /// invalidated wholesale with only a transient status line, which made the
+    /// loss mode invisible in insertions.jsonl (session 29). Cancellations are
+    /// deliberate (no receipt); generic failures already surface as .error
+    /// state the user must acknowledge.
+    nonisolated static func captureErrorAuditReason(_ error: Error) -> String? {
+        (error as? AudioCaptureError) == .deviceChanged ? "device_changed" : nil
+    }
+
     private func handleCaptureError(_ error: Error) {
         if Self.isUserCancellation(error) {
             log.info("Transcription pipeline canceled by user")
             return
         }
-        if let captureError = error as? AudioCaptureError, captureError == .deviceChanged {
+        if let reason = Self.captureErrorAuditReason(error) {
             log.warning("Capture invalidated by audio device change")
+            insertionAudit.recordRejection(
+                text: "",
+                reason: reason,
+                confidence: 0,
+                durationSeconds: 0,
+                source: "capture_error"
+            )
             state.setIdle()
             state.recordingDuration = 0
             state.statusLine = "Audio device changed — try again"
@@ -1176,7 +1218,12 @@ final class AppCoordinator: ObservableObject {
                     lightText: retoned.light,
                     polishText: retoned.polish,
                     selectedMode: state.selectedMode,
-                    confidence: state.transcriptCandidate?.confidence ?? 0.0
+                    confidence: state.transcriptCandidate?.confidence ?? 0.0,
+                    // Retone reuses the original capture — keep its audio stats
+                    // so a later insert receipt still reflects the true capture.
+                    audioSeconds: state.transcriptCandidate?.audioSeconds,
+                    rmsEnergy: state.transcriptCandidate?.rmsEnergy,
+                    peakAmplitude: state.transcriptCandidate?.peakAmplitude
                 )
                 state.statusLine = "Tone: \(tone.displayName)"
             } catch {
@@ -1561,7 +1608,10 @@ final class AppCoordinator: ObservableObject {
                 insertBehavior: effectiveInsert,
                 sttBackend: self.state.sttBackend,
                 lastTranscriptionConfidence: self.lastTranscriptionConfidence,
-                targetApp: self.capturedTargetApp
+                targetApp: self.capturedTargetApp,
+                audioSeconds: self.lastCaptureAudioStats?.audioSeconds,
+                rmsEnergy: self.lastCaptureAudioStats?.rmsEnergy,
+                peakAmplitude: self.lastCaptureAudioStats?.peakAmplitude
             )
 
             try await self.dictationWorkflow.processDictation(request) { name, startedAt, detail in

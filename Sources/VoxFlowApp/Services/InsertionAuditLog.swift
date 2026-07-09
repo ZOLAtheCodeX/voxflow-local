@@ -30,7 +30,15 @@ final class InsertionAuditLog {
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     }
 
-    func recordInsertion(text: String, targetApp: String?, source: String, confidence: Double?) {
+    func recordInsertion(
+        text: String,
+        targetApp: String?,
+        source: String,
+        confidence: Double?,
+        audioSeconds: Double? = nil,
+        rmsEnergy: Double? = nil,
+        peakAmplitude: Double? = nil
+    ) {
         var entry: [String: Any] = [
             "event": "insert",
             "ts": iso.string(from: Date()),
@@ -40,6 +48,13 @@ final class InsertionAuditLog {
         ]
         if let targetApp { entry["target"] = targetApp }
         if let confidence { entry["confidence"] = confidence }
+        // Tail-loss forensics: with duration/rms/peak on SUCCESSFUL inserts,
+        // a transcript that only covers the head of a long capture (decoder
+        // early-stop) is detectable post-hoc — chars vs audio_seconds. Absent
+        // for insert paths with no captured audio (snippets, re-inserts).
+        if let audioSeconds { entry["audio_seconds"] = audioSeconds }
+        if let rmsEnergy { entry["rms"] = rmsEnergy }
+        if let peakAmplitude { entry["peak_amplitude"] = peakAmplitude }
         append(entry)
     }
 
@@ -56,7 +71,8 @@ final class InsertionAuditLog {
         appliedGainDB: Double? = nil,
         meanNoSpeechProb: Double? = nil,
         segmentCount: Int? = nil,
-        peakAmplitude: Double? = nil
+        peakAmplitude: Double? = nil,
+        audioFile: String? = nil
     ) {
         var entry: [String: Any] = [
             "event": "reject",
@@ -87,6 +103,9 @@ final class InsertionAuditLog {
         if let meanNoSpeechProb { entry["mean_no_speech_prob"] = meanNoSpeechProb }
         if let segmentCount { entry["segment_count"] = segmentCount }
         if let peakAmplitude { entry["peak_amplitude"] = peakAmplitude }
+        // Path of the retained WAV (RejectedAudioStore), so triage lands on
+        // the actual audio instead of inferring from rms/peak (session 29).
+        if let audioFile { entry["audio_file"] = audioFile }
         append(entry)
     }
 

@@ -20,4 +20,23 @@ final class CancellationClassificationTests: XCTestCase {
         XCTAssertFalse(AppCoordinator.isUserCancellation(URLError(.cannotConnectToHost)))
         XCTAssertFalse(AppCoordinator.isUserCancellation(AudioCaptureError.deviceChanged))
     }
+
+    /// Session 29: a mid-capture device change used to discard the whole
+    /// dictation with only a transient status line — no insertions.jsonl
+    /// receipt, so the loss mode was invisible in the forensics log. The
+    /// classifier maps it to an audit reason; quiet cancels and generic
+    /// errors stay receipt-less (cancels are deliberate, generic errors
+    /// already surface loudly as .error state).
+    func testDeviceChangedMapsToAuditReason() {
+        XCTAssertEqual(
+            AppCoordinator.captureErrorAuditReason(AudioCaptureError.deviceChanged),
+            "device_changed")
+    }
+
+    func testCancellationAndGenericErrorsGetNoAuditReason() {
+        XCTAssertNil(AppCoordinator.captureErrorAuditReason(CancellationError()))
+        XCTAssertNil(AppCoordinator.captureErrorAuditReason(URLError(.cancelled)))
+        XCTAssertNil(AppCoordinator.captureErrorAuditReason(URLError(.timedOut)))
+        XCTAssertNil(AppCoordinator.captureErrorAuditReason(AudioCaptureError.captureNotRunning))
+    }
 }

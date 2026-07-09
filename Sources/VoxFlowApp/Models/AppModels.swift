@@ -420,6 +420,15 @@ struct TranscriptCandidate: Identifiable {
     var lightProvenance: String? = nil
     var polishProvenance: String? = nil
 
+    /// Capture audio stats (true input level, pre-gain), threaded to the insert
+    /// receipt so a transcript covering only the head of a long capture
+    /// (decoder early-stop) is detectable on SUCCESSFUL inserts, not just
+    /// rejects (session 29 tail-loss forensics). nil = no captured audio behind
+    /// this candidate (retone of an older transcript, tests).
+    var audioSeconds: Double? = nil
+    var rmsEnergy: Double? = nil
+    var peakAmplitude: Double? = nil
+
     func text(for mode: CleanupMode) -> String {
         switch mode {
         case .raw:

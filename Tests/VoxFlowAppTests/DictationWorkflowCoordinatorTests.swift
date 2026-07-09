@@ -135,6 +135,34 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         XCTAssertEqual(recordedStages, ["insert"])
     }
 
+    /// Session 29 tail-loss forensics: capture audio stats ride the request
+    /// into the candidate, so the insert receipt (written downstream from the
+    /// candidate) can expose partial decodes on successful inserts.
+    @MainActor func testCandidateCarriesRequestAudioStats() async throws {
+        let (sut, state, _, _) = makeSUT()
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-stats",
+            rawText: "hello stats",
+            providerMode: .localOnly,
+            consentToken: nil,
+            allowRaw: true,
+            toneStyle: .neutral,
+            insertBehavior: .autoInsertRaw,
+            sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.95,
+            targetApp: nil,
+            audioSeconds: 11.7,
+            rmsEnergy: 0.0679,
+            peakAmplitude: 0.703
+        )
+
+        try await sut.processDictation(request) { _, _, _ in }
+
+        XCTAssertEqual(state.transcriptCandidate?.audioSeconds, 11.7)
+        XCTAssertEqual(state.transcriptCandidate?.rmsEnergy, 0.0679)
+        XCTAssertEqual(state.transcriptCandidate?.peakAmplitude, 0.703)
+    }
+
     @MainActor func testLocalDictationWhisperKitAlwaysReview() async throws {
         let (sut, state, textInsertion, _) = makeSUT()
 

@@ -182,6 +182,42 @@ final class BackendProcessManagerTests: XCTestCase {
         XCTAssertFalse(BackendProcessManager.isVoxFlowBackendCommand(""))
     }
 
+    /// uvicorn writes ordinary access/startup lines to STDERR — logging every
+    /// stderr chunk at error level made healthy requests look like backend
+    /// failures in Console (one E entry per capture, session 29). Benign =
+    /// every non-empty line carries an INFO/DEBUG level token; anything else
+    /// (ERROR, tracebacks, unrecognized crash output) stays loud.
+    func testStderrChunkClassificationKeepsUvicornNoiseQuiet() {
+        // uvicorn access log line (the per-capture false positive)
+        XCTAssertFalse(BackendProcessManager.stderrChunkIndicatesError(
+            "INFO:     127.0.0.1:52713 - \"POST /v1/text/cleanup HTTP/1.1\" 200 OK"))
+        // uvicorn startup banner
+        XCTAssertFalse(BackendProcessManager.stderrChunkIndicatesError(
+            "INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)"))
+        // python logging via logging.getLogger("voxflow")
+        XCTAssertFalse(BackendProcessManager.stderrChunkIndicatesError(
+            "INFO:voxflow:polish served by ollama gemma4:e2b-mlx"))
+        // multi-line chunk of benign lines (pipe reads coalesce)
+        XCTAssertFalse(BackendProcessManager.stderrChunkIndicatesError(
+            "INFO:     127.0.0.1:1 - \"GET /v1/health HTTP/1.1\" 200 OK\nINFO:voxflow:ready"))
+    }
+
+    func testStderrChunkClassificationStaysLoudForRealFailures() {
+        XCTAssertTrue(BackendProcessManager.stderrChunkIndicatesError(
+            "ERROR:    Exception in ASGI application"))
+        XCTAssertTrue(BackendProcessManager.stderrChunkIndicatesError(
+            "Traceback (most recent call last):"))
+        // traceback continuation chunk with no level token — unknown stays loud
+        XCTAssertTrue(BackendProcessManager.stderrChunkIndicatesError(
+            "  File \"server.py\", line 10, in lifespan"))
+        // a benign line mixed with a failure line — the failure wins
+        XCTAssertTrue(BackendProcessManager.stderrChunkIndicatesError(
+            "INFO:voxflow:starting\nRuntimeError: model not found"))
+        // WARNING is not INFO/DEBUG: keep it visible
+        XCTAssertTrue(BackendProcessManager.stderrChunkIndicatesError(
+            "WARNING:  ASGI app factory detected"))
+    }
+
     /// Identity check: a non-VoxFlow process holding the port must NOT be killed,
     /// even after a foreign verdict triggers terminateForeignListenerAsync.
     func testForeignListenerTerminationRefusesUnknownProcess() {

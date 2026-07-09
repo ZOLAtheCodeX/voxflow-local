@@ -610,6 +610,22 @@ final class BackendProcessManager: @unchecked Sendable {
         return nil
     }
 
+    /// uvicorn (and python logging) write ordinary INFO/DEBUG lines to STDERR,
+    /// so "came over stderr" is not "is an error" — blanket error-level logging
+    /// produced one Console E entry per healthy capture (session 29 detour).
+    /// Benign = every non-empty line carries an INFO or DEBUG level token.
+    /// Anything else (ERROR, tracebacks, continuation lines, unrecognized crash
+    /// output) is unknown and stays loud — fail-loud, never fail-quiet.
+    nonisolated static func stderrChunkIndicatesError(_ chunk: String) -> Bool {
+        chunk.split(whereSeparator: \.isNewline).contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return false }
+            let benign = trimmed.hasPrefix("INFO:") || trimmed.hasPrefix("DEBUG:")
+                || trimmed.contains(" INFO ") || trimmed.contains(" DEBUG ")
+            return !benign
+        }
+    }
+
     private func drainPipe(_ pipe: Pipe, label: String) {
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
@@ -617,7 +633,7 @@ final class BackendProcessManager: @unchecked Sendable {
             guard let chunk = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                 !chunk.isEmpty else { return }
-            if label == "stderr" {
+            if label == "stderr", Self.stderrChunkIndicatesError(chunk) {
                 log.error("Backend \(label): \(chunk)")
             } else {
                 log.debug("Backend \(label): \(chunk)")

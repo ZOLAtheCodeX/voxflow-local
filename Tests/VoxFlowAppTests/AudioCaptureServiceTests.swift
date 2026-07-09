@@ -21,6 +21,41 @@ final class AudioCaptureServiceTests: XCTestCase {
         XCTAssertEqual(AudioCaptureService.targetSampleRate, 16_000)
     }
 
+    /// Session 29 IO-overload hardening: the tap's float→Int16 step runs on
+    /// the audio callback with a REUSED scratch buffer (no per-callback array
+    /// allocations — page faults inside the IO cycle drop input buffers).
+    /// Pin the conversion semantics: scale by Int16.max, clamp to
+    /// ±Int16.max (matching the historical vDSP clip bounds — -32768 is
+    /// never produced), truncate toward zero.
+    func testInt16ChunkConversionScalesAndClamps() {
+        var floats: [Float] = [0.0, 0.5, -0.5, 1.0, -1.0, 2.0, -2.0]
+        let scratch = UnsafeMutableBufferPointer<Int16>.allocate(capacity: floats.count)
+        defer { scratch.deallocate() }
+
+        let chunk = floats.withUnsafeMutableBufferPointer { buf in
+            AudioCaptureService.int16Chunk(
+                scalingInPlace: buf.baseAddress!, frameLength: buf.count, scratch: scratch)
+        }
+
+        let samples = chunk!.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+        XCTAssertEqual(samples, [0, 16383, -16383, 32767, -32767, 32767, -32767])
+    }
+
+    /// A frameLength beyond the scratch capacity must refuse (nil), never
+    /// write out of bounds — the OS controls delivered buffer sizes.
+    func testInt16ChunkRefusesFrameLengthBeyondScratchCapacity() {
+        var floats: [Float] = [0.1, 0.2, 0.3]
+        let scratch = UnsafeMutableBufferPointer<Int16>.allocate(capacity: 2)
+        defer { scratch.deallocate() }
+
+        let chunk = floats.withUnsafeMutableBufferPointer { buf in
+            AudioCaptureService.int16Chunk(
+                scalingInPlace: buf.baseAddress!, frameLength: buf.count, scratch: scratch)
+        }
+
+        XCTAssertNil(chunk)
+    }
+
     func testStartCaptureNoInputNodeOrConverter() {
         let service = AudioCaptureService()
         // In a headless CI environment, starting capture might fail if there's no audio input device.

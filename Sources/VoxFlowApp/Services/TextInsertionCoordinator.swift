@@ -92,7 +92,10 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 text: state.displayText,
                 targetApp: targetApp?.localizedName ?? appName,
                 source: reviewAuditSource(),
-                confidence: state.transcriptCandidate?.confidence
+                confidence: state.transcriptCandidate?.confidence,
+                audioSeconds: state.transcriptCandidate?.audioSeconds,
+                rmsEnergy: state.transcriptCandidate?.rmsEnergy,
+                peakAmplitude: state.transcriptCandidate?.peakAmplitude
             )
             state.sessionState = .idle
         } else {
@@ -135,7 +138,10 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 text: text,
                 targetApp: targetApp?.localizedName ?? appName,
                 source: statusSuffix,
-                confidence: state.transcriptCandidate?.confidence
+                confidence: state.transcriptCandidate?.confidence,
+                audioSeconds: state.transcriptCandidate?.audioSeconds,
+                rmsEnergy: state.transcriptCandidate?.rmsEnergy,
+                peakAmplitude: state.transcriptCandidate?.peakAmplitude
             )
             return true
         } else {
