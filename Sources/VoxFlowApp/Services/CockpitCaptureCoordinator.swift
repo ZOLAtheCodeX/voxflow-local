@@ -41,6 +41,26 @@ final class CockpitCaptureCoordinator {
     private var loopTask: Task<Void, Never>?
     private var isFlushing = false
 
+    /// Quiet-boundary flush (session 29): the hard timer cut chunks mid-word
+    /// at every 5 s seam. The flush now waits — in `flushDeferralStepNs`
+    /// steps, up to `maxFlushDeferralNs` — for the live buffer's tail to go
+    /// quiet, so the cut lands between words. Bounded: continuous speech
+    /// still flushes when the budget runs out; an unknown tail reading
+    /// (fakes, short buffer) fails open to the immediate cut.
+    private let flushDeferralStepNs: UInt64
+    private let maxFlushDeferralNs: UInt64
+    /// Window of tail audio judged for the boundary; matches the ~300 ms
+    /// inter-word gap floor (TranscriptGate.minAudioSeconds).
+    private static let tailWindowSeconds = 0.3
+
+    /// Defer only on ATTESTED speech at the tail. The threshold sits below
+    /// the speech floor so trailing weak speech still defers, while room
+    /// noise and silence cut immediately.
+    nonisolated static func shouldDeferFlush(tailRMS: Double?) -> Bool {
+        guard let tailRMS else { return false }
+        return tailRMS >= CapturedAudio.speechFloor * 0.75
+    }
+
     init(
         capture: AudioCapturing,
         transcriber: ChunkTranscribing,
@@ -52,6 +72,8 @@ final class CockpitCaptureCoordinator {
         // 0.3 s at 16 kHz mono PCM16 — aligned with the quick-dictation
         // minimum (TranscriptGate.minAudioSeconds); was 8_000 (0.25 s).
         minChunkBytes: Int = 9_600,
+        flushDeferralStepNs: UInt64 = 250_000_000,
+        maxFlushDeferralNs: UInt64 = 2_000_000_000,
         onCaptureLive: (@Sendable () -> Void)? = nil
     ) {
         self.capture = capture
@@ -62,6 +84,8 @@ final class CockpitCaptureCoordinator {
         self.rejectedAudio = rejectedAudio
         self.flushIntervalNs = flushIntervalNs
         self.minChunkBytes = minChunkBytes
+        self.flushDeferralStepNs = flushDeferralStepNs
+        self.maxFlushDeferralNs = maxFlushDeferralNs
         self.onCaptureLive = onCaptureLive
     }
 
@@ -98,6 +122,19 @@ final class CockpitCaptureCoordinator {
         guard !isFlushing, case .recording = session.state else { return }
         isFlushing = true
         defer { isFlushing = false }
+
+        // Wait (bounded) for a word boundary before cutting — not on the
+        // forced final flush, where the user already stopped speaking.
+        if !force {
+            var deferredNs: UInt64 = 0
+            while deferredNs < maxFlushDeferralNs,
+                  Self.shouldDeferFlush(
+                    tailRMS: capture.tailRMSEnergy(seconds: Self.tailWindowSeconds)) {
+                try? await Task.sleep(nanoseconds: flushDeferralStepNs)
+                deferredNs += flushDeferralStepNs
+                guard case .recording = session.state else { return }
+            }
+        }
 
         let audio: CapturedAudio
         do { audio = try capture.stopCapture() } catch {

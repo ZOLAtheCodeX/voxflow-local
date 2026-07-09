@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import asyncio
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -170,7 +171,10 @@ def readiness_snapshot() -> ReadyResponse:
                 try:
                     from engines.llm_backend import list_ollama_models
 
-                    installed = {m.get("name", "") for m in list_ollama_models(timeout=1.5)}
+                    installed = cached_probe(
+                        f"ollama_models:{spec.id}",
+                        lambda: {m.get("name", "") for m in list_ollama_models(timeout=1.5)},
+                    )
                     model_pulled = model_name in installed
                 except Exception as exc:
                     # None = "could not verify", not "missing" — but say why,
@@ -181,9 +185,13 @@ def readiness_snapshot() -> ReadyResponse:
                     _warn_readiness_probe_once(spec.id, f"could not enumerate Ollama models: {exc}")
                     model_pulled = None
         elif spec.kind == "openai_compat":
-            # Local servers come and go; probe is cheap (1.5 s worst case).
+            # Local servers come and go; probe is cheap-ish (1.5 s worst
+            # case) and TTL-cached so per-poll cost stays bounded.
             try:
-                reachable = provider_registry.backend(spec.id).is_available()
+                reachable = cached_probe(
+                    f"openai_compat:{spec.id}",
+                    provider_registry.backend(spec.id).is_available,
+                )
             except Exception as exc:
                 _warn_readiness_probe_once(spec.id, f"availability probe failed: {exc}")
                 reachable = False
@@ -266,6 +274,28 @@ def get_ml_semaphore() -> asyncio.Semaphore:
         _ml_semaphore = asyncio.Semaphore(2)
         _ml_semaphore_loop = loop
     return _ml_semaphore
+
+
+# Short TTL cache for /v1/ready's per-provider network probes (session 29
+# review, low): warmup polls every 2 s and each uncached probe held a
+# threadpool thread up to ~1.5 s per configured provider. 5 s TTL matches
+# probe_ollama_available's own cache. Failures are deliberately NOT cached so
+# recovery is visible on the next poll.
+_PROBE_CACHE: dict[str, tuple[float, object]] = {}
+_PROBE_CACHE_TTL_S = 5.0
+_PROBE_CACHE_LOCK = Lock()
+
+
+def cached_probe(key: str, fn):
+    now = time.monotonic()
+    with _PROBE_CACHE_LOCK:
+        hit = _PROBE_CACHE.get(key)
+        if hit is not None and (now - hit[0]) < _PROBE_CACHE_TTL_S:
+            return hit[1]
+    value = fn()
+    with _PROBE_CACHE_LOCK:
+        _PROBE_CACHE[key] = (time.monotonic(), value)
+    return value
 
 
 # Dedicated ML executor (session 29 stability review): the semaphore alone

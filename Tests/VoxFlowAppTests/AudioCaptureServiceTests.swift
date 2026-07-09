@@ -41,6 +41,28 @@ final class AudioCaptureServiceTests: XCTestCase {
         XCTAssertEqual(samples, [0, 16383, -16383, 32767, -32767, 32767, -32767])
     }
 
+    /// Tail-energy peek for the cockpit's quiet-boundary flush: rms of the
+    /// last N seconds of a PCM16 buffer, nil when the buffer is shorter than
+    /// the window (can't judge a boundary yet).
+    func testTailRMSComputesOverTheRequestedWindow() {
+        // 1 s of loud speech then 0.5 s of near-silence at 16 kHz.
+        var samples = [Int16](repeating: 8000, count: 16_000)
+        samples += [Int16](repeating: 10, count: 8_000)
+        let pcm = samples.withUnsafeBufferPointer { Data(buffer: $0) }
+
+        let tail = AudioCaptureService.tailRMS(of: pcm, sampleRate: 16_000, seconds: 0.3)
+        XCTAssertNotNil(tail)
+        XCTAssertLessThan(tail ?? 1.0, 0.01, "quiet tail must read quiet")
+
+        let wholeTail = AudioCaptureService.tailRMS(of: pcm, sampleRate: 16_000, seconds: 1.2)
+        XCTAssertGreaterThan(wholeTail ?? 0, 0.1, "window reaching into speech reads loud")
+    }
+
+    func testTailRMSNilWhenBufferShorterThanWindow() {
+        let pcm = Data(count: 1000)
+        XCTAssertNil(AudioCaptureService.tailRMS(of: pcm, sampleRate: 16_000, seconds: 0.3))
+    }
+
     /// A frameLength beyond the scratch capacity must refuse (nil), never
     /// write out of bounds — the OS controls delivered buffer sizes.
     func testInt16ChunkRefusesFrameLengthBeyondScratchCapacity() {

@@ -9,11 +9,18 @@ protocol AudioCapturing: AnyObject {
     /// (which clipped the front of every utterance).
     func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws
     func stopCapture() throws -> CapturedAudio
+    /// RMS energy of the last `seconds` of buffered audio, or nil when
+    /// unknown (buffer too short, implementation doesn't track it). The
+    /// cockpit's quiet-boundary flush uses this to avoid cutting mid-word;
+    /// nil fails open to the timer-cadence cut.
+    func tailRMSEnergy(seconds: Double) -> Double?
 }
 
 extension AudioCapturing {
     /// Back-compat for callers that don't need the live signal (e.g. cockpit).
     func startCapture() throws { try startCapture(onCaptureLive: nil) }
+    /// Default: tail energy unknown — quiet-boundary flush fails open.
+    func tailRMSEnergy(seconds: Double) -> Double? { nil }
 }
 
 /// One-shot transcription of a captured clip. `WhisperKitSTTService` conforms as-is.

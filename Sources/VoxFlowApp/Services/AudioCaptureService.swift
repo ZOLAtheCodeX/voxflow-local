@@ -262,6 +262,27 @@ final class AudioCaptureService: AudioCapturing {
             .map { Double($0.elapsedMilliseconds()) / 1000.0 }
     }
 
+    /// RMS of the last `seconds` of the live buffer — the cockpit's
+    /// quiet-boundary flush peeks this to cut chunks between words instead
+    /// of through them. Snapshot of the tail bytes under the lock, math
+    /// outside it.
+    func tailRMSEnergy(seconds: Double) -> Double? {
+        let tail: Data? = state.withLock { state in
+            let bytes = Int(Self.targetSampleRate * seconds) * MemoryLayout<Int16>.size
+            guard bytes > 0, state.pcmBuffer.count >= bytes else { return nil }
+            return state.pcmBuffer.suffix(bytes)
+        }
+        return tail.flatMap { Self.tailRMS(of: $0, sampleRate: Self.targetSampleRate, seconds: seconds) }
+    }
+
+    /// Pure tail-window rms: nil when the buffer can't cover the window
+    /// (too early in the capture to judge a boundary).
+    nonisolated static func tailRMS(of pcm: Data, sampleRate: Double, seconds: Double) -> Double? {
+        let bytes = Int(sampleRate * seconds) * MemoryLayout<Int16>.size
+        guard bytes > 0, pcm.count >= bytes else { return nil }
+        return CapturedAudio(pcm: Data(pcm.suffix(bytes)), sampleRate: sampleRate).rmsEnergy
+    }
+
     func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws {
         deviceChangedDuringCapture = false
         let captureGeneration: UInt64 = state.withLock {

@@ -8,6 +8,13 @@ private final class FakeCapture: AudioCapturing {
     var failNextStart = false
     var failNextStop = false
     var nextAudio: CapturedAudio
+    /// Scripted tail energy + consult counter for the quiet-boundary flush.
+    var tailRMSValue: Double?
+    private(set) var tailRMSConsults = 0
+    func tailRMSEnergy(seconds: Double) -> Double? {
+        tailRMSConsults += 1
+        return tailRMSValue
+    }
     /// Whether each startCapture call carried a live callback — pins which
     /// starts gate on the first buffer (the initial ⌘R start) and which
     /// deliberately don't (the every-5s segmentation restarts).
@@ -140,6 +147,59 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         coord.startRecording(targetApp: nil)
         await coord.flushNow()
         XCTAssertEqual(session.currentSession?.transcript, "the WHEREFORE clause")
+        await coord.stopRecording()
+    }
+
+    // MARK: - Quiet-boundary flush (session 29 deferred item)
+
+    /// The hard 5 s timer cut chunks mid-word at every seam. The flush now
+    /// defers (bounded) until the buffer tail goes quiet, so the cut lands
+    /// between words. Pure decision: defer only on ATTESTED speech at the
+    /// tail — an unknown reading (nil) must fail open to the old behavior.
+    func test_shouldDeferFlush_decision() {
+        XCTAssertTrue(CockpitCaptureCoordinator.shouldDeferFlush(tailRMS: 0.05))
+        XCTAssertFalse(CockpitCaptureCoordinator.shouldDeferFlush(tailRMS: 0.004),
+                       "quiet tail = word boundary, cut now")
+        XCTAssertFalse(CockpitCaptureCoordinator.shouldDeferFlush(tailRMS: nil),
+                       "unknown tail energy must not stall the flush")
+    }
+
+    /// Speech at the tail defers the flush (multiple energy consults) but the
+    /// deferral budget bounds it — the flush must still happen.
+    func test_flush_defers_while_tail_is_speech_then_cuts() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        capture.tailRMSValue = 0.06   // speech at the tail, forever
+        let transcriber = FakeTranscriber(); transcriber.nextText = "still flushed"
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            flushDeferralStepNs: 5_000_000,     // 5 ms steps for the test
+            maxFlushDeferralNs: 25_000_000)     // 25 ms budget
+        coord.startRecording(targetApp: nil)
+
+        await coord.flushNow()
+
+        XCTAssertGreaterThan(capture.tailRMSConsults, 1,
+                             "speech tail must be re-checked across the deferral budget")
+        XCTAssertEqual(session.currentSession?.transcript, "still flushed",
+                       "budget exhaustion must still flush")
+        await coord.stopRecording()
+    }
+
+    func test_flush_cuts_immediately_on_quiet_tail() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        capture.tailRMSValue = 0.002  // quiet tail — a word boundary
+        let transcriber = FakeTranscriber(); transcriber.nextText = "prompt cut"
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            flushDeferralStepNs: 5_000_000, maxFlushDeferralNs: 25_000_000)
+        coord.startRecording(targetApp: nil)
+
+        await coord.flushNow()
+
+        XCTAssertEqual(capture.tailRMSConsults, 1, "quiet tail flushes on the first check")
+        XCTAssertEqual(session.currentSession?.transcript, "prompt cut")
         await coord.stopRecording()
     }
 
