@@ -18,6 +18,7 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
     AccessibilityInsertService.swift    @MainActor AX text insertion + async paste fallback
     HallucinationFilter.swift           Two-tier Whisper hallucination filter (synced w/ backend)
     SessionMemoryStore.swift            Ring buffer for recent dictations
+    InsertionReceiptStore.swift         Read-only insertions.jsonl tail reader — palette last-capture row + Dashboard Recent Captures (CaptureReceipt/RowModel)
     MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem
     FocusContextMonitor.swift           Focused-target poller; frozen during capture
     CockpitCoordinator.swift            @MainActor cockpit orchestration — chip MRU + voice routing + insert/copy/undo + Notion target/search + assistant handoff + protocol/chain dispatch
