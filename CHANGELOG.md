@@ -43,6 +43,10 @@ All notable changes to VoxFlow Local are documented here. The format follows
   still run, and the provenance pill shows the degradation
   (`degraded_reason: memory_pressure`). Disable with
   `VOXFLOW_POLISH_MEMORY_GUARD=0`.
+- Pipeline viewer: persistent last-capture provenance row in the command
+  palette and a Recent Captures section in the Dashboard (mode, served-by,
+  target, duration, confidence, reject reason, reveal-retained-audio), read
+  from `insertions.jsonl`. Read-only; no capture-path changes.
 
 ### Fixed
 - A stability review (four parallel review agents, 23 verified findings,

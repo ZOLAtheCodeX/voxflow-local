@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 
 struct DashboardWindowView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
+    @ObservedObject var receiptStore: InsertionReceiptStore
 
     var body: some View {
         ScrollView {
@@ -11,6 +13,7 @@ struct DashboardWindowView: View {
                 metricsGrid
                 backendSection
                 modeUsageSection
+                recentCapturesSection
                 benchmarkRecommendationSection
                 compatibilitySection
             }
@@ -89,6 +92,83 @@ struct DashboardWindowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(VF.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
+        }
+    }
+
+    /// Pipeline provenance history: the newest receipts from insertions.jsonl,
+    /// rejects included. Read-only — the file is written by InsertionAuditLog.
+    private var recentCapturesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recent Captures")
+                .font(VF.headingFont)
+                .foregroundStyle(.secondary)
+
+            if receiptStore.receipts.isEmpty {
+                Text("No captures recorded yet")
+                    .font(VF.secondaryFont)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(receiptStore.receipts.enumerated()), id: \.offset) { _, receipt in
+                        recentCaptureRow(receipt)
+                    }
+                }
+            }
+        }
+        .onAppear { receiptStore.refresh() }
+        .onChange(of: state.captureCount) { _, _ in receiptStore.refresh() }
+        .onChange(of: state.statusLine) { _, _ in receiptStore.refresh() }
+    }
+
+    private func recentCaptureRow(_ receipt: CaptureReceipt) -> some View {
+        let row = CaptureReceiptRowModel(receipt: receipt)
+        return HStack(spacing: VF.spacingSmall) {
+            Image(systemName: row.isReject ? "xmark.circle" : "checkmark.circle")
+                .font(VF.captionFont)
+                .foregroundStyle(row.isReject ? VF.colorWarning : VF.colorSuccess)
+            Text(row.relativeTime)
+                .font(VF.monoCaptionFont)
+                .foregroundStyle(.secondary)
+                .frame(width: 56, alignment: .leading)
+            ForEach(row.chips, id: \.self) { chip in
+                Text(chip)
+                    .font(VF.microFont)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(VF.cardBackground, in: Capsule())
+            }
+            if let target = row.targetLabel {
+                Text(target)
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+            }
+            if !row.detail.isEmpty {
+                Text(row.detail)
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+            }
+            if let reason = row.rejectReason {
+                Text(reason)
+                    .font(VF.captionFont)
+                    .foregroundStyle(VF.colorWarning)
+            }
+            Text(row.snippet)
+                .font(VF.captionFont)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            if let url = row.audioFileURL {
+                // Rejects that retained their audio (RejectedAudioStore ring)
+                // get a one-click path to the WAV for forensic triage.
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Image(systemName: "waveform.circle")
+                }
+                .buttonStyle(.plain)
+                .help("Reveal retained audio in Finder")
+            }
         }
     }
 

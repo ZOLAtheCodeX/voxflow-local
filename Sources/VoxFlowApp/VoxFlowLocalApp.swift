@@ -78,7 +78,10 @@ struct VoxFlowLocalApp: App {
         .windowResizability(.contentMinSize)
 
         Window("VoxFlow Dashboard", id: "dashboard") {
-            DashboardWindowView(coordinator: coordinator, state: coordinator.state)
+            DashboardWindowView(
+                coordinator: coordinator,
+                state: coordinator.state,
+                receiptStore: coordinator.receiptStore)
                 .frame(minWidth: 760, minHeight: 540)
         }
 
