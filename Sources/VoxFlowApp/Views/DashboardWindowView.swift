@@ -158,7 +158,7 @@ struct DashboardWindowView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
-            if let url = row.audioFileURL {
+            if let url = row.audioFileURL, FileManager.default.fileExists(atPath: url.path) {
                 // Rejects that retained their audio (RejectedAudioStore ring)
                 // get a one-click path to the WAV for forensic triage.
                 Button {
