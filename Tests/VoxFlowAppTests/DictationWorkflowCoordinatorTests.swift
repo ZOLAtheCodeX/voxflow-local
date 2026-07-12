@@ -529,6 +529,38 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
                        "suffix was \(textInsertion.statusSuffix ?? "nil")")
     }
 
+    /// Round-trip pinning for the pipeline viewer: the statusSuffix built by
+    /// the REAL auto-insert code path (which becomes the audit `source`) must
+    /// parse into structured chips via SourceLabel.parse. If the label format
+    /// in autoInsertOrReview drifts, this fails — the writer and the viewer's
+    /// parser move together or not at all.
+    @MainActor func testAutoInsertSuffixRoundTripsThroughSourceLabelParse() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = true
+
+        let polishResponse = """
+        {"output_text": "polished by gemma", "mode_applied": "polish", "guardrail_triggered": false, "served_by": "ollama", "model_id": "gemma4:e2b-mlx"}
+        """.data(using: .utf8)!
+        DictationMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, polishResponse)
+        }
+
+        let request = DictationWorkflowRequest(
+            sessionID: "prov-roundtrip", rawText: "clean me", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .autoInsertPolish, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.9, targetApp: nil)
+
+        try await sut.processDictation(request) { _, _, _ in }
+
+        let suffix = try XCTUnwrap(textInsertion.statusSuffix)
+        let parsed = SourceLabel.parse(suffix)
+        XCTAssertEqual(parsed.tokens, ["polish", "gemma4:e2b-mlx"],
+                       "suffix was \(suffix)")
+        XCTAssertEqual(parsed.appLabel, "app")
+    }
+
     /// Provenance: when Ollama is down the backend serves the regex floor
     /// (served_by == "regex"); the suffix/audit must say so, not look identical
     /// to a real Gemma run.
