@@ -96,6 +96,8 @@ final class AppCoordinator: ObservableObject {
     private(set) var settings: SettingsCoordinating!
     private(set) lazy var onboarding: OnboardingCoordinating = OnboardingCoordinator(state: state)
     private(set) lazy var insertionAudit = InsertionAuditLog()
+    /// Read-only receipts view for the pipeline viewer (palette + dashboard).
+    private(set) lazy var receiptStore = InsertionReceiptStore()
     /// Bounded WAV ring for rejected captures — the audio is the evidence the
     /// empty-decode investigation was missing, and the user's lost dictation
     /// (session 29). VOXFLOW_KEEP_REJECTED_AUDIO=0 disables.
@@ -2001,6 +2003,7 @@ final class AppCoordinator: ObservableObject {
         let panelContent = CommandPaletteView(
             coordinator: self,
             state: state,
+            receiptStore: receiptStore,
             onOpenDashboardWindow: {
                 NotificationCenter.default.post(name: .voxflowOpenDashboard, object: nil)
             },

@@ -3,6 +3,7 @@ import SwiftUI
 struct CommandPaletteView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
+    @ObservedObject var receiptStore: InsertionReceiptStore
     var onOpenDashboardWindow: () -> Void = {}
     var onOpenSetup: () -> Void = {}
     var onQuit: () -> Void = {}
@@ -50,16 +51,23 @@ struct CommandPaletteView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            lastCaptureRow
+
             footerBar
         }
         .padding(.vertical, VF.spacingMedium)
         .background(state.isCommandLaneActive ? VF.tintedBackground(VF.colorWarning, opacity: 0.08) : Color.clear)
         .animation(VF.animationStandard, value: activePanel)
         .animation(.smooth(duration: 0.3), value: state.sessionState)
-        .onAppear { updateRecordingBadgeAnimation() }
+        .onAppear {
+            updateRecordingBadgeAnimation()
+            receiptStore.refresh()
+        }
         .onChange(of: state.sessionState) { _, _ in
             updateRecordingBadgeAnimation()
         }
+        .onChange(of: state.captureCount) { _, _ in receiptStore.refresh() }
+        .onChange(of: state.statusLine) { _, _ in receiptStore.refresh() }
     }
 
     private var header: some View {
@@ -728,6 +736,56 @@ struct CommandPaletteView: View {
         .labelStyle(.iconOnly)
         .controlSize(.regular)
         .padding(.horizontal, 16)
+    }
+
+    /// Persistent last-capture provenance row — the pipeline stage card
+    /// vanishes the instant an insert lands; this stays until the next
+    /// capture replaces it. Rejects render tinted with their reason.
+    @ViewBuilder private var lastCaptureRow: some View {
+        if let receipt = receiptStore.latest {
+            let row = CaptureReceiptRowModel(receipt: receipt)
+            HStack(spacing: VF.spacingSmall) {
+                Image(systemName: row.isReject ? "xmark.circle" : "checkmark.circle")
+                    .font(VF.captionFont)
+                    .foregroundStyle(row.isReject ? VF.colorWarning : VF.colorSuccess)
+                Text(row.relativeTime)
+                    .font(VF.microFont)
+                    .foregroundStyle(.secondary)
+                ForEach(row.chips, id: \.self) { chip in
+                    Text(chip)
+                        .font(VF.microFont)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(VF.cardBackground, in: Capsule())
+                }
+                if let target = row.targetLabel {
+                    Text(target)
+                        .font(VF.microFont)
+                        .foregroundStyle(.secondary)
+                }
+                if !row.detail.isEmpty {
+                    Text(row.detail)
+                        .font(VF.microFont)
+                        .foregroundStyle(.secondary)
+                }
+                if let reason = row.rejectReason {
+                    Text(reason)
+                        .font(VF.microFont)
+                        .foregroundStyle(VF.colorWarning)
+                }
+                Text(row.snippet)
+                    .font(VF.microFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(row.isReject
+                ? "Last capture rejected: \(row.rejectReason ?? "unknown")"
+                : "Last capture inserted via \(row.chips.joined(separator: ", "))")
+        }
     }
 
     /// R3.7 mode-in-use indicator: which provider serves polish right now.
