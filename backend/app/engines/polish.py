@@ -90,9 +90,13 @@ class PolishEngine:
         self._breaker_open_until: dict[int, float] = {}
 
     @property
-    def _backend(self) -> TextLLMBackend:
-        """First backend in the chain — compat for probes and legacy tests."""
-        return self._chain[0][1]
+    def _backend(self) -> TextLLMBackend | None:
+        """First backend in the chain — compat for probes and legacy tests.
+
+        None when the chain is empty (rules-only polish) — every accessor
+        below must tolerate that rather than IndexError.
+        """
+        return self._chain[0][1] if self._chain else None
 
     @property
     def backend_name(self) -> str:
@@ -108,6 +112,8 @@ class PolishEngine:
 
     def retry_load(self) -> None:
         """Reset failure state for backends that support lazy reload."""
+        if self._backend is None:
+            return
         retry = getattr(self._backend, "retry_load", None)
         if callable(retry):
             with self._lock:

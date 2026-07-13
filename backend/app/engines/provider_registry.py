@@ -142,7 +142,7 @@ def load_provider_config(path: Path | None = None) -> ProviderConfig:
         provider_id = str(entry.get("id", "")).strip()
         if not provider_id:
             continue
-        if provider_id == RULES_SENTINEL:
+        if provider_id.lower() == RULES_SENTINEL:
             logger.warning("providers.json: %r is a reserved chain id — provider entry skipped", provider_id)
             continue
         if kind not in KNOWN_KINDS:

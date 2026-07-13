@@ -70,7 +70,7 @@ whisper_engine = WhisperEngine()
 # BYOM (R3): providers.json drives the registry; chains end at the regex
 # floor inside PolishEngine. Separate engines per task so "anthropic for
 # smart actions, ollama for polish" is expressible.
-from engines.provider_registry import ProviderRegistry, load_provider_config  # noqa: E402
+from engines.provider_registry import RULES_SENTINEL, ProviderRegistry, load_provider_config  # noqa: E402
 
 provider_config = load_provider_config()
 provider_registry = ProviderRegistry(provider_config)
@@ -217,7 +217,7 @@ def readiness_snapshot() -> ReadyResponse:
     if provider_registry.rules_only("polish"):
         # User-chosen rules floor: report it as the active provider so the
         # mode-in-use indicator renders "chosen", not "degraded".
-        active_provider = "rules"
+        active_provider = RULES_SENTINEL
         active_polish_model_name = ""
 
     return ReadyResponse(
