@@ -41,9 +41,11 @@ _DIGIT_RUN_RE = re.compile(r"\d+")
 class PolishOutcome:
     """Full result of a chain run, with provenance (R3.4).
 
-    ``served_by`` is the provider id that produced the text ("regex" for the
-    rules floor); ``fallback_depth`` is how many chain entries were skipped
-    or rejected before this one served (len(chain) when the floor served).
+    ``served_by`` is the provider id that produced the text, ``"regex"`` for
+    the degraded floor (providers configured but all failed), or ``"rules"``
+    for the deliberately CHOSEN floor (user set chains.polish = ["rules"]);
+    ``fallback_depth`` is how many chain entries were skipped or rejected
+    before this one served (len(chain) when the floor served).
     """
 
     text: str
@@ -73,6 +75,7 @@ class PolishEngine:
         *,
         chain: list[tuple[ProviderSpec | None, TextLLMBackend]] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        rules_only: bool = False,
     ) -> None:
         if chain is not None:
             self._chain = chain
@@ -81,6 +84,7 @@ class PolishEngine:
             self._chain = [(None, resolved)]
         self._lock = Lock()
         self._clock = clock
+        self._rules_only = rules_only
         # Keyed by chain depth (stable identity even for spec-less entries).
         self._wedge_failures: dict[int, int] = {}
         self._breaker_open_until: dict[int, float] = {}
@@ -143,6 +147,17 @@ class PolishEngine:
         """
         if not text.strip():
             return PolishOutcome("", False, None, served_by="none", model_id=None, fallback_depth=0)
+
+        # Rules-only (user-chosen "Local rules only" polish): serve the floor
+        # deliberately. served_by="rules" ≠ served_by="regex" — chosen is not
+        # degraded, so degraded_reason stays None. Smart actions never carry
+        # the sentinel (UI does not offer it); a system_prompt call on a
+        # rules-only engine falls through to the normal (empty) chain walk.
+        if self._rules_only and system_prompt is None:
+            return PolishOutcome(
+                apply_tone(light_cleanup(text), tone), False, None,
+                served_by="rules", model_id=None, fallback_depth=0,
+            )
 
         # Polish path only: convert spoken punctuation deterministically
         # BEFORE the LLM — small models read "the new policy period" as a

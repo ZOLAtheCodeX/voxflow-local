@@ -74,7 +74,10 @@ from engines.provider_registry import ProviderRegistry, load_provider_config  # 
 
 provider_config = load_provider_config()
 provider_registry = ProviderRegistry(provider_config)
-polish_engine = PolishEngine(chain=provider_registry.chain("polish"))
+polish_engine = PolishEngine(
+    chain=provider_registry.chain("polish"),
+    rules_only=provider_registry.rules_only("polish"),
+)
 smart_action_polish_engine = PolishEngine(chain=provider_registry.chain("smart_action"))
 translate_engine = TranslateEngine()
 prompt_framing_engine = PromptFramingEngine()
@@ -210,6 +213,12 @@ def readiness_snapshot() -> ReadyResponse:
             active_provider = pid
             active_polish_model_name = s.model or ""
             break
+
+    if provider_registry.rules_only("polish"):
+        # User-chosen rules floor: report it as the active provider so the
+        # mode-in-use indicator renders "chosen", not "degraded".
+        active_provider = "rules"
+        active_polish_model_name = ""
 
     return ReadyResponse(
         service_status=state.service_status,
