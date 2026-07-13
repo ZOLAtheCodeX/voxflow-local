@@ -357,9 +357,12 @@ struct SettingsView: View {
                         ForEach(providerStore.providers.map(\.id), id: \.self) { pid in
                             Text(pid).tag(pid)
                         }
+                        if task == "polish" {
+                            Text("Local rules only").tag(ProviderConfigStore.rulesSentinel)
+                        }
                     }
                 }
-                Text("Chains fall back to Ollama, then the local regex pipeline — dictation keeps working offline no matter what.")
+                Text("Chains fall back to Ollama, then the local regex pipeline — dictation keeps working offline no matter what. \"Local rules only\" skips LLM polish entirely and never loads a model.")
                     .font(VF.microFont)
                     .foregroundStyle(.secondary)
 
@@ -974,12 +977,17 @@ struct SettingsView: View {
         Binding(
             get: { providerStore.chains[task]?.first ?? "ollama" },
             set: { newPrimary in
-                var chain = [newPrimary]
-                // Keep local Ollama as the availability fallback unless it IS the primary.
-                if newPrimary != "ollama", providerStore.providers.contains(where: { $0.id == "ollama" }) {
-                    chain.append("ollama")
+                if newPrimary == ProviderConfigStore.rulesSentinel {
+                    // Rules-only is a full stop: no LLM fallback appended.
+                    providerStore.setChain(task: task, providerIDs: [newPrimary])
+                } else {
+                    var chain = [newPrimary]
+                    // Keep local Ollama as the availability fallback unless it IS the primary.
+                    if newPrimary != "ollama", providerStore.providers.contains(where: { $0.id == "ollama" }) {
+                        chain.append("ollama")
+                    }
+                    providerStore.setChain(task: task, providerIDs: chain)
                 }
-                providerStore.setChain(task: task, providerIDs: chain)
                 applyProviderChanges()
             }
         )
