@@ -322,7 +322,9 @@ Append to `Tests/VoxFlowAppTests/TextCleanupServiceTests.swift` (read the file's
     }
 
     func testUhHuhIsNotAFiller() {
-        XCTAssertEqual(TextCleanupService.removeFillers("uh-huh sounds right"), "uh-huh sounds right")
+        // "correct" not "right" — "right" is in the Swift-only ambiguousFillers
+        // set (POS-aware Phase 2); test words must stay out of that zone.
+        XCTAssertEqual(TextCleanupService.removeFillers("uh-huh sounds correct"), "uh-huh sounds correct")
     }
 
     // MARK: - Stutter dedup
@@ -522,11 +524,11 @@ Create `Tests/Fixtures/cleanup_rules_parity.json`. ALL cases synthetic; every ca
     {"input": "it's pretty, you know, in your face", "expected": "It's pretty, in your face.", "note": "phrase-filler orphan heals"},
     {"input": "I was, uh, thinking about it", "expected": "I was, thinking about it.", "note": "filler-with-comma seam heals"},
     {"input": "uh... testing the mic", "expected": "Testing the mic.", "note": "filler with attached ellipsis"},
-    {"input": "um so the G-G-Gamma model works", "expected": "So the Gamma model works.", "note": "stutter + leading filler"},
+    {"input": "um the G-G-Gamma model works", "expected": "The Gamma model works.", "note": "stutter + leading filler ('so' avoided — Swift ambiguousFillers divergence zone)"},
     {"input": "that was pretty... good I think", "expected": "That was pretty... good I think.", "note": "hesitation ellipsis not recased"},
     {"input": "what it looks sort of.", "expected": "What it looks.", "note": "phrase filler leaves space-dot orphan"},
     {"input": "on D-Day we landed", "expected": "On D-Day we landed.", "note": "single-letter hyphenation untouched"},
-    {"input": "uh-huh sounds right", "expected": "Uh-huh sounds right.", "note": "hyphenated non-filler kept"},
+    {"input": "uh-huh sounds correct", "expected": "Uh-huh sounds correct.", "note": "hyphenated non-filler kept ('right' avoided — Swift ambiguousFillers divergence zone)"},
     {"input": "hello hello world", "expected": "Hello world.", "note": "baseline: adjacent dedup"},
     {"input": "send it period", "expected": "Send it.", "note": "baseline: spoken punctuation"}
   ]
