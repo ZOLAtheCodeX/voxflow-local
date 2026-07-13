@@ -1,7 +1,8 @@
 """Text cleanup helpers — parity with Swift TextCleanupService.
 
-Six-step pipeline: normalize whitespace → spoken punctuation → repeated-word
-dedup → sentence split + recase → filler removal → final normalization.
+Eight-step pipeline: normalize whitespace → spoken punctuation → stutter+repeated-word
+dedup → sentence split + recase → filler removal → punctuation-orphan repair →
+final normalization.
 
 POS-aware ambiguous filler removal (Phase 2 in Swift) is intentionally omitted
 here to avoid the nltk/spacy dependency.
@@ -14,8 +15,12 @@ import re
 from text_cleanup_rules import (
     ALWAYS_FILLERS,
     PHRASE_FILLERS,
+    PUNCT_ORPHAN_REPAIRS,
     SPOKEN_PUNCTUATION,
+    STUTTER_PREFIX,
 )
+
+_FILLER_PUNCT = ".,;:!?…\"'()[]"
 
 
 def normalize_whitespace(text: str) -> str:
@@ -31,7 +36,8 @@ def replace_spoken_punctuation(text: str) -> str:
 
 
 def remove_repeated_words(text: str) -> str:
-    """Remove adjacent duplicate words (case-insensitive)."""
+    """Remove adjacent duplicate words (case-insensitive) and stutter prefixes."""
+    text = STUTTER_PREFIX.sub(r"\2", text)
     words = text.split()
     if len(words) <= 1:
         return text
@@ -40,6 +46,18 @@ def remove_repeated_words(text: str) -> str:
         if word.lower() != result[-1].lower():
             result.append(word)
     return " ".join(result)
+
+
+def repair_punctuation_orphans(text: str) -> str:
+    """Collapse punctuation stranded by filler/phrase removal (corpus-backed).
+
+    Runs after filler removal in light_cleanup; ellipsis and newlines are
+    protected by the patterns themselves (see text_cleanup_rules).
+    """
+    result = text
+    for pattern, replacement in PUNCT_ORPHAN_REPAIRS:
+        result = pattern.sub(replacement, result)
+    return result
 
 
 def remove_fillers(text: str) -> str:
@@ -53,20 +71,25 @@ def remove_fillers(text: str) -> str:
     for pattern, replacement in PHRASE_FILLERS:
         result = pattern.sub(replacement, result)
     result = normalize_whitespace(result)
+    # Phase 1: single-word always-fillers. Tokens are checked with their
+    # leading/trailing punctuation stripped so "Uh..." / "um," match too
+    # (exact-token matching let them survive — corpus finding 2026-07-13).
+    # The whole token goes, punctuation included; repair_punctuation_orphans
+    # heals the seam afterwards. "uh-huh" keeps its hyphen core and stays.
     words = result.split()
-    words = [w for w in words if w.lower() not in ALWAYS_FILLERS]
+    words = [w for w in words if w.strip(_FILLER_PUNCT).lower() not in ALWAYS_FILLERS]
     return " ".join(words)
 
 
 def split_and_recase(text: str) -> str:
-    """Split on sentence-ending punctuation and uppercase first char of each.
+    """Split on sentence-ending punctuation (excluding ellipsis) and uppercase first char of each.
 
     Intentional divergence from Swift: Python uses regex-only splitting while
     Swift uses NLTokenizer + regex sub-splitting. This can diverge on edge
     cases like abbreviations ("Dr.") or punctuation without following whitespace.
     Accepted tradeoff to avoid adding nltk/spacy dependency.
     """
-    segments = re.split(r"(?<=[.!?])\s+", text)
+    segments = re.split(r"(?<=[.!?])(?<!\.\.\.)\s+", text)
     recased = []
     for seg in segments:
         seg = seg.strip()
@@ -77,7 +100,11 @@ def split_and_recase(text: str) -> str:
 
 
 def light_cleanup(text: str) -> str:
-    """6-step cleanup pipeline mirroring Swift TextCleanupService.cleanup(.light)."""
+    """8-step cleanup pipeline mirroring Swift TextCleanupService.cleanup(.light).
+
+    Pipeline: normalize whitespace → spoken punctuation → stutter+repeated-word dedup
+    → sentence split + recase → filler removal → punctuation-orphan repair → final normalization.
+    """
     cleaned = normalize_whitespace(text)
     if not cleaned:
         return ""
@@ -85,6 +112,7 @@ def light_cleanup(text: str) -> str:
     cleaned = remove_repeated_words(cleaned)
     cleaned = split_and_recase(cleaned)
     cleaned = remove_fillers(cleaned)
+    cleaned = repair_punctuation_orphans(cleaned)
     cleaned = normalize_whitespace(cleaned)
     if not cleaned:
         return ""

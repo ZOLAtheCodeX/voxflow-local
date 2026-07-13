@@ -80,6 +80,7 @@ from nlp import (  # noqa: F401
     normalize_whitespace,
     remove_fillers,
     remove_repeated_words,
+    repair_punctuation_orphans,
     render_meeting_markdown_export,
     render_meeting_notion_export,
     replace_spoken_punctuation,

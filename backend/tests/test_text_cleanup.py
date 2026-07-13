@@ -17,6 +17,7 @@ from server import (
     light_cleanup,
     remove_fillers,
     remove_repeated_words,
+    repair_punctuation_orphans,
     replace_spoken_punctuation,
     split_and_recase,
 )
@@ -365,3 +366,89 @@ class TestApplyToneCaseNormalization:
     def test_tone_with_whitespace(self):
         result = apply_tone("I don't agree.", "  formal  ")
         assert "do not" in result
+
+
+# ── Punctuation orphan repair ───────────────────────────────────────
+
+class TestPunctuationOrphanRepair:
+    """Corpus-backed (2026-07-13 mining): orphaned punctuation left by
+    filler/phrase removal was the dominant residual artifact (~3% of inserts)."""
+
+    def test_orphan_comma_pair_collapses(self):
+        assert repair_punctuation_orphans("pretty, , in your face") == "pretty, in your face"
+
+    def test_double_comma_collapses(self):
+        assert repair_punctuation_orphans("a,, b") == "a, b"
+
+    def test_comma_dot_resolves_to_dot(self):
+        assert repair_punctuation_orphans("the model,. sometimes") == "the model. sometimes"
+
+    def test_comma_space_dot_resolves_to_dot(self):
+        assert repair_punctuation_orphans("review, .") == "review."
+
+    def test_question_mark_absorbs_trailing_dot(self):
+        assert repair_punctuation_orphans("why?. next") == "why? next"
+
+    def test_space_before_period_removed(self):
+        assert repair_punctuation_orphans("what it looks .") == "what it looks."
+
+    def test_space_before_comma_removed(self):
+        assert repair_punctuation_orphans("first , second") == "first, second"
+
+    def test_ellipsis_never_collapses(self):
+        assert repair_punctuation_orphans("wait... what") == "wait... what"
+        assert repair_punctuation_orphans("wait ...") == "wait ..."
+
+    def test_newlines_preserved(self):
+        assert repair_punctuation_orphans("one.\n\ntwo .") == "one.\n\ntwo."
+
+
+class TestPunctuationAwareFillers:
+    def test_filler_with_trailing_ellipsis_removed(self):
+        assert remove_fillers("uh... testing the mic") == "testing the mic"
+
+    def test_filler_with_trailing_comma_removed(self):
+        # The whole token drops, punctuation included — "uh," carries its own
+        # comma away, so no seam remains on this path. (The ", ," seam that
+        # repair_punctuation_orphans heals comes from PHRASE-filler regex
+        # removal, which leaves the surrounding punctuation behind.)
+        assert remove_fillers("I was, uh, thinking") == "I was, thinking"
+
+    def test_uh_huh_is_not_a_filler(self):
+        assert remove_fillers("uh-huh sounds right") == "uh-huh sounds right"
+
+
+class TestStutterDedup:
+    def test_double_stutter_collapses(self):
+        assert remove_repeated_words("the G-G-Gamma model") == "the Gamma model"
+
+    def test_case_insensitive_stutter(self):
+        assert remove_repeated_words("g-G-gamma") == "gamma"
+
+    def test_d_day_untouched(self):
+        assert remove_repeated_words("on D-Day we landed") == "on D-Day we landed"
+
+    def test_t_shirt_untouched(self):
+        assert remove_repeated_words("a T-shirt design") == "a T-shirt design"
+
+
+class TestEllipsisRecase:
+    def test_midtext_ellipsis_is_not_a_sentence_boundary(self):
+        assert split_and_recase("ok. was pretty... good today") == "Ok. Was pretty... good today"
+
+    def test_real_boundaries_still_recase(self):
+        assert split_and_recase("done. next item") == "Done. Next item"
+
+
+class TestLightCleanupEndToEnd:
+    def test_phrase_filler_orphan_heals(self):
+        assert light_cleanup("it's pretty, you know, in your face") == "It's pretty, in your face."
+
+    def test_filler_comma_seam_heals(self):
+        assert light_cleanup("I was, uh, thinking about it") == "I was, thinking about it."
+
+    def test_stutter_and_filler_combo(self):
+        assert light_cleanup("um so the G-G-Gamma model works") == "So the Gamma model works."
+
+    def test_hesitation_ellipsis_stays_lowercase(self):
+        assert light_cleanup("that was pretty... good I think") == "That was pretty... good I think."
