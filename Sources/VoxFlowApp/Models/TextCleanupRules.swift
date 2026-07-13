@@ -23,7 +23,7 @@ enum TextCleanupRules {
     ]
 
     static let ambiguousFillers: Set<String> = [
-        "like", "so", "actually", "basically", "literally",
+        "like", "so", "right", "actually", "basically", "literally",
         "anyway", "anyways"
     ]
 

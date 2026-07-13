@@ -361,7 +361,10 @@ final class TextCleanupServiceTests: XCTestCase {
     }
 
     func testUhHuhIsNotAFiller() {
-        XCTAssertEqual(TextCleanupService.removeFillers("uh-huh sounds right"), "uh-huh sounds right")
+        // "correct" (not "right") — "right" is in ambiguousFillers and its
+        // POS-aware removal is shipped Swift-only behavior this test must
+        // not collide with.
+        XCTAssertEqual(TextCleanupService.removeFillers("uh-huh sounds correct"), "uh-huh sounds correct")
     }
 
     // MARK: - Stutter dedup
