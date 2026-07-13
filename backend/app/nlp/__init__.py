@@ -9,7 +9,6 @@ from .cleanup import (
     normalize_whitespace,
     remove_fillers,
     remove_repeated_words,
-    repair_punctuation_orphans,
     replace_spoken_punctuation,
     split_and_recase,
 )
@@ -22,6 +21,9 @@ from .meeting import (
     infer_task_owners,
     render_meeting_markdown_export,
     render_meeting_notion_export,
+)
+from .cleanup import (
+    repair_punctuation_orphans,
 )
 from .sentences import split_sentences
 from .tone import apply_tone
@@ -38,9 +40,9 @@ __all__ = [
     "normalize_whitespace",
     "remove_fillers",
     "remove_repeated_words",
-    "repair_punctuation_orphans",
     "render_meeting_markdown_export",
     "render_meeting_notion_export",
+    "repair_punctuation_orphans",
     "replace_spoken_punctuation",
     "split_and_recase",
     "split_sentences",

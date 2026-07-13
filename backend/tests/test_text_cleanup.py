@@ -402,6 +402,13 @@ class TestPunctuationOrphanRepair:
     def test_newlines_preserved(self):
         assert repair_punctuation_orphans("one.\n\ntwo .") == "one.\n\ntwo."
 
+    def test_abbreviation_comma_preserved(self):
+        assert repair_punctuation_orphans("e.g., apples and pears") == "e.g., apples and pears"
+        assert repair_punctuation_orphans("i.e., the second one") == "i.e., the second one"
+
+    def test_genuine_dot_comma_still_repairs(self):
+        assert repair_punctuation_orphans("done., next") == "done. next"
+
 
 class TestPunctuationAwareFillers:
     def test_filler_with_trailing_ellipsis_removed(self):
