@@ -45,6 +45,30 @@ PHRASE_FILLERS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bokay so\b", re.IGNORECASE), ""),
 ]
 
+# ── Punctuation-orphan repair (corpus-backed, 2026-07-13) ───────────
+# Filler/phrase removal strands the punctuation that surrounded the removed
+# words ("pretty, you know, in" -> "pretty, , in"). Order matters: comma
+# runs collapse first, then double marks resolve to the terminal mark, then
+# space-before-punctuation. [ \t] only (never \s) so the \n\n written by
+# "new paragraph" survives; the (?!\.) guards keep "..." from collapsing.
+
+PUNCT_ORPHAN_REPAIRS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r",[ \t]*(?:,[ \t]*)+"), ", "),          # ", ," / ",,"  -> ", "
+    (re.compile(r",[ \t]*\.(?!\.)"), "."),               # ",." / ", ."  -> "."
+    (re.compile(r"(?<!\.)\.[ \t]*,"), "."),              # ".,"          -> "."
+    (re.compile(r"\?[ \t]*[.,](?!\.)"), "?"),            # "?." / "?,"   -> "?"
+    (re.compile(r"![ \t]*[.,](?!\.)"), "!"),             # "!." / "!,"   -> "!"
+    (re.compile(r"[ \t]+(?=[,.;:!?](?:[ \t]|$))"), ""),  # "word ."      -> "word."
+]
+
+# ── Stutter prefixes (corpus-backed, 2026-07-13) ────────────────────
+# "G-G-Gamma" -> "Gamma". Requires >= 2 stutter letters before the word so
+# legitimate single-letter hyphenations (D-Day, T-shirt, X-ray) never match:
+# their second segment does not repeat the prefix letter, and even D-Day has
+# only ONE "D-" before the word.
+
+STUTTER_PREFIX: re.Pattern[str] = re.compile(r"\b(\w)-(?:\1-)+(\1\w*)", re.IGNORECASE)
+
 # ── Tone: concise ───────────────────────────────────────────────────
 
 HEDGING_PHRASES: list[tuple[re.Pattern[str], str]] = [
