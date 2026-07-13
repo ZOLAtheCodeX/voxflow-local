@@ -395,4 +395,35 @@ final class TextCleanupServiceTests: XCTestCase {
         XCTAssertEqual(TextCleanupService.cleanup("that was pretty... good I think", mode: .light, tone: .neutral),
                        "That was pretty... good I think.")
     }
+
+    /// Behavioral parity with backend/app/nlp/cleanup.py — both sides consume
+    /// Tests/Fixtures/cleanup_rules_parity.json (same mechanism as the
+    /// hallucination parity test).
+    func testCleanupRulesParityFixture() throws {
+        struct ParityCase: Decodable {
+            let input: String
+            let expected: String
+            let note: String?
+        }
+        struct ParityFixture: Decodable {
+            let cases: [ParityCase]
+        }
+
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // Tests/VoxFlowAppTests
+            .deletingLastPathComponent()  // Tests
+            .appendingPathComponent("Fixtures/cleanup_rules_parity.json")
+        let data = try Data(contentsOf: fixtureURL)
+        let fixture = try JSONDecoder().decode(ParityFixture.self, from: data)
+        XCTAssertGreaterThanOrEqual(fixture.cases.count, 10, "Fixture unexpectedly small — wrong file?")
+
+        var failures: [String] = []
+        for c in fixture.cases {
+            let got = TextCleanupService.cleanup(c.input, mode: .light, tone: .neutral)
+            if got != c.expected {
+                failures.append("'\(c.input)': expected '\(c.expected)', got '\(got)' — \(c.note ?? "")")
+            }
+        }
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
+    }
 }
