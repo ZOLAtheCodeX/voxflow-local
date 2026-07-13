@@ -80,6 +80,11 @@ final class ProviderConfigStore: ObservableObject {
 
     static let tasks = ["polish", "smart_action"]
 
+    /// Reserved chain id: a polish chain of ["rules"] means the user chose
+    /// the local rules floor deliberately — no LLM provider runs for polish.
+    /// MUST match RULES_SENTINEL in backend provider_registry.py.
+    nonisolated static let rulesSentinel = "rules"
+
     private let fileURL: URL
     private let log = Logger(subsystem: "local.voxflow.app", category: "ProviderConfigStore")
 
@@ -141,6 +146,10 @@ final class ProviderConfigStore: ObservableObject {
     func add(_ spec: ProviderSpecModel) -> Bool {
         let trimmedID = spec.id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedID.isEmpty, !providers.contains(where: { $0.id == trimmedID }) else { return false }
+        guard trimmedID.lowercased() != Self.rulesSentinel else {
+            log.error("Provider id 'rules' is reserved for the rules-only chain sentinel — rejected")
+            return false
+        }
         var normalized = spec
         normalized.id = trimmedID
         if normalized.kind.isCloud, normalized.apiKeyEnv == nil {
@@ -156,7 +165,9 @@ final class ProviderConfigStore: ObservableObject {
         providers.removeAll { $0.id == id }
         KeychainService.delete(account: Self.keychainAccount(for: id))
         for task in chains.keys {
-            chains[task] = (chains[task] ?? []).filter { pid in providers.contains(where: { $0.id == pid }) }
+            chains[task] = (chains[task] ?? []).filter { pid in
+                pid == Self.rulesSentinel || providers.contains(where: { $0.id == pid })
+            }
             if chains[task]?.isEmpty == true {
                 chains[task] = providers.first.map { [$0.id] } ?? []
             }
@@ -165,10 +176,17 @@ final class ProviderConfigStore: ObservableObject {
     }
 
     /// Sets a task's fallback chain. Unknown provider ids are pruned; an
-    /// empty result falls back to the first configured provider.
+    /// empty result falls back to the first configured provider. The
+    /// reserved "rules" sentinel is accepted and truncates the chain (any
+    /// entries after it are unreachable, matching the backend loader).
     func setChain(task: String, providerIDs: [String]) {
         let known = Set(providers.map(\.id))
-        var pruned = providerIDs.filter { known.contains($0) }
+        var pruned = providerIDs.filter { known.contains($0) || $0 == Self.rulesSentinel }
+        if let idx = pruned.firstIndex(of: Self.rulesSentinel) {
+            // Entries after the sentinel are unreachable — normalize them away
+            // (matches the backend loader's truncation).
+            pruned = Array(pruned[...idx])
+        }
         if pruned.isEmpty, let first = providers.first?.id { pruned = [first] }
         chains[task] = pruned
         save()

@@ -44,16 +44,18 @@ struct CockpitTopBarView: View {
 
     private var modelPill: some View {
         // R3.7: provenance from /v1/ready — which provider/model the polish
-        // chain would use right now. Empty provider = regex fallback.
+        // chain would use right now. Empty provider = regex fallback
+        // (degraded, orange); "rules" = user-chosen rules floor (neutral).
         let provider = state.backendReadiness.activePolishProvider
         let model = state.backendReadiness.activePolishModel
+        let isRules = provider == ProviderConfigStore.rulesSentinel
         let label = provider.isEmpty
             ? "regex fallback"
-            : (model.isEmpty ? provider : "\(provider) · \(model)")
+            : (isRules ? "rules · local" : (model.isEmpty ? provider : "\(provider) · \(model)"))
         return pill(label, tint: provider.isEmpty ? VF.colorWarning : VF.colorNeutral)
             .accessibilityLabel(provider.isEmpty
                 ? "Polish degraded to regex fallback"
-                : "Polish served by \(label)")
+                : (isRules ? "Polish served by local rules (chosen)" : "Polish served by \(label)"))
     }
 
     @ViewBuilder private var targetPill: some View {

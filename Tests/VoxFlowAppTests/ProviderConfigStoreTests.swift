@@ -130,4 +130,34 @@ final class ProviderConfigStoreTests: XCTestCase {
         XCTAssertEqual(claude?["api_key_env"] as? String, "VOXFLOW_PROVIDER_KEY_CLAUDE")
         XCTAssertNotNil(json?["chains"] as? [String: [String]])
     }
+
+    // MARK: - Rules sentinel (rules-only polish)
+
+    func testAddRejectsReservedRulesID() {
+        let store = ProviderConfigStore(fileURL: tempURL)
+        XCTAssertFalse(store.add(ProviderSpecModel(id: "rules", kind: .ollama)))
+        XCTAssertFalse(store.add(ProviderSpecModel(id: "Rules", kind: .ollama)))
+        XCTAssertFalse(store.providers.contains { $0.id.lowercased() == "rules" })
+    }
+
+    func testSetChainAcceptsSentinelAndTruncatesAfterIt() {
+        let store = ProviderConfigStore(fileURL: tempURL)
+        store.setChain(task: "polish", providerIDs: ["rules", "ollama"])
+        XCTAssertEqual(store.chains["polish"], ["rules"])
+    }
+
+    func testSentinelSurvivesProviderRemovalPruning() {
+        let store = ProviderConfigStore(fileURL: tempURL)
+        store.add(ProviderSpecModel(id: "lmstudio", kind: .openaiCompat))
+        store.setChain(task: "polish", providerIDs: ["rules"])
+        store.remove(id: "lmstudio")
+        XCTAssertEqual(store.chains["polish"], ["rules"])
+    }
+
+    func testSentinelRoundTripsThroughSaveAndLoad() {
+        let store = ProviderConfigStore(fileURL: tempURL)
+        store.setChain(task: "polish", providerIDs: [ProviderConfigStore.rulesSentinel])
+        let reloaded = ProviderConfigStore(fileURL: tempURL)
+        XCTAssertEqual(reloaded.chains["polish"], ["rules"])
+    }
 }
