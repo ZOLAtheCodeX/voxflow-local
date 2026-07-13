@@ -10,6 +10,7 @@
     {"input": "on D-Day we landed", "expected": "On D-Day we landed.", "note": "single-letter hyphenation untouched"},
     {"input": "uh-huh sounds correct", "expected": "Uh-huh sounds correct.", "note": "hyphenated non-filler kept ('right' avoided — Swift ambiguousFillers divergence zone)"},
     {"input": "hello hello world", "expected": "Hello world.", "note": "baseline: adjacent dedup"},
-    {"input": "send it period", "expected": "Send it.", "note": "baseline: spoken punctuation"}
+    {"input": "send it period", "expected": "Send it.", "note": "baseline: spoken punctuation"},
+    {"input": "the list, etc., is done", "expected": "The list, etc., is done.", "note": "trailing-dot abbreviation comma preserved (dot-comma repair requires a space)"}
   ]
 }

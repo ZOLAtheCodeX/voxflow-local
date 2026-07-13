@@ -407,7 +407,15 @@ class TestPunctuationOrphanRepair:
         assert repair_punctuation_orphans("i.e., the second one") == "i.e., the second one"
 
     def test_genuine_dot_comma_still_repairs(self):
-        assert repair_punctuation_orphans("done., next") == "done. next"
+        # Space required: the dot-SPACE-comma seam is what phrase-filler
+        # removal actually leaves; bare ".," is left alone (see below).
+        assert repair_punctuation_orphans("done. , next") == "done. next"
+
+    def test_bare_dot_comma_left_alone(self):
+        # Indistinguishable from "etc.," — conservative by design.
+        assert repair_punctuation_orphans("done., next") == "done., next"
+        assert repair_punctuation_orphans("etc., and more") == "etc., and more"
+        assert repair_punctuation_orphans("Acme Inc., the maker") == "Acme Inc., the maker"
 
 
 class TestPunctuationAwareFillers:

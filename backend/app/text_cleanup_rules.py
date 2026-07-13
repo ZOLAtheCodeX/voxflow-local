@@ -55,7 +55,7 @@ PHRASE_FILLERS: list[tuple[re.Pattern[str], str]] = [
 PUNCT_ORPHAN_REPAIRS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r",[ \t]*(?:,[ \t]*)+"), ", "),          # ", ," / ",,"  -> ", "
     (re.compile(r",[ \t]*\.(?!\.)"), "."),               # ",." / ", ."  -> "."
-    (re.compile(r"(?<![A-Za-z]\.[A-Za-z])(?<!\.)\.[ \t]*,"), "."),              # ".," -> "." (not after "e.g."-style abbreviations)
+    (re.compile(r"(?<![A-Za-z]\.[A-Za-z])(?<!\.)\.[ \t]+,"), "."),              # ". ," -> "." (space required — bare ".," is indistinguishable from "etc.,")
     (re.compile(r"\?[ \t]*[.,](?!\.)"), "?"),            # "?." / "?,"   -> "?"
     (re.compile(r"![ \t]*[.,](?!\.)"), "!"),             # "!." / "!,"   -> "!"
     (re.compile(r"[ \t]+(?=[,.;:!?](?:[ \t]|$))"), ""),  # "word ."      -> "word."

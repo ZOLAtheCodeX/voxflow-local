@@ -347,7 +347,9 @@ final class TextCleanupServiceTests: XCTestCase {
     func testAbbreviationCommaPreserved() {
         XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("e.g., apples and pears"),
                        "e.g., apples and pears")
-        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("done., next"), "done. next")
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("done. , next"), "done. next")
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("done., next"), "done., next")
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("etc., and more"), "etc., and more")
     }
 
     func testNewlinesPreservedByRepair() {
