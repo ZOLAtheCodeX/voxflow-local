@@ -429,3 +429,27 @@ class TestWedgedProviderCircuitBreaker:
         for _ in range(4):
             engine.run("dictation to polish while ollama is down", "neutral")
         assert len(fast_dead.received) == 4, "fast failures must keep probing"
+
+
+class _MustNotBeCalledBackend:
+    name = "must-not-be-called"
+
+    def polish(self, *args, **kwargs):
+        raise AssertionError("provider backend called in rules-only mode")
+
+
+class TestRulesOnlyPolish:
+    def test_rules_only_serves_floor_with_rules_provenance(self):
+        engine = PolishEngine(chain=[(None, _MustNotBeCalledBackend())], rules_only=True)
+        out = engine.run("um hello hello world", "neutral")
+        assert out.served_by == "rules"
+        assert out.degraded_reason is None
+        assert out.fallback_depth == 0
+        assert out.guardrail_triggered is False
+        assert out.text == "Hello world."
+
+    def test_degraded_floor_still_reports_regex(self):
+        engine = PolishEngine(chain=[], rules_only=False)
+        out = engine.run("hello world", "neutral")
+        assert out.served_by == "regex"
+        assert out.degraded_reason == "backend_unavailable"

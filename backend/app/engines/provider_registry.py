@@ -43,6 +43,11 @@ logger = logging.getLogger("voxflow")
 KNOWN_KINDS = ("ollama", "openai_compat", "openai", "anthropic")
 DEFAULT_TASKS = ("polish", "smart_action")
 
+# Reserved chain id: a chain starting with "rules" means the user chose the
+# local rules/regex floor deliberately — no LLM provider runs for that task.
+# It is a chain concept, not a provider: a provider may never use this id.
+RULES_SENTINEL = "rules"
+
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 # Default endpoint for an openai_compat provider with no explicit base_url — a
@@ -137,6 +142,9 @@ def load_provider_config(path: Path | None = None) -> ProviderConfig:
         provider_id = str(entry.get("id", "")).strip()
         if not provider_id:
             continue
+        if provider_id == RULES_SENTINEL:
+            logger.warning("providers.json: %r is a reserved chain id — provider entry skipped", provider_id)
+            continue
         if kind not in KNOWN_KINDS:
             logger.warning("providers.json: unknown kind %r for id %r — skipped", kind, provider_id)
             continue
@@ -163,7 +171,10 @@ def load_provider_config(path: Path | None = None) -> ProviderConfig:
     raw_chains = raw.get("chains", {}) if isinstance(raw.get("chains", {}), dict) else {}
     for task in DEFAULT_TASKS:
         entries = raw_chains.get(task, [])
-        pruned = [str(e) for e in entries if str(e) in known_ids] if isinstance(entries, list) else []
+        pruned = [str(e) for e in entries if str(e) in known_ids or str(e) == RULES_SENTINEL] if isinstance(entries, list) else []
+        if RULES_SENTINEL in pruned:
+            # Entries after the sentinel are unreachable — normalize them away.
+            pruned = pruned[: pruned.index(RULES_SENTINEL) + 1]
         if not pruned:
             # Sensible default: ollama if declared, else the first provider.
             pruned = ["ollama"] if "ollama" in known_ids else [specs[0].id]
@@ -199,11 +210,23 @@ class ProviderRegistry:
         return backend
 
     def chain(self, task: str) -> list[tuple[ProviderSpec, object]]:
-        """Resolved (spec, backend) pairs for a task, in fallback order."""
+        """Resolved (spec, backend) pairs for a task, in fallback order.
+
+        A chain starting with RULES_SENTINEL resolves to [] — the caller
+        (PolishEngine with rules_only=True) serves the floor deliberately —
+        and the default-refill must NOT fire for it.
+        """
         ids = self._config.chains.get(task) or self._config.chains.get("polish") or []
-        if not ids and self._config.providers:
+        if RULES_SENTINEL in ids:
+            ids = ids[: ids.index(RULES_SENTINEL)]
+        elif not ids and self._config.providers:
             ids = [self._config.providers[0].id]
         return [(self.spec(pid), self.backend(pid)) for pid in ids]
+
+    def rules_only(self, task: str) -> bool:
+        """True when the task's chain deliberately starts at the rules floor."""
+        ids = self._config.chains.get(task) or []
+        return bool(ids) and ids[0] == RULES_SENTINEL
 
     def _construct(self, spec: ProviderSpec):
         from .llm_backend import (

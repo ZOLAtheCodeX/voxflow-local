@@ -287,3 +287,45 @@ class TestOllamaModelAutoResolution:
         monkeypatch.setenv("VOXFLOW_OLLAMA_MODEL", "gemma4:custom")
         registry = self._registry(ProviderSpec(id="ollama", kind="ollama"))
         assert registry.backend("ollama").model == "gemma4:custom"
+
+
+class TestRulesSentinel:
+    def _write(self, tmp_path, config):
+        p = tmp_path / "providers.json"
+        p.write_text(json.dumps(config), encoding="utf-8")
+        return p
+
+    def test_sentinel_survives_chain_pruning(self, tmp_path):
+        cfg = load_provider_config(self._write(tmp_path, {
+            "version": 1,
+            "providers": [{"id": "ollama", "kind": "ollama"}],
+            "chains": {"polish": ["rules"], "smart_action": ["ollama"]},
+        }))
+        assert cfg.chains["polish"] == ["rules"]
+
+    def test_entries_after_sentinel_are_truncated(self, tmp_path):
+        cfg = load_provider_config(self._write(tmp_path, {
+            "version": 1,
+            "providers": [{"id": "ollama", "kind": "ollama"}],
+            "chains": {"polish": ["rules", "ollama"], "smart_action": ["ollama"]},
+        }))
+        assert cfg.chains["polish"] == ["rules"]
+
+    def test_reserved_provider_id_is_skipped(self, tmp_path, caplog):
+        cfg = load_provider_config(self._write(tmp_path, {
+            "version": 1,
+            "providers": [{"id": "rules", "kind": "ollama"}, {"id": "ollama", "kind": "ollama"}],
+            "chains": {"polish": ["ollama"], "smart_action": ["ollama"]},
+        }))
+        assert [s.id for s in cfg.providers] == ["ollama"]
+
+    def test_chain_resolution_skips_sentinel_and_does_not_refill(self, tmp_path):
+        cfg = load_provider_config(self._write(tmp_path, {
+            "version": 1,
+            "providers": [{"id": "ollama", "kind": "ollama"}],
+            "chains": {"polish": ["rules"], "smart_action": ["ollama"]},
+        }))
+        registry = ProviderRegistry(cfg)
+        assert registry.chain("polish") == []
+        assert registry.rules_only("polish") is True
+        assert registry.rules_only("smart_action") is False
