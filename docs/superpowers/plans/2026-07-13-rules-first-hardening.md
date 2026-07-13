@@ -154,7 +154,7 @@ Append to `backend/app/text_cleanup_rules.py` (after `PHRASE_FILLERS`, before th
 PUNCT_ORPHAN_REPAIRS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r",[ \t]*(?:,[ \t]*)+"), ", "),          # ", ," / ",,"  -> ", "
     (re.compile(r",[ \t]*\.(?!\.)"), "."),               # ",." / ", ."  -> "."
-    (re.compile(r"(?<!\.)\.[ \t]*,"), "."),              # ".,"          -> "."
+    (re.compile(r"(?<![A-Za-z]\.[A-Za-z])(?<!\.)\.[ \t]*,"), "."),  # ".," -> "." (not after "e.g."-style abbreviations)
     (re.compile(r"\?[ \t]*[.,](?!\.)"), "?"),            # "?." / "?,"   -> "?"
     (re.compile(r"![ \t]*[.,](?!\.)"), "!"),             # "!." / "!,"   -> "!"
     (re.compile(r"[ \t]+(?=[,.;:!?](?:[ \t]|$))"), ""),  # "word ."      -> "word."
@@ -305,6 +305,12 @@ Append to `Tests/VoxFlowAppTests/TextCleanupServiceTests.swift` (read the file's
         XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("wait ..."), "wait ...")
     }
 
+    func testAbbreviationCommaPreserved() {
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("e.g., apples and pears"),
+                       "e.g., apples and pears")
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("done., next"), "done. next")
+    }
+
     func testNewlinesPreservedByRepair() {
         XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("one.\n\ntwo ."), "one.\n\ntwo.")
     }
@@ -367,7 +373,7 @@ In `Sources/VoxFlowApp/Models/TextCleanupRules.swift`, add (near `phraseFillers`
     static let punctOrphanRepairs: [(String, String)] = [
         (#",[ \t]*(?:,[ \t]*)+"#, ", "),
         (#",[ \t]*\.(?!\.)"#, "."),
-        (#"(?<!\.)\.[ \t]*,"#, "."),
+        (#"(?<![A-Za-z]\.[A-Za-z])(?<!\.)\.[ \t]*,"#, "."),
         (#"\?[ \t]*[.,](?!\.)"#, "?"),
         (#"![ \t]*[.,](?!\.)"#, "!"),
         (#"[ \t]+(?=[,.;:!?](?:[ \t]|$))"#, ""),
