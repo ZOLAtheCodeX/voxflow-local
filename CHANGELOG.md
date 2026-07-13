@@ -47,6 +47,12 @@ All notable changes to VoxFlow Local are documented here. The format follows
   palette and a Recent Captures section in the Dashboard (mode, served-by,
   target, duration, confidence, reject reason, reveal-retained-audio), read
   from `insertions.jsonl`. Read-only; no capture-path changes.
+- "Local rules only" polish setting: a reserved `rules` chain id that serves
+  the regex floor deliberately (`served_by=rules`, neutral indicator) and
+  never probes or loads a local LLM for polish. Smart actions unchanged.
+- Corpus-backed cleanup rules (mirrored Swift/Python, shared parity
+  fixture): punctuation-orphan repair, punctuation-aware filler matching,
+  stutter dedup, ellipsis recase exclusion.
 
 ### Fixed
 - A stability review (four parallel review agents, 23 verified findings,
