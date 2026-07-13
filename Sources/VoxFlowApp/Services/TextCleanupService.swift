@@ -18,8 +18,13 @@ enum TextCleanupService {
     }
 
     static func removeRepeatedWords(_ text: String) -> String {
-        let words = text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        guard words.count > 1 else { return text }
+        let destuttered = text.replacingOccurrences(
+            of: TextCleanupRules.stutterPrefixPattern,
+            with: "$2",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        let words = destuttered.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        guard words.count > 1 else { return destuttered }
 
         var result = [words[0]]
         for i in 1..<words.count {
@@ -30,13 +35,31 @@ enum TextCleanupService {
         return result.joined(separator: " ")
     }
 
+    /// Collapse punctuation stranded by filler/phrase removal (corpus-backed).
+    /// Ellipsis and newlines are protected by the patterns themselves.
+    static func repairPunctuationOrphans(_ text: String) -> String {
+        var result = text
+        for (pattern, replacement) in TextCleanupRules.punctOrphanRepairs {
+            result = result.replacingOccurrences(
+                of: pattern, with: replacement, options: .regularExpression)
+        }
+        return result
+    }
+
     static func splitAndRecase(_ text: String) -> String {
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text
 
         var nlSentences: [String] = []
         tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
-            nlSentences.append(String(text[range]).trimmingCharacters(in: .whitespaces))
+            let sentence = String(text[range]).trimmingCharacters(in: .whitespaces)
+            // A fragment boundary at "..." is a hesitation, not a sentence
+            // end — merge it back so the next word is not recapitalized.
+            if let last = nlSentences.last, last.hasSuffix("...") {
+                nlSentences[nlSentences.count - 1] = last + " " + sentence
+            } else {
+                nlSentences.append(sentence)
+            }
             return true
         }
 
@@ -45,8 +68,9 @@ enum TextCleanupService {
         var sentences: [String] = []
         for chunk in nlSentences {
             // Insert a sentinel after sentence-ending punctuation + space
+            // The (?<!\.\.) lookbehind prevents splitting at the final dot of "..."
             let marked = chunk.replacingOccurrences(
-                of: #"([.!?])\s+"#,
+                of: #"(?<!\.\.)([.!?])\s+"#,
                 with: "$1\u{001E}",
                 options: .regularExpression
             )
@@ -82,9 +106,15 @@ enum TextCleanupService {
         }
         result = normalizeWhitespace(result)
 
-        // Pass 1: Remove always-fillers
+        // Pass 1: Remove always-fillers. Tokens are checked with their
+        // leading/trailing punctuation stripped so "Uh..." / "um," match too
+        // (exact-token matching let them survive — corpus finding 2026-07-13).
+        let fillerPunct = CharacterSet(charactersIn: ".,;:!?…\"'()[]")
         let words = result.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        let afterAlways = words.filter { !TextCleanupRules.alwaysFillers.contains($0.lowercased()) }
+        let afterAlways = words.filter { word in
+            let core = word.trimmingCharacters(in: fillerPunct).lowercased()
+            return core.isEmpty || !TextCleanupRules.alwaysFillers.contains(core)
+        }
         result = afterAlways.joined(separator: " ")
 
         // Pass 2: POS-aware removal of ambiguous fillers
@@ -135,6 +165,9 @@ enum TextCleanupService {
 
         // Step 5: Filler removal
         result = removeFillers(result)
+
+        // Step 5.5: Punctuation-orphan repair (corpus-backed 2026-07-13)
+        result = repairPunctuationOrphans(result)
 
         // Re-normalize after removals
         result = normalizeWhitespace(result)
