@@ -23,7 +23,7 @@ enum TextCleanupRules {
     ]
 
     static let ambiguousFillers: Set<String> = [
-        "like", "so", "right", "actually", "basically", "literally",
+        "like", "so", "actually", "basically", "literally",
         "anyway", "anyways"
     ]
 
@@ -132,4 +132,23 @@ enum TextCleanupRules {
         (#"\byeah\b"#, "yes"),
         (#"\bnope\b"#, "no"),
     ]
+
+    // ── Punctuation-orphan repair (corpus-backed, 2026-07-13) ────────
+    // Mirror of PUNCT_ORPHAN_REPAIRS in backend/app/text_cleanup_rules.py —
+    // keep the two lists in lockstep (cleanup_rules_parity.json pins them).
+    // [ \t] only (never \s) so "new paragraph" newlines survive; (?!\.)
+    // guards keep "..." from collapsing.
+    static let punctOrphanRepairs: [(String, String)] = [
+        (#",[ \t]*(?:,[ \t]*)+"#, ", "),
+        (#",[ \t]*\.(?!\.)"#, "."),
+        (#"(?<![A-Za-z]\.[A-Za-z])(?<!\.)\.[ \t]*,"#, "."),
+        (#"\?[ \t]*[.,](?!\.)"#, "?"),
+        (#"![ \t]*[.,](?!\.)"#, "!"),
+        (#"[ \t]+(?=[,.;:!?](?:[ \t]|$))"#, ""),
+    ]
+
+    // ── Stutter prefixes (corpus-backed, 2026-07-13) ─────────────────
+    // "G-G-Gamma" -> "Gamma"; >= 2 stutter letters required so D-Day /
+    // T-shirt / X-ray never match. Mirror of STUTTER_PREFIX (python).
+    static let stutterPrefixPattern = #"\b(\w)-(?:\1-)+(\1\w*)"#
 }

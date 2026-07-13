@@ -321,4 +321,75 @@ final class TextCleanupServiceTests: XCTestCase {
             ""
         )
     }
+
+    // MARK: - Punctuation-orphan repair (corpus-backed 2026-07-13)
+
+    func testOrphanCommaPairCollapses() {
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("pretty, , in your face"),
+                       "pretty, in your face")
+    }
+
+    func testCommaDotResolvesToDot() {
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("the model,. sometimes"),
+                       "the model. sometimes")
+    }
+
+    func testSpaceBeforePeriodRemoved() {
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("what it looks ."),
+                       "what it looks.")
+    }
+
+    func testEllipsisNeverCollapses() {
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("wait... what"), "wait... what")
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("wait ..."), "wait ...")
+    }
+
+    func testAbbreviationCommaPreserved() {
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("e.g., apples and pears"),
+                       "e.g., apples and pears")
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("done., next"), "done. next")
+    }
+
+    func testNewlinesPreservedByRepair() {
+        XCTAssertEqual(TextCleanupService.repairPunctuationOrphans("one.\n\ntwo ."), "one.\n\ntwo.")
+    }
+
+    // MARK: - Punctuation-aware fillers
+
+    func testFillerWithTrailingEllipsisRemoved() {
+        XCTAssertEqual(TextCleanupService.removeFillers("uh... testing the mic"), "testing the mic")
+    }
+
+    func testUhHuhIsNotAFiller() {
+        XCTAssertEqual(TextCleanupService.removeFillers("uh-huh sounds right"), "uh-huh sounds right")
+    }
+
+    // MARK: - Stutter dedup
+
+    func testDoubleStutterCollapses() {
+        XCTAssertEqual(TextCleanupService.removeRepeatedWords("the G-G-Gamma model"), "the Gamma model")
+    }
+
+    func testDDayUntouched() {
+        XCTAssertEqual(TextCleanupService.removeRepeatedWords("on D-Day we landed"), "on D-Day we landed")
+    }
+
+    // MARK: - Ellipsis recase
+
+    func testMidtextEllipsisIsNotASentenceBoundary() {
+        XCTAssertEqual(TextCleanupService.splitAndRecase("ok. was pretty... good today"),
+                       "Ok. Was pretty... good today")
+    }
+
+    // MARK: - Light pipeline end to end
+
+    func testPhraseFillerOrphanHeals() {
+        XCTAssertEqual(TextCleanupService.cleanup("it's pretty, you know, in your face", mode: .light, tone: .neutral),
+                       "It's pretty, in your face.")
+    }
+
+    func testHesitationEllipsisStaysLowercase() {
+        XCTAssertEqual(TextCleanupService.cleanup("that was pretty... good I think", mode: .light, tone: .neutral),
+                       "That was pretty... good I think.")
+    }
 }
