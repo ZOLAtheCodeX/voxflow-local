@@ -6,6 +6,15 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-07-13
+
+A forensics and rules-first release: the field-reported capture-loss class
+was root-caused and instrumented (rejected audio retained, receipts
+enriched), a four-agent stability review closed 23 verified findings, and
+the rules/regex pipeline became a first-class citizen — visible per capture
+in the new pipeline viewer, selectable as a never-load-an-LLM polish mode,
+and measurably better at healing real dictation artifacts.
+
 ### Added
 - Capture-loss forensics: rejected captures are retained as WAV clips
   (newest 8, local-only, `~/Library/Logs/VoxFlow/rejected_audio/`, disable
