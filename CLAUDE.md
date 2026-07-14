@@ -61,7 +61,7 @@ swift build && swift run VoxFlowLocal      # frontend (requires backend running)
 ```
 
 - Swift 6.2 strict concurrency, macOS 14+ deployment target
-- Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.10.0, transformers 5.3.0
+- Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.10.0, transformers 5.5.0
 - Health: `curl http://127.0.0.1:8765/v1/health` · Readiness: `curl http://127.0.0.1:8765/v1/ready`
 
 ### Ollama (text polish)
@@ -135,8 +135,8 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 ## Testing
 
 ```bash
-swift test                                              # ~643 Swift tests
-./.venv/bin/python -m pytest backend/tests              # ~519 Python tests (+26 model/live-Ollama skipped)
+swift test                                              # ~689 Swift tests
+./.venv/bin/python -m pytest backend/tests              # ~551 Python tests (+26 model/live-Ollama skipped)
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
 VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py  # live Ollama acceptance
