@@ -80,6 +80,12 @@ All notable changes to VoxFlow Local are documented here. The format follows
   self-heals after connection-level failures.
 
 ### Security
+- transformers bumped 5.3.0 → 5.5.0, closing CVE-2026-5241 (arbitrary code
+  execution in the LightGlue model-loading path — not reachable as
+  configured since VoxFlow never loads LightGlue, but fixed at the source
+  anyway). Validated against the real-model STT regression suite: 14/14
+  clips, p50 713 ms vs the 5.3.0 baseline's 707 ms measured immediately
+  prior.
 - transformers bumped 4.56 → 5.3.0 (with huggingface-hub 0.34 → 1.22),
   actually fixing CVE-2026-4372 rather than relying on the dismissed-alert
   mitigations (WhisperKit default, offline mode, official models).
