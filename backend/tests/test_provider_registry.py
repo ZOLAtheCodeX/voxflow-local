@@ -15,6 +15,7 @@ from engines.provider_registry import (  # noqa: E402
     ProviderRegistry,
     ProviderSpec,
     is_local_url,
+    is_ollama_cloud_model,
     load_provider_config,
 )
 
@@ -329,3 +330,25 @@ class TestRulesSentinel:
         assert registry.chain("polish") == []
         assert registry.rules_only("polish") is True
         assert registry.rules_only("smart_action") is False
+
+
+class TestOllamaCloudModels:
+    """Ollama serves hosted models under a ':cloud' tag (kimi-k3:cloud,
+    deepseek-v4-pro:cloud); /api/tags reports remote_host=https://ollama.com.
+    The request still goes to localhost:11434 but the text leaves the machine,
+    so they are CLOUD: redaction on, memory guard off (zero local RAM)."""
+
+    def test_cloud_tag_is_cloud(self) -> None:
+        assert ProviderSpec(id="k", kind="ollama", model="kimi-k3:cloud").is_cloud is True
+
+    def test_local_model_stays_local(self) -> None:
+        assert ProviderSpec(id="g", kind="ollama", model="gemma4:e2b-mlx").is_cloud is False
+
+    def test_no_model_stays_local(self) -> None:
+        assert ProviderSpec(id="g", kind="ollama").is_cloud is False
+
+    def test_helper_is_case_insensitive_and_nil_safe(self) -> None:
+        assert is_ollama_cloud_model("Kimi-K3:CLOUD") is True
+        assert is_ollama_cloud_model("gemma4:e2b-mlx") is False
+        assert is_ollama_cloud_model(None) is False
+        assert is_ollama_cloud_model("") is False

@@ -72,6 +72,18 @@ def is_local_url(base_url: str | None) -> bool:
     return host in _LOCAL_HOSTS
 
 
+# Ollama serves hosted models under a ":cloud" tag (e.g. "kimi-k3:cloud");
+# /api/tags reports them with remote_host=https://ollama.com. The request
+# still goes to localhost:11434, but the text leaves the machine — so for
+# redaction they are CLOUD, and for the memory guard they cost no local RAM.
+OLLAMA_CLOUD_TAG = ":cloud"
+
+
+def is_ollama_cloud_model(model: str | None) -> bool:
+    """True when an Ollama model id names a hosted (ollama.com) model."""
+    return bool(model) and model.strip().lower().endswith(OLLAMA_CLOUD_TAG)
+
+
 @dataclass(frozen=True)
 class ProviderSpec:
     id: str
@@ -90,7 +102,10 @@ class ProviderSpec:
     @property
     def is_cloud(self) -> bool:
         if self.kind == "ollama":
-            # Default Ollama endpoint is localhost; explicit base_url decides.
+            # A ':cloud' model is served by ollama.com regardless of base_url;
+            # otherwise the default endpoint is localhost and base_url decides.
+            if is_ollama_cloud_model(self.model):
+                return True
             return not is_local_url(self.base_url or "http://localhost:11434")
         if self.kind == "openai_compat":
             # Classify with the SAME resolved URL the backend will call (the
