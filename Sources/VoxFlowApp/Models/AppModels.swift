@@ -792,6 +792,10 @@ struct SmartActionResult: Sendable, Equatable {
     let output: String
     let guardrailTriggered: Bool
     let error: String?
+    /// Why the chain fell to the floor when `error == "provider_unavailable"`
+    /// (`memory_pressure` / `provider_wedged` / `backend_unavailable`), so the
+    /// cockpit can say what actually happened instead of "configure a provider".
+    var degradedReason: String? = nil
 }
 
 struct AppliedAction: Codable, Sendable, Equatable {

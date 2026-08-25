@@ -87,10 +87,21 @@ final class CockpitCoordinator: ObservableObject {
 
     /// User-facing message for a smart-action soft error. Provider-neutral so it
     /// stays accurate whatever the configured chain (Ollama, LM Studio, cloud).
-    static func smartActionErrorMessage(_ action: SmartActionId, error: String) -> String {
+    /// `degradedReason` is the backend's floor reason: the provider may be fine
+    /// and the memory guard refused, which must NOT read as "configure a provider".
+    static func smartActionErrorMessage(
+        _ action: SmartActionId, error: String, degradedReason: String? = nil
+    ) -> String {
         switch error {
         case "provider_unavailable":
-            return "\(action.label): no LLM provider is ready — configure one in Settings"
+            switch degradedReason {
+            case "memory_pressure":
+                return "\(action.label) paused: memory pressure is critical — close some apps and retry"
+            case "provider_wedged":
+                return "\(action.label) paused: the LLM runner is not responding — run `ollama stop` and retry"
+            default:
+                return "\(action.label): no LLM provider is ready — check Ollama or configure one in Settings"
+            }
         default:
             return "\(action.label) failed: \(error)"
         }
@@ -103,7 +114,7 @@ final class CockpitCoordinator: ObservableObject {
         // unchanged — the direct chip/voice path used to discard it, unlike
         // ChainExecutor. Don't count it as an invocation or record history.
         if let error = result.error {
-            state.statusLine = Self.smartActionErrorMessage(action, error: error)
+            state.statusLine = Self.smartActionErrorMessage(action, error: error, degradedReason: result.degradedReason)
             return result
         }
         state.chipInvocationCounts[action, default: 0] += 1

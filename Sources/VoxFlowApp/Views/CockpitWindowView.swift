@@ -178,7 +178,9 @@ struct CockpitWindowView: View {
                 let result = try await coordinator.applyAction(action, to: transcript)
                 // A soft error (e.g. provider_unavailable) is returned, not
                 // thrown — surface it rather than treating it as success.
-                lastError = result.error.map { CockpitCoordinator.smartActionErrorMessage(action, error: $0) }
+                lastError = result.error.map {
+                    CockpitCoordinator.smartActionErrorMessage(action, error: $0, degradedReason: result.degradedReason)
+                }
             } catch {
                 lastError = "\(action.label) failed: \(error.localizedDescription)"
             }
