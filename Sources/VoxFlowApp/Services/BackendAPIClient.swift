@@ -329,12 +329,14 @@ enum BackendAPIClient {
             let output: String
             let guardrailTriggered: Bool
             let error: String?
+            let degradedReason: String?
 
             enum CodingKeys: String, CodingKey {
                 case actionId = "action_id"
                 case output
                 case guardrailTriggered = "guardrail_triggered"
                 case error
+                case degradedReason = "degraded_reason"
             }
         }
 
@@ -351,7 +353,8 @@ enum BackendAPIClient {
             actionId: actionId,
             output: parsed.output,
             guardrailTriggered: parsed.guardrailTriggered,
-            error: parsed.error
+            error: parsed.error,
+            degradedReason: parsed.degradedReason
         )
     }
 

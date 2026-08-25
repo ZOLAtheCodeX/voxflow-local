@@ -296,6 +296,32 @@ final class CockpitCoordinatorTests: XCTestCase {
         makeCoordinator(backend: EchoSmartActionBackend())
     }
 
+    func test_smartActionErrorMessage_names_memory_pressure() {
+        let msg = CockpitCoordinator.smartActionErrorMessage(
+            .memo, error: "provider_unavailable", degradedReason: "memory_pressure")
+        XCTAssertTrue(msg.lowercased().contains("memory pressure"), msg)
+        XCTAssertFalse(msg.lowercased().contains("configure"), "the provider is fine — do not send the user to Settings")
+    }
+
+    func test_smartActionErrorMessage_names_wedged_runner() {
+        let msg = CockpitCoordinator.smartActionErrorMessage(
+            .memo, error: "provider_unavailable", degradedReason: "provider_wedged")
+        XCTAssertTrue(msg.contains("ollama stop"), msg)
+    }
+
+    /// The backend refuses with degraded_reason when the memory guard (not a
+    /// missing provider) kept the action from running; the status line must
+    /// say that instead of sending the user to Settings.
+    func test_applyAction_surfaces_memory_pressure_reason() async throws {
+        let (state, coord, _, _) = makeCoordinator(backend: MemoryPressureSmartActionBackend())
+
+        let result = try await coord.applyAction(.memo, to: "raw transcript")
+
+        XCTAssertEqual(result.degradedReason, "memory_pressure")
+        XCTAssertTrue(state.statusLine.lowercased().contains("memory pressure"), state.statusLine)
+        XCTAssertEqual(state.chipInvocationCounts[.memo, default: 0], 0)
+    }
+
     private func makeCoordinator(
         backend: SmartActionBackend,
         snippetStore: SnippetStore? = nil
@@ -365,5 +391,13 @@ private final class EchoSmartActionBackend: SmartActionBackend, @unchecked Senda
             guardrailTriggered: false,
             error: nil
         )
+    }
+}
+
+private final class MemoryPressureSmartActionBackend: SmartActionBackend, @unchecked Sendable {
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        SmartActionResult(
+            actionId: action, output: transcript, guardrailTriggered: false,
+            error: "provider_unavailable", degradedReason: "memory_pressure")
     }
 }
