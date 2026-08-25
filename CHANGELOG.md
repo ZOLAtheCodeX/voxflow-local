@@ -8,9 +8,11 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ### Fixed
 - Gemma polish and smart actions no longer spend seconds on hidden
-  "thinking": Ollama chat requests now send `think: false` (measured warm
-  polish on gemma4:e2b-mlx: 6.0 s with ~370 hidden reasoning tokens vs
-  0.26 s without). `VOXFLOW_OLLAMA_THINK=1` re-enables reasoning.
+  "thinking": Ollama chat requests now send `think: false`. Measured on
+  gemma4:e2b-mlx (M1 Pro 16 GB): a warm 30-word polish took 6.0 s with
+  ~370 hidden reasoning tokens vs 0.26 s without; the 24-case golden
+  benchmark now runs at p50 327 ms / p95 654 ms steady (cold load 7.0 s).
+  `VOXFLOW_OLLAMA_THINK=1` re-enables reasoning.
 - Smart actions work on 16 GB machines again: the memory-pressure guard
   skips local providers for smart actions only at CRITICAL pressure
   (polish on the dictation hot path still yields at WARN, where such
