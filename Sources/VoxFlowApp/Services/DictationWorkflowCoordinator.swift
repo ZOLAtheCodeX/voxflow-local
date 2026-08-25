@@ -90,7 +90,13 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
         // the backend provider chain. Use it when warm, then fall back to the
         // Swift cleanup pipeline so dictation never hard-depends on Ollama.
         if request.providerMode == .localOnly && request.sttBackend == .whisperKit {
-            if state.backendReadiness.readyForDictation {
+            // Rules-only polish (Settings → "Local rules only"): the backend
+            // would serve the identical regex floor over HTTP — minus the
+            // POS-aware ambiguous-filler pass only the Swift pipeline has. Serve
+            // it in-app: no round trip, no backend dependency on the hottest
+            // path, and the stronger ruleset.
+            let rulesOnly = state.backendReadiness.activePolishProvider == ProviderConfigStore.rulesSentinel
+            if state.backendReadiness.readyForDictation && !rulesOnly {
                 do {
                     try await processBackendCleanup(request, recordStage: recordStage)
                     return
@@ -113,6 +119,7 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 }
             }
 
+            let localProvenance = rulesOnly ? PolishProvenance.rulesInApp : PolishProvenance.inApp
             let cleanupStarted = ContinuousClock.now
             let lightStarted = ContinuousClock.now
             let lightText = TextCleanupService.cleanup(request.rawText, mode: .light, tone: request.toneStyle)
@@ -130,9 +137,10 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 confidence: request.lastTranscriptionConfidence,
                 timestamp: Date(),
                 targetProcessIdentifier: request.targetApp?.processIdentifier,
-                // Both modes came from the in-app TextCleanupService (backend cold).
-                lightProvenance: PolishProvenance.inApp,
-                polishProvenance: PolishProvenance.inApp,
+                // Both modes came from the in-app TextCleanupService — chosen
+                // (rules-only) or because the backend was cold.
+                lightProvenance: localProvenance,
+                polishProvenance: localProvenance,
                 audioSeconds: request.audioSeconds,
                 rmsEnergy: request.rmsEnergy,
                 peakAmplitude: request.peakAmplitude,

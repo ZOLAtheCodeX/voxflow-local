@@ -130,6 +130,38 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         XCTAssertNotNil(timing.cleanupMs)
     }
 
+    /// Rules-only polish (Settings → "Local rules only"): the backend would
+    /// serve the same regex floor over HTTP minus the POS-aware filler pass
+    /// only the Swift pipeline has. Serve it in-app with its own provenance.
+    @MainActor func testRulesOnlyPolishServesInAppWithoutBackendRoundTrip() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = true
+        state.backendReadiness.activePolishProvider = ProviderConfigStore.rulesSentinel
+        state.focusTarget = FocusTargetSnapshot(
+            hasFocusedTextInput: true, hasInsertionCursor: true, appName: "Notes",
+            bundleID: "com.apple.Notes", role: "AXTextField", processIdentifier: nil)
+        DictationMockURLProtocol.requestHandler = { request in
+            XCTFail("rules-only cleanup must not round-trip the backend, hit \(request.url?.path ?? "?")")
+            throw URLError(.badServerResponse)
+        }
+
+        var recordedStages: [String] = []
+        let request = DictationWorkflowRequest(
+            sessionID: "dictation-rules", rawText: "um hello world", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .autoInsertLight, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.95, targetApp: nil)
+
+        try await sut.processDictation(request) { name, _, _ in recordedStages.append(name) }
+
+        XCTAssertEqual(textInsertion.insertedText, "Hello world.")
+        XCTAssertTrue(recordedStages.contains("cleanup_light_local"))
+        XCTAssertFalse(recordedStages.contains("cleanup_light_api"))
+        XCTAssertEqual(textInsertion.statusSuffix?.contains(PolishProvenance.rulesInApp), true,
+                       "status was \(textInsertion.statusSuffix ?? "nil")")
+        XCTAssertEqual(state.transcriptCandidate?.lightProvenance, PolishProvenance.rulesInApp)
+    }
+
     @MainActor func testLocalDictationAutoInsertRaw() async throws {
         let (sut, state, textInsertion, _) = makeSUT()
         state.focusTarget = FocusTargetSnapshot(
