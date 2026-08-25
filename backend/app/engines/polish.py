@@ -69,6 +69,16 @@ class PolishEngine:
     _WEDGE_COOLDOWN_S = 120.0
     _WEDGE_TIMEOUT_FRACTION = 0.8
 
+    # Memory-pressure skip thresholds (kern.memorystatus_vm_pressure_level:
+    # 1 normal, 2 warn, 4 critical). Polish sits on the dictation hot path
+    # and yields at WARN so the resident LLM never competes with live
+    # capture. Smart actions run in the cockpit's review state with no
+    # capture live, so they yield only at CRITICAL: a 16 GB machine rests at
+    # warn (measured 2026-08-24), and the shared threshold had turned every
+    # smart action into `provider_unavailable`.
+    _POLISH_PRESSURE_SKIP_LEVEL = 2
+    _SMART_ACTION_PRESSURE_SKIP_LEVEL = 4
+
     def __init__(
         self,
         backend: TextLLMBackend | None = None,
@@ -182,13 +192,17 @@ class PolishEngine:
         # Called through the module so tests can monkeypatch the source.
         guard_enabled = os.environ.get("VOXFLOW_POLISH_MEMORY_GUARD", "1").strip() != "0"
         pressure = llm_backend.detect_memory_pressure_level() if guard_enabled else 1
+        skip_level = (
+            self._SMART_ACTION_PRESSURE_SKIP_LEVEL if system_prompt is not None
+            else self._POLISH_PRESSURE_SKIP_LEVEL
+        )
         memory_skipped = False
 
         redacted_text: str | None = None
         wedge_skipped = False
         for depth, (spec, backend) in enumerate(self._chain):
             is_cloud = bool(spec and spec.is_cloud)
-            if not is_cloud and pressure >= 2:
+            if not is_cloud and pressure >= skip_level:
                 if not memory_skipped:
                     logger.info(
                         "Memory pressure level %d — skipping local polish provider(s); cloud chain entries still run",

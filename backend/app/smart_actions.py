@@ -131,6 +131,10 @@ class SmartActionEngine:
                         output=transcript,
                         guardrail_triggered=False,
                         error="provider_unavailable",
+                        # Why the floor served (memory_pressure / provider_wedged /
+                        # backend_unavailable) so the cockpit can say so instead
+                        # of "configure a provider" when the provider is fine.
+                        degraded_reason=outcome.degraded_reason,
                     )
                 return SmartActionResult(
                     action_id=action_id,

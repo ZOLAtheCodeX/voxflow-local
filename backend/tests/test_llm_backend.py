@@ -790,3 +790,66 @@ class TestOllamaThinking:
     def test_env_garbage_means_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("VOXFLOW_OLLAMA_THINK", "maybe")
         assert self._sent_body()["think"] is False
+
+
+class _SystemPromptFakeBackend:
+    """Fake accepting the smart-action system_prompt kwarg (the module-level
+    _FakeBackend deliberately lacks it to exercise the legacy TypeError path)."""
+
+    name = "fake"
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.calls: list[str] = []
+
+    def polish(self, text, tone, system_prompt=None, model=None, timeout=None):
+        self.calls.append(text)
+        return self.response
+
+
+class TestSmartActionMemoryPressure:
+    """Smart actions run in the cockpit's review state with no capture live,
+    so they yield only at CRITICAL pressure (4). Polish stays gated at WARN
+    (2): it sits on the dictation hot path. A 16 GB machine rests at warn
+    (measured 2026-08-24), which made the shared threshold a permanent off
+    switch for smart actions."""
+
+    _PROMPT = "Restructure as a memo."
+
+    def test_smart_action_runs_at_warn_pressure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 2)
+        local = _SystemPromptFakeBackend("# Issue\nmemo body")
+        engine = PolishEngine(chain=[(ProviderSpec(id="ollama", kind="ollama"), local)])
+
+        out = engine.run("some transcript text", "neutral", system_prompt=self._PROMPT)
+
+        assert local.calls == ["some transcript text"]
+        assert out.served_by == "ollama"
+        assert out.degraded_reason is None
+
+    def test_smart_action_skips_at_critical_pressure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 4)
+        local = _SystemPromptFakeBackend("# Issue\nmemo body")
+        engine = PolishEngine(chain=[(ProviderSpec(id="ollama", kind="ollama"), local)])
+
+        out = engine.run("some transcript text", "neutral", system_prompt=self._PROMPT)
+
+        assert local.calls == []
+        assert out.served_by == "regex"
+        assert out.degraded_reason == "memory_pressure"
+
+    def test_polish_still_skips_at_warn_pressure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 2)
+        local = _SystemPromptFakeBackend("Polished.")
+        engine = PolishEngine(chain=[(ProviderSpec(id="ollama", kind="ollama"), local)])
+
+        out = engine.run("send the weekly report before friday", "neutral")
+
+        assert local.calls == []
+        assert out.degraded_reason == "memory_pressure"
