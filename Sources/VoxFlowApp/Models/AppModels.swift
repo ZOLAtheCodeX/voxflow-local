@@ -455,6 +455,16 @@ struct TranscriptCandidate: Identifiable {
     }
 }
 
+/// Per-capture latency context threaded from the pipeline trace into the
+/// insert receipt (session 32). The trace already measured these stages, but
+/// nothing persisted them, so field latency was unobservable.
+struct InsertTimingContext: Sendable {
+    /// Pipeline origin: the moment the user released the hotkey.
+    let pipelineStartedAt: ContinuousClock.Instant
+    let sttMs: Int?
+    let cleanupMs: Int?
+}
+
 struct InsertResult {
     let method: InsertMethod
     let success: Bool

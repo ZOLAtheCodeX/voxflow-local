@@ -18,6 +18,10 @@ struct DictationWorkflowRequest {
     var rmsEnergy: Double? = nil
     var peakAmplitude: Double? = nil
     var tailGapSeconds: Double? = nil
+    /// Latency forensics (session 32): pipeline origin (hotkey release) and the
+    /// STT stage ms, so the insert receipt can carry total latency.
+    var pipelineStartedAt: ContinuousClock.Instant? = nil
+    var sttMs: Int? = nil
 }
 
 @MainActor
@@ -71,7 +75,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             // NOT insert — propagate as cancellation, not a silent insert.
             try Task.checkCancellation()
             let insertStarted = ContinuousClock.now
-            if await textInsertion.insertText(request.rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: request.targetApp) {
+            let timing = Self.timingContext(for: request, cleanupMs: 0)
+            if await textInsertion.insertText(request.rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: request.targetApp, timing: timing) {
                 recordStage("insert", insertStarted, "mode=raw")
                 state.sessionState = .idle
             } else {
@@ -108,12 +113,14 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
                 }
             }
 
+            let cleanupStarted = ContinuousClock.now
             let lightStarted = ContinuousClock.now
             let lightText = TextCleanupService.cleanup(request.rawText, mode: .light, tone: request.toneStyle)
             recordStage("cleanup_light_local", lightStarted, "tone=\(request.toneStyle.rawValue)")
             let polishStarted = ContinuousClock.now
             let polishText = TextCleanupService.cleanup(request.rawText, mode: .polish, tone: request.toneStyle)
             recordStage("cleanup_polish_local", polishStarted, "tone=\(request.toneStyle.rawValue)")
+            let cleanupMs = cleanupStarted.elapsedMilliseconds()
 
             let candidate = TranscriptCandidate(
                 rawText: request.rawText,
@@ -135,7 +142,7 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             state.selectedMode = .raw
             pushToSessionMemory(candidate)
 
-            try await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage)
+            try await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage, cleanupMs: cleanupMs)
             return
         }
 
@@ -153,6 +160,7 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
         // Review and private-API still resolve both modes via the backend:
         // the user toggles between them, so both must be real LLM output.
         let autoMode = request.providerMode == .localOnly ? request.insertBehavior.cleanupMode : nil
+        let cleanupStarted = ContinuousClock.now
 
         let lightText: String
         let polishText: String
@@ -201,6 +209,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             polishProvenance = PolishProvenance.label(servedBy: polishResponse.servedBy, modelId: polishResponse.modelId)
         }
 
+        let cleanupMs = cleanupStarted.elapsedMilliseconds()
+
         // Private-API: default to .light so the redacted/cleaned version
         // is shown first — .raw would expose the unredacted original.
         let defaultMode: CleanupMode = request.providerMode == .privateAPI ? .light : .raw
@@ -223,7 +233,15 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
         state.selectedMode = defaultMode
         if request.providerMode == .localOnly { pushToSessionMemory(candidate) }
 
-        try await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage)
+        try await autoInsertOrReview(candidate: candidate, request: request, recordStage: recordStage, cleanupMs: cleanupMs)
+    }
+
+    /// Builds the receipt timing context when the caller supplied a pipeline
+    /// origin (quick dictation does; re-inserts and snippets don't).
+    private static func timingContext(for request: DictationWorkflowRequest, cleanupMs: Int?) -> InsertTimingContext? {
+        request.pipelineStartedAt.map {
+            InsertTimingContext(pipelineStartedAt: $0, sttMs: request.sttMs, cleanupMs: cleanupMs)
+        }
     }
 
     /// One backend cleanup round-trip, timed and recorded under the existing
@@ -252,7 +270,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
     private func autoInsertOrReview(
         candidate: TranscriptCandidate,
         request: DictationWorkflowRequest,
-        recordStage: WorkflowStageRecorder
+        recordStage: WorkflowStageRecorder,
+        cleanupMs: Int?
     ) async throws {
         // Auto-insert light/polish
         if let autoMode = request.insertBehavior.cleanupMode, request.providerMode == .localOnly {
@@ -268,7 +287,8 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             let provenance = candidate.provenance(for: autoMode)
             let provenanceTag = (provenance.map { $0.isEmpty ? "" : " · \($0)" }) ?? ""
             let insertStarted = ContinuousClock.now
-            if await textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel)\(provenanceTag) — \(appLabel))", targetApp: request.targetApp) {
+            let timing = Self.timingContext(for: request, cleanupMs: cleanupMs)
+            if await textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel)\(provenanceTag) — \(appLabel))", targetApp: request.targetApp, timing: timing) {
                 recordStage("insert", insertStarted, "mode=\(autoMode.rawValue)")
                 state.sessionState = .idle
             } else {

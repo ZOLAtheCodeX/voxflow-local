@@ -168,4 +168,31 @@ final class InsertionAuditLogTests: XCTestCase {
         let rotated = tempURL.deletingPathExtension().appendingPathExtension("1.jsonl")
         XCTAssertTrue(FileManager.default.fileExists(atPath: rotated.path))
     }
+
+    /// Latency forensics (session 32): stage timings were computed per capture
+    /// and never persisted, so field latency was unobservable. Inserts now
+    /// carry stt/cleanup/insert/total ms and the insert method.
+    func testInsertReceiptCarriesStageTimings() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordInsertion(
+            text: "hello world", targetApp: "Notes", source: "quick_dictation", confidence: 0.91,
+            sttMs: 640, cleanupMs: 3, insertMs: 45, totalMs: 702, insertMethod: "simulatedPaste")
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["stt_ms"] as? Int, 640)
+        XCTAssertEqual(obj?["cleanup_ms"] as? Int, 3)
+        XCTAssertEqual(obj?["insert_ms"] as? Int, 45)
+        XCTAssertEqual(obj?["total_ms"] as? Int, 702)
+        XCTAssertEqual(obj?["insert_method"] as? String, "simulatedPaste")
+    }
+
+    func testInsertReceiptOmitsTimingKeysWhenAbsent() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordInsertion(text: "hello", targetApp: "Notes", source: "review", confidence: nil)
+        let line = try String(contentsOf: tempURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertNil(obj?["stt_ms"])
+        XCTAssertNil(obj?["total_ms"])
+        XCTAssertNil(obj?["insert_method"])
+    }
 }

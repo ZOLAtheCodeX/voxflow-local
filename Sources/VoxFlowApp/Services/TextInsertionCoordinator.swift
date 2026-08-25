@@ -7,9 +7,18 @@ import os.log
     func insertCurrentText(targetApp: NSRunningApplication?) async
     func insertText(_ text: String, statusSuffix: String) async -> Bool
     func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) async -> Bool
+    /// Timing-aware variant: stamps stage/total latency + insert method into
+    /// the receipt. Conformers that don't measure fall back to the 3-arg form.
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) async -> Bool
     func copyCurrentText()
     func copyMeetingMarkdownTemplate()
     func copyMeetingNotionTemplate()
+}
+
+extension TextInsertionCoordinating {
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) async -> Bool {
+        await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp)
+    }
 }
 
 @MainActor
@@ -114,6 +123,13 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
 
     @discardableResult
     func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) async -> Bool {
+        await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp, timing: nil)
+    }
+
+    @discardableResult
+    func insertText(
+        _ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?
+    ) async -> Bool {
         guard !text.isEmpty else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
@@ -143,7 +159,12 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 audioSeconds: state.transcriptCandidate?.audioSeconds,
                 rmsEnergy: state.transcriptCandidate?.rmsEnergy,
                 peakAmplitude: state.transcriptCandidate?.peakAmplitude,
-                tailGapSeconds: state.transcriptCandidate?.tailGapSeconds
+                tailGapSeconds: state.transcriptCandidate?.tailGapSeconds,
+                sttMs: timing?.sttMs,
+                cleanupMs: timing?.cleanupMs,
+                insertMs: elapsedMs,
+                totalMs: timing?.pipelineStartedAt.elapsedMilliseconds(),
+                insertMethod: result.method.rawValue
             )
             return true
         } else {
