@@ -6,6 +6,31 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Gemma polish and smart actions no longer spend seconds on hidden
+  "thinking": Ollama chat requests now send `think: false` (measured warm
+  polish on gemma4:e2b-mlx: 6.0 s with ~370 hidden reasoning tokens vs
+  0.26 s without). `VOXFLOW_OLLAMA_THINK=1` re-enables reasoning.
+- Smart actions work on 16 GB machines again: the memory-pressure guard
+  skips local providers for smart actions only at CRITICAL pressure
+  (polish on the dictation hot path still yields at WARN, where such
+  machines rest). A refused action now says why (memory pressure / wedged
+  runner / no provider) instead of "configure a provider".
+- Ollama `:cloud` models (e.g. `kimi-k3:cloud`) are classified as cloud:
+  payloads are PII-redacted first and the memory guard no longer skips
+  them (they use no local RAM).
+
+### Added
+- Insert receipts carry `stt_ms`, `cleanup_ms`, `insert_ms`, `total_ms`
+  (from hotkey release) and `insert_method`, so field latency is finally
+  observable per capture.
+- "Local rules only" polish is served in-app by the Swift pipeline
+  (provenance `rules · in-app`): no backend round trip, and it includes the
+  POS-aware filler pass the Python floor omits.
+- Cockpit smart actions are single-flight: chips disable and the top bar
+  shows the running action with elapsed seconds; a second dispatch is
+  refused with a soft error instead of queuing a duplicate transform.
+
 ## [0.1.3] — 2026-07-13
 
 A forensics and rules-first release: the field-reported capture-loss class
