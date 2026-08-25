@@ -44,7 +44,8 @@ struct CockpitChipRowView: View {
             onActionTriggered(action)
         } label: {
             HStack(spacing: 4) {
-                Text(action.label).font(VF.captionFont)
+                Text(state.smartActionInFlight == action ? "\(action.label)…" : action.label)
+                    .font(VF.captionFont)
                 Text("⌘\(shortcut)")
                     .font(VF.monoMicroFont)
                     .padding(.horizontal, 4)
@@ -58,5 +59,9 @@ struct CockpitChipRowView: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut(KeyEquivalent(Character("\(shortcut)")), modifiers: .command)
+        // Single-flight (session 32): no duplicate dispatch while a transform
+        // runs; the running chip keeps full opacity so the user sees which.
+        .disabled(state.smartActionInFlight != nil)
+        .opacity(state.smartActionInFlight == nil || state.smartActionInFlight == action ? 1 : 0.5)
     }
 }

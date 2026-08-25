@@ -322,6 +322,44 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertEqual(state.chipInvocationCounts[.memo, default: 0], 0)
     }
 
+    /// Single-flight: chips had no in-flight state, so a second tap during a
+    /// 6 s transform dispatched a duplicate. The second call is refused with a
+    /// soft error and the state clears when the first completes.
+    func test_applyAction_refuses_second_dispatch_while_in_flight() async throws {
+        let backend = GatedSmartActionBackend()
+        let (state, coord, _, _) = makeCoordinator(backend: backend)
+
+        let first = Task { try await coord.applyAction(.memo, to: "raw transcript") }
+        await backend.waitUntilCalled()
+        XCTAssertEqual(state.smartActionInFlight, .memo)
+        XCTAssertNotNil(state.smartActionStartedAt)
+
+        let second = try await coord.applyAction(.mece, to: "raw transcript")
+        XCTAssertEqual(second.error, "action_in_flight")
+        XCTAssertEqual(state.chipInvocationCounts[.mece, default: 0], 0)
+
+        backend.release()
+        let result = try await first.value
+        XCTAssertNil(result.error)
+        XCTAssertNil(state.smartActionInFlight)
+        XCTAssertNil(state.smartActionStartedAt)
+        XCTAssertEqual(state.chipInvocationCounts[.memo, default: 0], 1)
+    }
+
+    func test_applyAction_clears_in_flight_state_on_throw() async {
+        let (state, coord, _, _) = makeCoordinator(backend: ThrowingSmartActionBackend())
+        do {
+            _ = try await coord.applyAction(.memo, to: "raw transcript")
+            XCTFail("expected throw")
+        } catch {}
+        XCTAssertNil(state.smartActionInFlight)
+    }
+
+    func test_smartActionErrorMessage_in_flight() {
+        let msg = CockpitCoordinator.smartActionErrorMessage(.mece, error: "action_in_flight")
+        XCTAssertTrue(msg.lowercased().contains("still running"), msg)
+    }
+
     private func makeCoordinator(
         backend: SmartActionBackend,
         snippetStore: SnippetStore? = nil
@@ -399,5 +437,61 @@ private final class MemoryPressureSmartActionBackend: SmartActionBackend, @unche
         SmartActionResult(
             actionId: action, output: transcript, guardrailTriggered: false,
             error: "provider_unavailable", degradedReason: "memory_pressure")
+    }
+}
+
+/// Blocks inside performSmartAction until released, so tests can observe the
+/// in-flight window deterministically.
+private final class GatedSmartActionBackend: SmartActionBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var called = false
+    private var released = false
+    private var calledWaiter: CheckedContinuation<Void, Never>?
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func waitUntilCalled() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            lock.withLock {
+                if called { cont.resume() } else { calledWaiter = cont }
+            }
+        }
+    }
+
+    func release() {
+        let waiter: CheckedContinuation<Void, Never>? = lock.withLock {
+            released = true
+            let waiter = releaseWaiter
+            releaseWaiter = nil
+            return waiter
+        }
+        waiter?.resume()
+    }
+
+    /// Synchronous so the lock never spans a suspension point (NSLock is
+    /// unavailable from async contexts under Swift 6).
+    private func markCalled() -> CheckedContinuation<Void, Never>? {
+        lock.withLock {
+            called = true
+            let waiter = calledWaiter
+            calledWaiter = nil
+            return waiter
+        }
+    }
+
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        markCalled()?.resume()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            lock.withLock {
+                if released { cont.resume() } else { releaseWaiter = cont }
+            }
+        }
+        return SmartActionResult(actionId: action, output: "# transformed\n\n\(transcript)", guardrailTriggered: false, error: nil)
+    }
+}
+
+private final class ThrowingSmartActionBackend: SmartActionBackend, @unchecked Sendable {
+    struct Boom: Error {}
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        throw Boom()
     }
 }
