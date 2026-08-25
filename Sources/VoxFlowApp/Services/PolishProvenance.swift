@@ -14,6 +14,11 @@ enum PolishProvenance {
     /// backend is cold/absent. Distinct from the backend's own regex floor.
     static let inApp = "in-app cleanup"
 
+    /// Marker for the in-app rules pipeline chosen deliberately (polish chain
+    /// == ["rules"]). Distinct from `inApp` (backend cold) so receipts can
+    /// tell "user chose rules" from "backend was down".
+    static let rulesInApp = "rules · in-app"
+
     /// A concise human-readable provenance tag from a backend cleanup response.
     /// Returns "" when provenance is unknown (older/lean responses) so callers
     /// can omit the tag rather than print a misleading label.
