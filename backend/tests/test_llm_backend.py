@@ -286,6 +286,24 @@ class TestMemoryPressureDegrade:
         assert out.served_by == "ollama"
         assert out.degraded_reason is None
 
+    def test_ollama_cloud_model_runs_under_pressure_and_is_redacted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An Ollama ':cloud' model costs no local RAM (not memory-guarded) and
+        sends text off-machine (redacted first)."""
+        from engines import llm_backend
+
+        monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 2)
+        cloud = _FakeBackend("Please email ops the weekly report before Friday.")
+        spec = ProviderSpec(id="ollama-cloud", kind="ollama", model="kimi-k3:cloud")
+        engine = PolishEngine(chain=[(spec, cloud)])
+
+        out = engine.run("email ops@example.com the weekly report before friday", "neutral")
+
+        assert out.served_by == "ollama-cloud"
+        assert cloud.calls, "cloud entry must run under pressure"
+        sent_text = cloud.calls[0][0]
+        assert "[EMAIL]" in sent_text
+        assert "ops@example.com" not in sent_text
+
     def test_guard_can_be_disabled_by_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engines import llm_backend
 
