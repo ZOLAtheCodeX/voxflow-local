@@ -102,12 +102,27 @@ final class CockpitCoordinator: ObservableObject {
             default:
                 return "\(action.label): no LLM provider is ready — check Ollama or configure one in Settings"
             }
+        case "action_in_flight":
+            return "\(action.label) skipped: another smart action is still running"
         default:
             return "\(action.label) failed: \(error)"
         }
     }
 
     func applyAction(_ action: SmartActionId, to transcript: String) async throws -> SmartActionResult {
+        // Single-flight: the backend serialises smart actions behind one ML
+        // semaphore anyway (a concurrent call would 503), and a duplicate tap
+        // during a multi-second transform must not queue a second transform.
+        if state.smartActionInFlight != nil {
+            state.statusLine = Self.smartActionErrorMessage(action, error: "action_in_flight")
+            return SmartActionResult(actionId: action, output: transcript, guardrailTriggered: false, error: "action_in_flight")
+        }
+        state.smartActionInFlight = action
+        state.smartActionStartedAt = Date()
+        defer {
+            state.smartActionInFlight = nil
+            state.smartActionStartedAt = nil
+        }
         let result = try await actionService.apply(action, to: transcript)
         // A soft error (e.g. provider_unavailable) means no real transform
         // happened. Surface it instead of silently leaving the transcript

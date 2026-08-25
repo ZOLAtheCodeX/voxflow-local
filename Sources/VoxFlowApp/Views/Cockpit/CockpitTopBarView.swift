@@ -8,6 +8,7 @@ struct CockpitTopBarView: View {
     var body: some View {
         HStack(spacing: VF.spacingSmall) {
             recordingPill
+            inFlightPill
             modelPill
             persistenceWarningPill
             Spacer()
@@ -39,6 +40,17 @@ struct CockpitTopBarView: View {
             .accessibilityLabel("Recording in progress")
         case .reviewing:
             pill("● review", tint: VF.colorInfo)
+        }
+    }
+
+    /// Session 32: smart actions had no visible in-progress state (a 6 s
+    /// transform looked like a dead chip). Ticks once a second while running.
+    @ViewBuilder private var inFlightPill: some View {
+        if let action = state.smartActionInFlight, let startedAt = state.smartActionStartedAt {
+            TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                pill("● \(action.label.lowercased()) · \(elapsedString(since: startedAt))", tint: VF.colorInfo)
+            }
+            .accessibilityLabel("\(action.label) smart action in progress")
         }
     }
 

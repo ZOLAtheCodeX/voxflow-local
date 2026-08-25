@@ -74,6 +74,10 @@ final class AppState: ObservableObject {
     /// user earned should survive quit + reopen.
     @Published var chipMRU: [SmartActionId] = AppState.loadChipMRU()
     @Published var chipInvocationCounts: [SmartActionId: Int] = AppState.loadChipInvocationCounts()
+    /// Smart action currently executing (session 32): chips disable, the top
+    /// bar shows elapsed time, and a second dispatch is refused (single-flight).
+    @Published var smartActionInFlight: SmartActionId?
+    @Published var smartActionStartedAt: Date?
     @Published var totalCaptureCount: Int = UserDefaults.standard.integer(forKey: "VoxFlow.totalCaptureCount")
     @Published var voicePromptStripDismissed: Bool = UserDefaults.standard.bool(forKey: "VoxFlow.voicePromptStripDismissed")
     @Published var localCaptureCount = 0
