@@ -38,7 +38,12 @@ final class InsertionAuditLog {
         audioSeconds: Double? = nil,
         rmsEnergy: Double? = nil,
         peakAmplitude: Double? = nil,
-        tailGapSeconds: Double? = nil
+        tailGapSeconds: Double? = nil,
+        sttMs: Int? = nil,
+        cleanupMs: Int? = nil,
+        insertMs: Int? = nil,
+        totalMs: Int? = nil,
+        insertMethod: String? = nil
     ) {
         var entry: [String: Any] = [
             "event": "insert",
@@ -59,6 +64,13 @@ final class InsertionAuditLog {
         // Seconds of speech-bearing audio after the last transcribed segment
         // (partial decode / tail loss, session 29). Absent = full coverage.
         if let tailGapSeconds { entry["tail_gap_seconds"] = tailGapSeconds }
+        // Latency forensics (session 32): per-stage ms + total from hotkey
+        // release, and the insert method (AX-direct vs paste) for per-app tuning.
+        if let sttMs { entry["stt_ms"] = sttMs }
+        if let cleanupMs { entry["cleanup_ms"] = cleanupMs }
+        if let insertMs { entry["insert_ms"] = insertMs }
+        if let totalMs { entry["total_ms"] = totalMs }
+        if let insertMethod { entry["insert_method"] = insertMethod }
         append(entry)
     }
 

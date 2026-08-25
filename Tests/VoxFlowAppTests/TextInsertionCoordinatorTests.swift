@@ -198,4 +198,31 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         // Insert may fail (no AX context in test), but it should not crash
         XCTAssertNotNil(state.lastInsertResult)
     }
+
+    /// The insert receipt is the only persisted latency record: insert_ms is
+    /// measured here, total_ms runs from the pipeline origin (hotkey release),
+    /// and the method tells AX-direct from paste for later per-app tuning.
+    @MainActor
+    func testInsertTextStampsTimingAndMethod() async throws {
+        let state = AppState()
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
+        let service = ScriptedInsertService()
+        service.result = InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
+        let sut = TextInsertionCoordinator(state: state, insertService: service, audit: InsertionAuditLog(fileURL: auditURL))
+        let timing = InsertTimingContext(pipelineStartedAt: .now, sttMs: 640, cleanupMs: 3)
+
+        let ok = await sut.insertText("hello", statusSuffix: "Inserted (light)", targetApp: nil, timing: timing)
+
+        XCTAssertTrue(ok)
+        let line = try String(contentsOf: auditURL, encoding: .utf8)
+        let obj = try JSONSerialization.jsonObject(with: Data(line.split(separator: "\n")[0].utf8)) as? [String: Any]
+        XCTAssertEqual(obj?["stt_ms"] as? Int, 640)
+        XCTAssertEqual(obj?["cleanup_ms"] as? Int, 3)
+        let insertMs = try XCTUnwrap(obj?["insert_ms"] as? Int)
+        let totalMs = try XCTUnwrap(obj?["total_ms"] as? Int)
+        XCTAssertGreaterThanOrEqual(insertMs, 0)
+        XCTAssertGreaterThanOrEqual(totalMs, insertMs)
+        XCTAssertEqual(obj?["insert_method"] as? String, "simulatedPaste")
+    }
 }

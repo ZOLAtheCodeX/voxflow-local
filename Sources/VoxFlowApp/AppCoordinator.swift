@@ -41,6 +41,13 @@ private final class CapturePipelineTraceBuilder {
         audioDurationMs = Int(audio.durationSeconds * 1000.0)
     }
 
+    /// Pipeline origin for total-latency receipts (session 32).
+    var startedAt: ContinuousClock.Instant { started }
+
+    func durationMs(of stageName: String) -> Int? {
+        stageTimings.first { $0.name == stageName }?.durationMs
+    }
+
     func recordStage(_ name: String, startedAt: ContinuousClock.Instant, detail: String? = nil) {
         let elapsed = startedAt.elapsedMilliseconds()
         stageTimings.append(PipelineStageTiming(name: name, durationMs: elapsed, detail: detail))
@@ -1706,7 +1713,7 @@ final class AppCoordinator: ObservableObject {
             let effectiveTone = profile?.tone ?? self.state.toneStyle
             let effectiveInsert = profile?.insertBehavior ?? self.state.insertBehavior
 
-            let request = DictationWorkflowRequest(
+            var request = DictationWorkflowRequest(
                 sessionID: sessionID,
                 rawText: rawText,
                 providerMode: providerMode,
@@ -1722,6 +1729,10 @@ final class AppCoordinator: ObservableObject {
                 peakAmplitude: self.lastCaptureAudioStats?.peakAmplitude,
                 tailGapSeconds: self.lastCaptureAudioStats?.tailGapSeconds
             )
+            // Latency receipt: total runs from hotkey release; STT ms is the
+            // stage the pipeline already recorded before handing off here.
+            request.pipelineStartedAt = trace.startedAt
+            request.sttMs = trace.durationMs(of: "stt")
 
             try await self.dictationWorkflow.processDictation(request) { name, startedAt, detail in
                 trace.recordStage(name, startedAt: startedAt, detail: detail)

@@ -55,6 +55,13 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
             insertText(text, statusSuffix: statusSuffix, targetApp: nil)
         }
 
+        var lastTiming: InsertTimingContext?
+
+        func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) -> Bool {
+            lastTiming = timing
+            return insertText(text, statusSuffix: statusSuffix, targetApp: targetApp)
+        }
+
         func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?) -> Bool {
             insertCallCount += 1
             insertedText = text
@@ -97,6 +104,30 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
             }
         )
         return (sut, state, textInsertion, sessionMemory)
+    }
+
+    /// The workflow threads the pipeline origin + STT ms into the insert so the
+    /// receipt can carry total latency; cleanup ms is measured here.
+    @MainActor func testAutoInsertThreadsTimingContext() async throws {
+        let (sut, state, textInsertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = false
+        state.focusTarget = FocusTargetSnapshot(
+            hasFocusedTextInput: true, hasInsertionCursor: true, appName: "Notes",
+            bundleID: "com.apple.Notes", role: "AXTextField", processIdentifier: nil)
+
+        var request = DictationWorkflowRequest(
+            sessionID: "dictation-timing", rawText: "hello world", providerMode: .localOnly,
+            consentToken: nil, allowRaw: false, toneStyle: .neutral,
+            insertBehavior: .autoInsertLight, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.95, targetApp: nil)
+        request.pipelineStartedAt = .now
+        request.sttMs = 500
+
+        try await sut.processDictation(request) { _, _, _ in }
+
+        let timing = try XCTUnwrap(textInsertion.lastTiming)
+        XCTAssertEqual(timing.sttMs, 500)
+        XCTAssertNotNil(timing.cleanupMs)
     }
 
     @MainActor func testLocalDictationAutoInsertRaw() async throws {
