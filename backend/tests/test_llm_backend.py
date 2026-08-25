@@ -762,3 +762,31 @@ class TestAnthropicBackend:
         ):
             assert backend.polish("text", "neutral") == ""
 
+
+
+class TestOllamaThinking:
+    """Gemma 4 reasons before answering unless told not to (measured 2026-08-24:
+    a warm 30-word polish took ~6.0 s with ~370 hidden thinking tokens vs
+    ~0.26 s with think=false). Thinking tokens also count against num_predict,
+    so long smart actions could have their answer truncated."""
+
+    def _sent_body(self) -> dict:
+        backend = OllamaBackend(model="gemma4:e2b-mlx")
+        with patch(
+            "engines.llm_backend.urlrequest.urlopen",
+            return_value=_FakeHTTPResponse(_ollama_response("ok")),
+        ) as urlopen_mock:
+            backend.polish("some dictated text to polish", "neutral")
+        return json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+
+    def test_thinking_disabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("VOXFLOW_OLLAMA_THINK", raising=False)
+        assert self._sent_body()["think"] is False
+
+    def test_thinking_env_opt_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VOXFLOW_OLLAMA_THINK", "1")
+        assert self._sent_body()["think"] is True
+
+    def test_env_garbage_means_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VOXFLOW_OLLAMA_THINK", "maybe")
+        assert self._sent_body()["think"] is False

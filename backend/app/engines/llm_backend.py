@@ -62,6 +62,20 @@ def _tone_instruction(tone: str) -> str:
     return _TONE_INSTRUCTIONS.get(tone.lower(), _TONE_INSTRUCTIONS["neutral"])
 
 
+def ollama_think_enabled() -> bool:
+    """Whether Ollama chat requests may spend tokens on hidden reasoning.
+
+    Gemma 4 (and other thinking-capable models) reason before answering
+    unless told not to. Measured live 2026-08-24 on gemma4:e2b-mlx: a warm
+    30-word polish took ~6.0 s with ~370 hidden thinking tokens vs ~0.26 s
+    with think=false, and thinking tokens count against ``num_predict`` so
+    long smart actions could have their answer truncated. Off by default;
+    ``VOXFLOW_OLLAMA_THINK=1`` re-enables it for machines that prefer
+    reasoning on smart actions and can afford the latency.
+    """
+    return os.environ.get("VOXFLOW_OLLAMA_THINK", "0").strip().lower() in {"1", "true", "yes"}
+
+
 # Compressed for prompt-eval cost (R2.3): ~35 tokens vs the previous ~85.
 # On a HEALTHY runner prompt eval is cheap; under memory pressure it
 # degrades to ~5 tok/s with no prefix caching (measured live 2026-06-11),
@@ -153,6 +167,9 @@ class OllamaBackend:
                 {"role": "user", "content": text},
             ],
             "stream": False,
+            # Hidden reasoning is pure latency for polish/smart actions
+            # (see ollama_think_enabled). Native-endpoint field, like keep_alive.
+            "think": ollama_think_enabled(),
             # Pin the model in unified memory across idle gaps — Ollama's
             # default unload caused multi-second cold-load p95 spikes and
             # 30 s client timeouts between dictations (R2.1). NOTE: only the
