@@ -392,3 +392,37 @@ def test_smart_action_result_carries_provenance_from_chain_engine():
     assert result.served_by == "claude"
     assert result.model_id == "claude-haiku-4-5-20251001"
 
+
+
+def test_refusal_carries_memory_pressure_reason(monkeypatch):
+    """The cockpit used to tell the user to 'configure a provider' when the
+    provider was fine and the memory guard had refused — the reason was
+    dropped here. Critical pressure refuses; the reason travels with it."""
+    from engines import llm_backend
+    from engines.polish import PolishEngine
+
+    monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 4)
+    local = _ChainBackend("ollama", "# Issue\nmemo")
+    engine = SmartActionEngine(polish_backend=PolishEngine(chain=[(_spec("ollama"), local)]))
+
+    result = engine.apply(action_id="memo", transcript="the transcript to restructure")
+
+    assert result.error == "provider_unavailable"
+    assert result.degraded_reason == "memory_pressure"
+    assert result.output == "the transcript to restructure"
+    assert local.received == []
+
+
+def test_smart_action_serves_at_warn_pressure(monkeypatch):
+    from engines import llm_backend
+    from engines.polish import PolishEngine
+
+    monkeypatch.setattr(llm_backend, "detect_memory_pressure_level", lambda: 2)
+    local = _ChainBackend("ollama", "# Issue\nmemo")
+    engine = SmartActionEngine(polish_backend=PolishEngine(chain=[(_spec("ollama"), local)]))
+
+    result = engine.apply(action_id="memo", transcript="the transcript to restructure")
+
+    assert result.error is None
+    assert result.served_by == "ollama"
+    assert result.output == "# Issue\nmemo"
