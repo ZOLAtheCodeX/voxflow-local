@@ -35,6 +35,33 @@ provider yourself.
   in the macOS Keychain; every insertion writes an audit receipt to
   `~/Library/Logs/VoxFlow/insertions.jsonl`.
 
+### Audit receipts and what they keep
+
+The receipt log exists to make a phantom insertion attributable after the
+fact, and by default each receipt carries the dictated text, because the text
+is what tells one insertion from another. That also means dictated content
+stays on disk in a predictable place after the dictation is finished.
+
+If you dictate material you should not leave sitting in a log file, narrow
+what the receipt keeps:
+
+```bash
+# hash instead of text: still tells insertions apart, still matches a phrase
+# you report if you hash that phrase, but reveals nothing when read
+defaults write local.voxflow.app VoxFlow.auditTextRetention digest
+
+# keep only the character count
+defaults write local.voxflow.app VoxFlow.auditTextRetention none
+
+# back to the default
+defaults delete local.voxflow.app VoxFlow.auditTextRetention
+```
+
+An unset or unrecognized value resolves to full text, so a typo cannot quietly
+reduce your forensics. The setting applies to gate rejections as well as
+insertions. It does not retroactively rewrite receipts already written, and it
+does not affect the rejected-audio store, which retains WAV files separately.
+
 ## Requirements
 
 | | Minimum | Notes |
