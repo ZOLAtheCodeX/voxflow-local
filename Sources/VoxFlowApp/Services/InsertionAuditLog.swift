@@ -1,16 +1,54 @@
+import CryptoKit
 import Foundation
 import os
+
+/// What a receipt keeps of the dictated text itself.
+///
+/// The log exists to attribute a phantom insertion after the fact, and the text
+/// is what makes one insertion distinguishable from the next. It is also, for
+/// anyone dictating privileged or client-identifying material, a plain-text copy
+/// of that material on disk in a predictable place, still there long after the
+/// dictation was inserted and the app was quit.
+///
+/// `.digest` is the middle setting and keeps attribution without keeping
+/// content. A truncated SHA-256 still tells two insertions apart, and still
+/// matches a phrase a user reports if you hash that phrase, but reading the log
+/// reveals nothing. `.none` keeps only the length.
+///
+/// The default stays `.full`. This log was built for a specific bug class, and
+/// weakening it by default would quietly take that away from every user to serve
+/// a case most of them do not have.
+enum AuditTextRetention: String {
+    case full
+    case digest
+    case none
+
+    static let defaultsKey = "VoxFlow.auditTextRetention"
+
+    /// Unset, empty, or unrecognized all resolve to `.full`. A typo in the
+    /// defaults value must not silently reduce forensics.
+    static func fromDefaults(_ defaults: UserDefaults = .standard) -> AuditTextRetention {
+        guard let raw = defaults.string(forKey: defaultsKey),
+              let parsed = AuditTextRetention(rawValue: raw) else { return .full }
+        return parsed
+    }
+}
 
 /// Local forensics for the ghost-text bug class. Every text insertion and
 /// every TranscriptGate rejection appends one JSON line to
 /// ~/Library/Logs/VoxFlow/insertions.jsonl — because macOS does not persist
 /// info-level os_log, repeated phantom-"hello" reports were unattributable
-/// after the fact. The file is local-only, plain text the user already
-/// dictated on their own machine, and rotates at ~1 MB (one .1 backup).
+/// after the fact. The file is local-only and rotates at ~1 MB (one .1 backup).
+///
+/// By default a receipt carries the dictated text, which is what makes a
+/// specific phantom insertion identifiable. `AuditTextRetention` narrows that
+/// to a digest or to a length alone for anyone who should not leave dictated
+/// content on disk. See that type for why the default is not the narrow one.
 @MainActor
 final class InsertionAuditLog {
     private let fileURL: URL
     private let maxBytes: Int
+    private let retention: AuditTextRetention
     private let log = Logger(subsystem: "local.voxflow.app", category: "InsertionAuditLog")
     private let iso = ISO8601DateFormatter()
 
@@ -23,11 +61,38 @@ final class InsertionAuditLog {
             .appendingPathComponent("insertions.jsonl")
     }
 
-    init(fileURL: URL = InsertionAuditLog.defaultFileURL, maxBytes: Int = 1_000_000) {
+    init(
+        fileURL: URL = InsertionAuditLog.defaultFileURL,
+        maxBytes: Int = 1_000_000,
+        retention: AuditTextRetention = .fromDefaults()
+    ) {
         self.fileURL = fileURL
         self.maxBytes = maxBytes
+        self.retention = retention
         try? FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    }
+
+    /// The text-bearing fields for one receipt, under the active retention.
+    /// `chars` is emitted at every level: it costs nothing, reveals nothing, and
+    /// is what the tail-loss check compares against `audio_seconds`.
+    private func textFields(_ text: String) -> [String: Any] {
+        switch retention {
+        case .full:
+            return ["text": text, "chars": text.count]
+        case .digest:
+            return ["text_sha256": Self.shortDigest(text), "chars": text.count]
+        case .none:
+            return ["chars": text.count]
+        }
+    }
+
+    /// First 6 bytes of SHA-256, hex. Enough to tell insertions apart and to
+    /// match a phrase a user reports by hashing it; not enough to be a
+    /// meaningful target for anyone reading the log.
+    nonisolated static func shortDigest(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).prefix(6)
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     func recordInsertion(
@@ -48,10 +113,9 @@ final class InsertionAuditLog {
         var entry: [String: Any] = [
             "event": "insert",
             "ts": iso.string(from: Date()),
-            "text": text,
-            "chars": text.count,
             "source": source,
         ]
+        entry.merge(textFields(text)) { _, new in new }
         if let targetApp { entry["target"] = targetApp }
         if let confidence { entry["confidence"] = confidence }
         // Tail-loss forensics: with duration/rms/peak on SUCCESSFUL inserts,
@@ -94,12 +158,12 @@ final class InsertionAuditLog {
         var entry: [String: Any] = [
             "event": "reject",
             "ts": iso.string(from: Date()),
-            "text": text,
             "reason": reason,
             "confidence": confidence,
             "audio_seconds": durationSeconds,
             "source": source,
         ]
+        entry.merge(textFields(text)) { _, new in new }
         // RMS distinguishes "you were silent" (near 0) from "your mic is too
         // quiet to decode" (above the silence floor but below speech level) —
         // the difference between the two empty-capture failure modes.

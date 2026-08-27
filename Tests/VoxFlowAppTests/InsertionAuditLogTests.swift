@@ -195,4 +195,73 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertNil(obj?["total_ms"])
         XCTAssertNil(obj?["insert_method"])
     }
+
+    // MARK: - Text retention
+
+    /// The default must stay `.full`. This log exists to attribute a phantom
+    /// insertion, and the text is what makes one identifiable; narrowing it by
+    /// default would take that away from every user to serve a minority case.
+    func testRetentionDefaultsToFullText() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordInsertion(text: "hello world", targetApp: "Notes", source: "quick_dictation", confidence: 0.9)
+        let obj = try firstEntry()
+        XCTAssertEqual(obj["text"] as? String, "hello world")
+        XCTAssertNil(obj["text_sha256"])
+    }
+
+    /// Digest keeps attribution without keeping content: the text is gone, the
+    /// length remains, and the hash still tells two insertions apart.
+    func testDigestRetentionReplacesTextWithHash() throws {
+        let log = InsertionAuditLog(fileURL: tempURL, retention: .digest)
+        log.recordInsertion(text: "privileged and confidential", targetApp: "Mail", source: "quick_dictation", confidence: 0.9)
+        let obj = try firstEntry()
+        XCTAssertNil(obj["text"])
+        XCTAssertEqual(obj["chars"] as? Int, 27)
+        XCTAssertEqual(obj["text_sha256"] as? String, InsertionAuditLog.shortDigest("privileged and confidential"))
+    }
+
+    /// A user who reports a phrase can be matched against the log by hashing
+    /// the phrase they report. Different text must not collide.
+    func testDigestDistinguishesDifferentText() {
+        XCTAssertNotEqual(InsertionAuditLog.shortDigest("hello"), InsertionAuditLog.shortDigest("hello "))
+        XCTAssertEqual(InsertionAuditLog.shortDigest("hello"), InsertionAuditLog.shortDigest("hello"))
+    }
+
+    func testNoneRetentionKeepsOnlyLength() throws {
+        let log = InsertionAuditLog(fileURL: tempURL, retention: .none)
+        log.recordInsertion(text: "hello world", targetApp: "Notes", source: "quick_dictation", confidence: 0.9)
+        let obj = try firstEntry()
+        XCTAssertNil(obj["text"])
+        XCTAssertNil(obj["text_sha256"])
+        XCTAssertEqual(obj["chars"] as? Int, 11)
+    }
+
+    /// Rejections carry dictated text too, so retention has to reach them.
+    /// A gate rejection is often the most sensitive line in the file: it is
+    /// what the user said that the app then refused to insert.
+    func testRetentionAppliesToRejections() throws {
+        let log = InsertionAuditLog(fileURL: tempURL, retention: .digest)
+        log.recordRejection(text: "client name here", reason: "low_confidence", confidence: 0.2, durationSeconds: 1.4, source: "quick_dictation")
+        let obj = try firstEntry()
+        XCTAssertEqual(obj["event"] as? String, "reject")
+        XCTAssertNil(obj["text"])
+        XCTAssertEqual(obj["text_sha256"] as? String, InsertionAuditLog.shortDigest("client name here"))
+        XCTAssertEqual(obj["reason"] as? String, "low_confidence")
+    }
+
+    /// An unrecognized or absent defaults value must not silently reduce
+    /// forensics, so both resolve to `.full`.
+    func testUnknownOrAbsentDefaultsValueResolvesToFull() {
+        let defaults = UserDefaults(suiteName: "voxflow-retention-\(UUID().uuidString)")!
+        XCTAssertEqual(AuditTextRetention.fromDefaults(defaults), .full)
+        defaults.set("banana", forKey: AuditTextRetention.defaultsKey)
+        XCTAssertEqual(AuditTextRetention.fromDefaults(defaults), .full)
+        defaults.set("digest", forKey: AuditTextRetention.defaultsKey)
+        XCTAssertEqual(AuditTextRetention.fromDefaults(defaults), .digest)
+    }
+
+    private func firstEntry() throws -> [String: Any] {
+        let line = try String(contentsOf: tempURL, encoding: .utf8).split(separator: "\n")[0]
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+    }
 }
