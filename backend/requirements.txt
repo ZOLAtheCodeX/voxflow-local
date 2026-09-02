@@ -2,7 +2,7 @@ fastapi==0.116.1
 uvicorn[standard]==0.35.0
 pydantic==2.11.7
 numpy==2.3.2
-transformers==5.5.0
+transformers==5.10.1
 torch==2.10.0
 torchaudio==2.10.0
 huggingface-hub==1.22.0
