@@ -136,7 +136,8 @@ waits have not been subtracted to manufacture an improvement.
 - [ ] Controlled insertion into a disposable plain text field and available
   terminal/editor prompts, including exact command syntax and no Enter.
 - [ ] Live focus-switch/cancellation/fallback checks and microphone dictation.
-- [ ] Draft PR created with the current acceptance status.
+- [x] [Draft PR #16](https://github.com/ZOLAtheCodeX/voxflow-local/pull/16)
+  created with the current acceptance status.
 
 Rollback is retained privately under
 `~/Documents/Codex/voxflow-rollbacks/2026-09-04-reliability-vocabulary-skills/`.
