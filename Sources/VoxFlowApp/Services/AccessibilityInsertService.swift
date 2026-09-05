@@ -3,6 +3,15 @@ import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
 
+enum TextInsertionPolicy: Sendable {
+    case prose
+    case verbatim
+
+    func adjusted(_ text: String, precedingCharacter: Character?) -> String {
+        self == .verbatim ? text : SmartSpacing.adjusted(text, precedingCharacter: precedingCharacter)
+    }
+}
+
 /// Seam for text insertion so unit tests can NEVER reach the real
 /// accessibility machinery. The ghost-"hello" saga's final culprit:
 /// TextInsertionCoordinatorTests used the real service, so every
@@ -11,6 +20,13 @@ import Foundation
 @MainActor
 protocol TextInserting {
     func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult
+    func insert(text: String, targetApp: NSRunningApplication?, policy: TextInsertionPolicy) async -> InsertResult
+}
+
+extension TextInserting {
+    func insert(text: String, targetApp: NSRunningApplication?, policy: TextInsertionPolicy) async -> InsertResult {
+        await insert(text: text, targetApp: targetApp)
+    }
 }
 
 @MainActor
@@ -96,8 +112,8 @@ final class AccessibilityInsertService: TextInserting {
     /// failure — conflating it with `.unreadable` let the prior-insertion
     /// fallback put a stray leading space at the start of fresh documents in
     /// fully AX-readable apps.
-    private func precedingAXRead() -> SmartSpacing.AXPrecedingRead {
-        guard let focused = copyFocusedElement(),
+    private func precedingAXRead(targetPID: pid_t?) -> SmartSpacing.AXPrecedingRead {
+        guard let focused = copyOwnedFocusedElement(targetPID: targetPID),
               let value = copyStringAttribute(kAXValueAttribute as CFString, on: focused),
               let range = copySelectedRange(on: focused) else { return .unreadable }
         if range.location == 0 { return .fieldStart }
@@ -110,16 +126,24 @@ final class AccessibilityInsertService: TextInserting {
     }
 
     func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
+        await insert(text: text, targetApp: targetApp, policy: .prose)
+    }
+
+    func insert(text: String, targetApp: NSRunningApplication?, policy: TextInsertionPolicy) async -> InsertResult {
+        guard !Task.isCancelled, let targetApp, !targetApp.isTerminated else {
+            return InsertResult(method: .failed, success: false, fallbackUsed: false,
+                                errorCode: Task.isCancelled ? "CANCELLED" : "TARGET_UNAVAILABLE")
+        }
         // R5.0: boundary-aware spacing — successive dictations used to land
         // back-to-back ("test.I've tested"). The AX read returns nil in
         // Electron/web/terminals (the paste-fallback apps), so fall back to the
         // trailing char of our own last insertion into the same target.
         let preceding = SmartSpacing.effectivePrecedingCharacter(
-            axRead: precedingAXRead(),
+            axRead: policy == .verbatim ? .unreadable : precedingAXRead(targetPID: targetApp.processIdentifier),
             prior: priorInsertion,
-            currentTargetPid: targetApp?.processIdentifier
+            currentTargetPid: targetApp.processIdentifier
         )
-        let text = SmartSpacing.adjusted(text, precedingCharacter: preceding)
+        let text = policy.adjusted(text, precedingCharacter: preceding)
         // No ``?? NSWorkspace.shared.frontmostApplication`` fallback here —
         // callers must commit to a target. The frozen snapshot is the
         // source of truth for "where the user was typing"; resolving
@@ -127,7 +151,7 @@ final class AccessibilityInsertService: TextInserting {
         // path) explicitly freeze against. The parameterless overload
         // above keeps the legacy "use frontmost" behaviour available, but
         // makes the choice explicit at the call site.
-        if insertDirectly(text: text) {
+        if insertDirectly(text: text, targetPID: targetApp.processIdentifier) {
             recordPriorInsertion(text, targetApp: targetApp)
             return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
         }
@@ -181,8 +205,8 @@ final class AccessibilityInsertService: TextInserting {
         return simulateKeyPress(virtualKey: 0x06, flags: .maskCommand)
     }
 
-    private func insertDirectly(text: String) -> Bool {
-        guard let focusedElement = copyFocusedElement() else {
+    private func insertDirectly(text: String, targetPID: pid_t) -> Bool {
+        guard !Task.isCancelled, let focusedElement = copyOwnedFocusedElement(targetPID: targetPID) else {
             return false
         }
 
@@ -208,6 +232,7 @@ final class AccessibilityInsertService: TextInserting {
     }
 
     private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil) async -> Bool {
+        guard let targetApp, !targetApp.isTerminated, !Task.isCancelled else { return false }
         let pasteboard = NSPasteboard.general
 
         // Save the user's current clipboard so we can restore it after pasting
@@ -220,11 +245,17 @@ final class AccessibilityInsertService: TextInserting {
         // past this value and we must NOT clobber their new clipboard with
         // the stale save (audit S4).
         let ourChangeCount = pasteboard.changeCount
+        defer {
+            if let previous = previousContents, pasteboard.changeCount == ourChangeCount {
+                pasteboard.clearContents()
+                pasteboard.setString(previous, forType: .string)
+            }
+        }
 
         // Re-activate the target app — focus may have shifted during transcription.
         // Uses Task.sleep to yield the main thread during the wait.
-        if let app = targetApp, !app.isActive {
-            app.activate()
+        if !targetApp.isActive {
+            targetApp.activate()
             // Give macOS time to bring the app window forward.
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
         } else {
@@ -232,6 +263,9 @@ final class AccessibilityInsertService: TextInserting {
             try? await Task.sleep(nanoseconds: 30_000_000) // 30ms
         }
 
+        // Activation can fail, and cancellation can arrive during either wait.
+        // Never post Cmd+V to the unrelated app that still owns the keyboard.
+        guard !Task.isCancelled, targetApp.isActive, !targetApp.isTerminated else { return false }
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
 
         // Restore the user's previous clipboard after a brief delay
@@ -242,12 +276,20 @@ final class AccessibilityInsertService: TextInserting {
             // Even if cancelled, we fall through to restore
         }
 
-        if let previous = previousContents, pasteboard.changeCount == ourChangeCount {
-            pasteboard.clearContents()
-            pasteboard.setString(previous, forType: .string)
-        }
-
         return pasted
+    }
+
+    nonisolated static func ownsFocusedElement(targetPID: pid_t?, focusedPID: pid_t?) -> Bool {
+        guard let targetPID, targetPID > 0, let focusedPID else { return false }
+        return targetPID == focusedPID
+    }
+
+    private func copyOwnedFocusedElement(targetPID: pid_t?) -> AXUIElement? {
+        guard let element = copyFocusedElement() else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success,
+              Self.ownsFocusedElement(targetPID: targetPID, focusedPID: pid) else { return nil }
+        return element
     }
 
     private func simulateKeyPress(virtualKey: CGKeyCode, flags: CGEventFlags) -> Bool {

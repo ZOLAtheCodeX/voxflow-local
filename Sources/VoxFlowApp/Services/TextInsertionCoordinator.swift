@@ -10,12 +10,16 @@ import os.log
     /// Timing-aware variant: stamps stage/total latency + insert method into
     /// the receipt. Conformers that don't measure fall back to the 3-arg form.
     func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) async -> Bool
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?, policy: TextInsertionPolicy) async -> Bool
     func copyCurrentText()
     func copyMeetingMarkdownTemplate()
     func copyMeetingNotionTemplate()
 }
 
 extension TextInsertionCoordinating {
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?, policy: TextInsertionPolicy) async -> Bool {
+        await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp, timing: timing)
+    }
     func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) async -> Bool {
         await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp)
     }
@@ -130,11 +134,21 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     func insertText(
         _ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?
     ) async -> Bool {
-        guard !text.isEmpty else { return false }
+        await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp, timing: timing, policy: .prose)
+    }
+
+    @discardableResult
+    func insertText(
+        _ text: String, statusSuffix: String, targetApp: NSRunningApplication?,
+        timing: InsertTimingContext?, policy: TextInsertionPolicy
+    ) async -> Bool {
+        guard !text.isEmpty, !Task.isCancelled else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
         let started = ContinuousClock.now
-        let result = await insertService.insert(text: text, targetApp: targetApp)
+        let result = await insertService.insert(text: text, targetApp: targetApp, policy: policy)
+        // A cancellation before posting must not fall through to a stale clipboard copy.
+        guard result.success || !Task.isCancelled else { return false }
         let elapsedMs = started.elapsedMilliseconds()
         log.info("insertText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result

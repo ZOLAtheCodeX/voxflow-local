@@ -5,6 +5,21 @@ import XCTest
 /// the real service here — it performs genuine AX insertions and CGEvent
 /// posts (the ghost-"hello" incident class). Only nonisolated statics.
 final class AccessibilityInsertLogicTests: XCTestCase {
+    func testFocusMustBelongToFrozenTarget() {
+        XCTAssertTrue(AccessibilityInsertService.ownsFocusedElement(targetPID: 101, focusedPID: 101))
+        XCTAssertFalse(AccessibilityInsertService.ownsFocusedElement(targetPID: 101, focusedPID: 202))
+        XCTAssertFalse(AccessibilityInsertService.ownsFocusedElement(targetPID: nil, focusedPID: 202))
+        XCTAssertFalse(AccessibilityInsertService.ownsFocusedElement(targetPID: 101, focusedPID: nil))
+        XCTAssertFalse(AccessibilityInsertService.ownsFocusedElement(targetPID: 0, focusedPID: 0))
+    }
+
+    func testVerbatimPolicyPreservesCLIInvocationAtAnyBoundary() {
+        for preceding: Character? in [nil, "x", ".", " ", "\n"] {
+            XCTAssertEqual(TextInsertionPolicy.verbatim.adjusted("/research", precedingCharacter: preceding), "/research")
+            XCTAssertEqual(TextInsertionPolicy.verbatim.adjusted("$research --local", precedingCharacter: preceding), "$research --local")
+        }
+        XCTAssertEqual(TextInsertionPolicy.prose.adjusted("Next", precedingCharacter: "."), " Next")
+    }
 
     /// Session 29 review: simulatePaste returning true only proves the Cmd+V
     /// event was POSTED. Under secure event input the target never receives
