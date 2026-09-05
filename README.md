@@ -35,6 +35,22 @@ provider yourself.
   in the macOS Keychain; every insertion writes an audit receipt to
   `~/Library/Logs/VoxFlow/insertions.jsonl`.
 
+### Bring your vocabulary and CLI skills
+
+In **Settings → Dictation Tools**, add or edit preferred spellings, import a
+plain-text term list or versioned JSON, and export your vocabulary for another
+installation. Pin terms to prioritize the bounded recognition glossary;
+corrections use the full dictionary.
+
+Create a spoken skill profile for your terminal or editor, then choose that
+profile from the VoxFlow menu. For example, “use the research skill” can insert
+your configured `/research` or `$research` invocation verbatim, without pressing
+Enter. Profiles start Off, support portable JSON, and include a phrase preview.
+
+See the [setup guide](docs/vocabulary-and-skills.md) and
+[generic example files](examples/) for formats, conflict handling, CLI syntax,
+and application selection.
+
 ### Audit receipts and what they keep
 
 The receipt log exists to make a phantom insertion attributable after the
