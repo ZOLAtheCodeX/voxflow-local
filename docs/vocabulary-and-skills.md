@@ -46,7 +46,11 @@ through another replacement in the same correction pass. For example, with
 This makes imported rules predictable, unlike the previous sequential cascading
 behavior. Duplicate spoken forms in legacy files keep their first match.
 
-## Spoken skill profiles
+## Voice Action Prompts and skill profiles
+
+**Voice Action Prompts** are configured spoken phrases that prepare an action by
+inserting its exact command. Configure them under **Voice Action Prompts** in
+Dictation Tools. The application receiving the command runs it on submission.
 
 A profile describes the CLI you are using, its allowed applications, and the
 exact command for each spoken skill. It does not install the skill into that CLI.
@@ -75,7 +79,8 @@ match. Unknown or ambiguous names, disabled profiles, and other applications
 remain ordinary dictation. The existing transcript rejection gates still apply.
 
 The command is inserted verbatim, including its prefix, with no extra spacing or
-punctuation and **no Enter key**. Commands must be one line, with no control
+punctuation. **Automatic Enter is Off by default**; select a submission mode below
+if you want VoxFlow to press Enter afterward. Commands must be one line, with no control
 characters and no more than 1,000 characters. Skill names/aliases allow 128
 characters, with up to 20 aliases per skill and 1,000 skills per profile.
 
@@ -133,3 +138,36 @@ remain in force; the short-capture fix does not relax those filters.
 Vocabulary matching is compiled when the dictionary changes, so each capture
 uses the cached matcher. See the [validation record](qa/2026-09-04-reliability-vocabulary-skills.md)
 for measured timings, coverage, and remaining verification work.
+
+## Automatic Enter
+
+In **Settings → Dictation Tools → Automatic Enter**, choose which successful
+quick-dictation insertions should be followed by one Enter key:
+
+| Choice | Configured Voice Action Prompts | Ordinary dictation, including text snippets |
+|---|---|---|
+| Off (default) | Insert only | Insert only |
+| Voice Action Prompts only | Insert and press Enter | Insert only |
+| Ordinary dictation only | Insert only | Insert and press Enter |
+| Both | Insert and press Enter | Insert and press Enter |
+
+Enter can submit a chat message, run a terminal command, or add a new line in an
+editor. Position the cursor in the intended input before recording. The palette
+shows the selected mode. Turning a skill profile Off makes its phrases ordinary
+dictation, so they follow the ordinary-dictation column.
+
+The selection is saved locally and captured at recording start. Changing it
+withdraws any pending automatic Enter; the new choice applies to the next capture.
+Importing a profile does not change it. Review screens, cockpit recording, translation,
+meeting notes, manual re-insertion, and the existing command lane retain their
+own controls; this setting does not bypass review.
+
+VoxFlow retains the target window and focused element when recording starts.
+A known change within the target app blocks insertion and leaves a clipboard
+recovery. Enter is sent only after a successful insertion, with the target still
+active, the original window/field identities still available and unchanged,
+and no cancellation or secure-input block. If text lands but submission cannot
+be verified, it stays inserted and the status says **Enter skipped**. No second
+insertion or automatic retry follows. Receipts distinguish `enterPosted` from
+`skipped`; posting a key is not proof that the receiving application completed
+the requested action.

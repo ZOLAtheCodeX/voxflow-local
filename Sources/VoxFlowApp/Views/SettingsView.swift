@@ -446,6 +446,19 @@ struct SettingsView: View {
             VocabularySettingsSection(dictionary: dictionary)
             SkillProfileSettingsSection(store: coordinator.skillProfiles)
 
+            Section("Automatic Enter") {
+                Picker("Press Enter after", selection: Binding(
+                    get: { state.autoSubmitMode },
+                    set: { coordinator.selectAutoSubmitMode($0) }
+                )) {
+                    ForEach(AutoSubmitMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                Text("Press Enter once after successful automatic insertion. Depending on the app, Enter submits a message, runs a command, or adds a new line. Off leaves submission to you.")
+                    .font(VF.captionFont).foregroundStyle(.secondary)
+            }
+
             Section("Voice Snippets") {
                 if snippetStore.snippets.isEmpty {
                     Text("No snippets yet. Add a keyword and the expansion VoxFlow inserts when you say it.")

@@ -216,6 +216,8 @@ final class AppCoordinator: ObservableObject {
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
     private var capturedSkillMatcher: SpokenSkillMatcher?
+    private var capturedAutoSubmitMode: AutoSubmitMode = .off
+    private var capturedInsertionFocus: CapturedInsertionFocus?
     private var lastTranscriptionConfidence: Double = 0.0
     /// Audio stats of the last decoded capture (true input level, pre-gain),
     /// threaded onto the workflow request → candidate → insert receipt so
@@ -257,6 +259,8 @@ final class AppCoordinator: ObservableObject {
                 if newState == .idle {
                     self?.capturedTargetApp = nil
                     self?.capturedSkillMatcher = nil
+                    self?.capturedAutoSubmitMode = .off
+                    self?.capturedInsertionFocus = nil
                     self?.lastTranscriptionConfidence = 0.0
                     self?.state.recordingDuration = 0
                     self?.focusMonitor.unfreeze()
@@ -689,6 +693,8 @@ final class AppCoordinator: ObservableObject {
         backendManager.setCaptureActive(true)
         capturedTargetApp = NSWorkspace.shared.frontmostApplication
         capturedSkillMatcher = commandLane ? nil : skillProfiles.activeMatcher
+        capturedAutoSubmitMode = commandLane ? .off : state.autoSubmitMode
+        capturedInsertionFocus = commandLane ? nil : CapturedInsertionFocus.capture(for: capturedTargetApp)
         focusMonitor.freeze()
         sessionCounter += 1
         state.isCommandLaneActive = commandLane
@@ -1054,7 +1060,8 @@ final class AppCoordinator: ObservableObject {
                 targetApp: capturedTargetApp,
                 timing: InsertTimingContext(pipelineStartedAt: trace.startedAt,
                                             sttMs: transcription.processingTimeMs, cleanupMs: 0),
-                policy: .verbatim)
+                policy: .verbatim.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: true))
+                    .withCapturedFocus(capturedInsertionFocus))
             state.recordingDuration = 0
             state.sessionState = .idle
             return
@@ -1082,7 +1089,9 @@ final class AppCoordinator: ObservableObject {
             _ = await textInsertion.insertText(
                 snippet.text,
                 statusSuffix: "Snippet '\(snippet.keyword)' inserted — \(appLabel)",
-                targetApp: capturedTargetApp
+                targetApp: capturedTargetApp, timing: nil,
+                policy: .prose.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: false))
+                    .withCapturedFocus(capturedInsertionFocus)
             )
             state.recordingDuration = 0
             state.sessionState = .idle
@@ -1418,6 +1427,10 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Settings Forwarding
 
     func selectInsertBehavior(_ behavior: InsertBehavior) { settings.selectInsertBehavior(behavior) }
+    func selectAutoSubmitMode(_ mode: AutoSubmitMode) {
+        if mode != state.autoSubmitMode { capturedInsertionFocus?.revokeSubmission() }
+        settings.selectAutoSubmitMode(mode)
+    }
     func updateAppProfile(bundleID: String, profile: AppProfile?) { settings.updateAppProfile(bundleID: bundleID, profile: profile) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }
     func setMeetingModeEnabled(_ isEnabled: Bool) { settings.setMeetingModeEnabled(isEnabled) }
@@ -1758,6 +1771,8 @@ final class AppCoordinator: ObservableObject {
             // stage the pipeline already recorded before handing off here.
             request.pipelineStartedAt = trace.startedAt
             request.sttMs = trace.durationMs(of: "stt")
+            request.autoSubmit = self.capturedAutoSubmitMode.includes(voiceActionPrompt: false)
+            request.insertionFocus = self.capturedInsertionFocus
 
             try await self.dictationWorkflow.processDictation(request) { name, startedAt, detail in
                 trace.recordStage(name, startedAt: startedAt, detail: detail)
@@ -2058,7 +2073,11 @@ final class AppCoordinator: ObservableObject {
         // Observe sessionState and commandLane for icon updates + auto-open on review
         state.$sessionState
             .combineLatest(state.$isCommandLaneActive)
-            .receive(on: RunLoop.main)
+            // Keep this deferred (Published emits before the properties update),
+            // but deliver through the main dispatch executor. A live release
+            // capture exposed a crash in the CF run-loop executor's isolation
+            // check when entering this MainActor-isolated sink.
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] newState, _ in
                 guard let self else { return }
                 self.menuBarPanel?.updateIcon(state: Self.menuBarIconState(for: self.state.sessionState, commandLane: self.state.isCommandLaneActive))

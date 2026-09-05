@@ -470,6 +470,21 @@ struct InsertResult {
     let success: Bool
     let fallbackUsed: Bool
     let errorCode: String?
+    var submission: Submission = .notRequested
+
+    enum Submission: String {
+        case notRequested
+        case enterPosted
+        case skipped
+
+        var statusSuffix: String {
+            switch self {
+            case .notRequested: ""
+            case .enterPosted: " · Enter sent"
+            case .skipped: " · Enter skipped"
+            }
+        }
+    }
 
     enum InsertMethod: String {
         case accessibilityDirect

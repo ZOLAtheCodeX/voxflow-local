@@ -42,10 +42,14 @@ plain-text term list or versioned JSON, and export your vocabulary for another
 installation. Pin terms to prioritize the bounded recognition glossary;
 corrections use the full dictionary.
 
-Create a spoken skill profile for your terminal or editor, then choose that
-profile from the VoxFlow menu. For example, “use the research skill” can insert
-your configured `/research` or `$research` invocation verbatim, without pressing
-Enter. Profiles start Off, support portable JSON, and include a phrase preview.
+**Voice Action Prompts** map spoken names to exact commands. Create a skill
+profile for your terminal or editor and select it from the VoxFlow menu. For
+example, “use the research skill” can insert your configured `/research` or
+`$research` invocation verbatim. Profiles support portable JSON and a phrase preview.
+
+Automatic Enter starts Off. In **Settings → Dictation Tools → Automatic Enter**,
+choose Voice Action Prompts only, ordinary dictation only, or both to submit
+automatically after insertion. The receiving application determines what Enter does.
 
 See the [setup guide](docs/vocabulary-and-skills.md) and
 [generic example files](examples/) for formats, conflict handling, CLI syntax,

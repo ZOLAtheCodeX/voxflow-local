@@ -1,14 +1,20 @@
 # Reliability, vocabulary, and spoken skills — validation record
 
-Date: September 4, 2026 (Pacific). Baseline: `3cc226b` on `master`.
+Dates: September 4–5, 2026 (Pacific). Baseline: `3cc226b` on `master`.
 Working branch: `feature/reliability-vocabulary-skills`.
 
-Implementation and automated validation are complete. The signed release bundle
-has been built and a verified rollback retained. **Installation and live UI
-acceptance remain pending** because the available computer-use runtime cannot
-initialize (`Computer Use requires nodeRepl.createElicitation`). An alternative
-local UI harness has been proposed to the operator. These checks are not replaced
-by the passing unit tests.
+The original reliability/vocabulary/skill-profile build is installed with an
+Apple Development signature and a verified rollback. Live Settings, TextEdit,
+Terminal, focus-switch, cancellation, and acoustic vocabulary checks passed.
+An isolated VS Code attempt posted a paste event but its test file stayed empty
+when the user changed windows; that check is not counted as a verified insertion.
+
+On September 5, Zola named the feature **Voice Action Prompts** and requested a
+selectable Automatic Enter menu. That extension and capture-time window/field
+guards are implemented and pass automated checks. **The final expanded build's
+installation and live submission checks remain pending while the Mac is locked.**
+The operator-approved native Accessibility/keyboard harness resumes after unlock.
+Temporary QA vocabulary/profiles still need restoration after live acceptance.
 
 ## Confirmed changes
 
@@ -27,7 +33,8 @@ by the passing unit tests.
 - Explicit skill profiles support names, aliases, application restrictions,
   portable import/export, and a phrase preview. Quick Dictation freezes the
   matcher with the target. Accepted commands bypass prose processing and use
-  verbatim insertion without Enter. Existing cockpit words retain precedence.
+  verbatim insertion. Automatic Enter is Off by default; the September 5 extension
+  adds separate prompt/dictation scopes. Existing cockpit words retain precedence.
 
 The bounded empty-result retry investigation did not reproduce an additional
 segmented-empty case with these fixtures. The existing single retry for zero
@@ -37,7 +44,7 @@ policy was introduced without evidence.
 ## Automated checks
 
 The baseline standard suite reported 707 Swift tests (one opt-in skip) and
-564 passing Python tests (26 model/live checks skipped). The final suite,
+564 passing Python tests (26 model/live checks skipped). The initial final suite,
 including published example-file validation, reported **732 Swift tests with
 three opt-in skips and no failures**, and **564 passing Python tests with
 26 skips**. Seven existing Python dependency deprecation warnings remain.
@@ -117,8 +124,12 @@ it does not establish a field failure rate or speaker/accent coverage.
 Deterministic skill resolution uses a cached phrase lookup and bypasses cleanup.
 No isolated latency improvement is claimed for that new path. Existing paste
 activation/restoration waits remain, including the 300 ms clipboard restore wait.
-Visible insertion and end-to-end timing need the pending live checks; bookkeeping
-waits have not been subtracted to manufacture an improvement.
+The live TextEdit command receipt recorded 1,081 ms STT, 0 ms cleanup, 11 ms
+direct insertion, and 1,168 ms total. The Terminal alias receipt recorded 988 ms
+STT, 0 ms cleanup, 362 ms simulated paste, and 1,416 ms total. These are individual
+acoustic integration observations, not a comparative latency benchmark. The
+Terminal insertion figure retains the clipboard restoration wait; neither receipt
+includes the time spent speaking.
 
 ## Delivery and live acceptance
 
@@ -126,24 +137,105 @@ waits have not been subtracted to manufacture an improvement.
 - [x] Stable Apple Development signature verified with `codesign --verify --strict`.
 - [x] Installed predecessor cloned and signature verified; affected configuration
   backed up before any installation.
-- [ ] Confirm the running app has no capture or unsaved review before replacement.
-- [ ] Install at `~/Applications/VoxFlow.app`, launch through LaunchServices,
+- [x] Confirm the running app has no capture or unsaved review before replacement.
+- [x] Install at `~/Applications/VoxFlow.app`, launch through LaunchServices,
   and confirm permissions/readiness.
-- [ ] Settings: create/edit/pin vocabulary, import text/JSON, inspect and cancel
+- [x] Settings: create/edit/pin vocabulary, import text/JSON, inspect and cancel
   conflicts, export and re-import; verify persisted values after restart.
-- [ ] Settings: create/edit a profile and application selection, try phrases,
+- [x] Settings: create/edit a profile and application selection, try phrases,
   import/export, select and disable it from the menu; verify restart persistence.
-- [ ] Controlled insertion into a disposable plain text field and available
-  terminal/editor prompts, including exact command syntax and no Enter.
-- [ ] Live focus-switch/cancellation/fallback checks and microphone dictation.
+- [x] Controlled TextEdit and Terminal insertion, exact command syntax, default no Enter.
+- [ ] Finish the isolated VS Code editor check with retained window/field identities.
+- [x] Live focus-switch/cancellation/fallback and speaker-to-microphone dictation
+  on the installed menu-callback fix.
+- [ ] Install the expanded Automatic Enter build and verify all four choices,
+  actual submission, same-app window changes, cancellation, setting revocation,
+  and restart persistence.
+- [ ] Restore original vocabulary/profile configuration and leave Automatic Enter Off.
 - [x] [Draft PR #16](https://github.com/ZOLAtheCodeX/voxflow-local/pull/16)
   created with the current acceptance status.
 
 Rollback is retained privately under
-`~/Documents/Codex/voxflow-rollbacks/2026-09-04-reliability-vocabulary-skills/`.
+`~/Documents/Codex/voxflow-rollbacks/2026-09-05-before-install/`.
 It contains the predecessor `VoxFlow.app`, a manifest of hashes, and only the
 affected configuration files that existed before the update. Quit VoxFlow before
 restoring the bundle or configuration, preserve any new configuration you want
 to keep, and relaunch the restored app through `open ~/Applications/VoxFlow.app`.
 No user dictations, model files, credentials, or private configuration are in
 this source change.
+
+## September 5 live observations before Automatic Enter
+
+All test vocabulary, profiles, and target documents are disposable. The native
+harness used the installed app's actual controls and ordinary Fn capture hotkey.
+No production test backdoor or direct injection into the transcription service
+was used. The operator disconnected Bluetooth headphones and resolved muted
+playback before the successful acoustic checks.
+
+- Vocabulary: added and edited a spoken form and preferred spelling, pinned it,
+  cancelled a conflict import without changing the file, verified default
+  retention and explicit replacement, imported UTF-8 terms, and exported/re-imported
+  JSON with eight duplicates and no additions. Edits and priority survived restart.
+- Profiles: created a research mapping and alias, selected Terminal with the
+  application picker, and previewed both a matching complete invocation and a
+  longer sentence that correctly remained prose. Export/re-import reported a
+  duplicate. An application-list conflict retained the original by default and
+  changed it only after explicit replacement. Imports left the active profile Off.
+  Explicit selection appeared in Settings and the palette and survived restart.
+- Acoustic command: macOS Samantha spoke “Hey, use the research skill.” through
+  the Mac speakers into the microphone. TextEdit contained exactly `/research`
+  (nine characters) after direct Accessibility insertion.
+- Acoustic alias: “Deep research.” produced the same exact command through the
+  Terminal paste path. A disposable Python input prompt received no Enter and
+  recorded no submission; dictated text was never executed.
+- Initial unsuccessful acoustic attempts produced device-change/silence rejection
+  receipts and left the target empty. Speech thresholds were not lowered to pass
+  the demonstration.
+
+A release-app crash observed during this session pointed to the menu icon's
+Combine sink, inside the Swift runtime's main-executor check after `RunLoop.main`
+delivery. The callback now uses `DispatchQueue.main`, preserving deferred delivery
+while avoiding that CF run-loop executor path. The complete Swift suite was rerun:
+732 tests, three opt-in skips, no failures. The signed release was rebuilt and
+installed. This is a targeted mitigation for the observed stack, not a claim that
+all Swift runtime crashes or audio-device failures have been eliminated.
+
+Additional checks on the signed menu-callback build:
+
+- Focus switched from TextEdit to Terminal before capture release; the sentence
+  arrived in TextEdit through the target-aware paste path, and Terminal stayed
+  unchanged. The harness verified Terminal was actually frontmost before release.
+- Clicking the actual recording pill cancelled a spoken command. TextEdit stayed
+  empty, no insertion receipt appeared, and the palette showed Capture canceled / Idle.
+- Switching the skill profile Off from the palette made the same research phrase
+  insert as ordinary prose.
+- An imported test correction `schedule → arrange` changed the acoustic sentence
+  to “Please arrange the meeting for tomorrow.” in TextEdit.
+- The rebuilt bundle took several minutes on its first load; a process sample
+  showed Core ML preparation. It subsequently reported STT ready. This first-load
+  observation is separate from the cached-model controlled measurements above.
+
+## Automatic Enter extension: automated evidence and pending live checks
+
+The selection has four choices: Off, Voice Action Prompts only, ordinary
+dictation only, and both. It is local, defaults Off for absent/unknown settings,
+and is not enabled by profile import. The capture retains its choice and AX
+window/field identities. Changing the selection revokes pending Enter without
+cancelling text insertion. Known changes of target window/field block insertion;
+unavailable identities cannot authorize Enter. The paste path rechecks after
+activation and before posting, then checks again before Return. Cancellation,
+secure input, and failed insertion never authorize automatic Enter.
+
+Receipts distinguish `enterPosted` and `skipped` while preserving the fact that
+text may have been inserted successfully even if Enter was skipped. Review and
+manual insertion paths do not inherit automatic submission.
+
+The focused checks cover scope combinations, isolated preference persistence,
+exact command formatting, wrong process/window/field, unavailable identities,
+cancellation and secure input, raw/cleaned workflow propagation, explicit review,
+and accurate success-versus-skipped receipts without duplicate insertion.
+The complete post-review Swift suite passed: **741 tests, three opt-in skips,
+zero failures**. The release bundle was rebuilt and its stable Apple Development
+signature passed deep/strict verification. Installation and live submission
+checks remain pending desktop unlock. The Python implementation is unchanged
+by this extension; the existing 564-pass/26-skip result still applies.

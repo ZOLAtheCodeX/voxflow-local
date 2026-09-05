@@ -108,7 +108,8 @@ final class InsertionAuditLog {
         cleanupMs: Int? = nil,
         insertMs: Int? = nil,
         totalMs: Int? = nil,
-        insertMethod: String? = nil
+        insertMethod: String? = nil,
+        submission: String? = nil
     ) {
         var entry: [String: Any] = [
             "event": "insert",
@@ -135,6 +136,7 @@ final class InsertionAuditLog {
         if let insertMs { entry["insert_ms"] = insertMs }
         if let totalMs { entry["total_ms"] = totalMs }
         if let insertMethod { entry["insert_method"] = insertMethod }
+        if let submission { entry["submission"] = submission }
         append(entry)
     }
 

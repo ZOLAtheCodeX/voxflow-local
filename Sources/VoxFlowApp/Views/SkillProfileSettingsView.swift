@@ -38,7 +38,7 @@ struct SkillProfileSettingsSection: View {
     }
 
     var body: some View {
-        Section("Spoken skills") {
+        Section("Voice Action Prompts") {
             HStack {
                 SkillProfileMenu(store: store)
                 Spacer()
@@ -49,7 +49,7 @@ struct SkillProfileSettingsSection: View {
                     catch { message = error.localizedDescription }
                 }
             }
-            Text("Choose a profile for your CLI. Say a configured name or ‘use the research skill’ to insert its command. VoxFlow does not press Enter.")
+            Text("Choose a profile for your CLI. Say a configured name or ‘use the research skill’ to insert its command. The Automatic Enter setting controls submission.")
                 .font(VF.captionFont).foregroundStyle(.secondary)
             ForEach(store.profiles) { profile in
                 HStack {

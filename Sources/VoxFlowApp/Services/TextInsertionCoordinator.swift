@@ -163,12 +163,12 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(text, forType: .string)
             }
-            state.statusLine = statusSuffix
+            state.statusLine = statusSuffix + result.submission.statusSuffix
             state.lastInsertedText = text
             audit.recordInsertion(
                 text: text,
                 targetApp: targetApp?.localizedName ?? appName,
-                source: statusSuffix,
+                source: state.statusLine,
                 confidence: state.transcriptCandidate?.confidence,
                 audioSeconds: state.transcriptCandidate?.audioSeconds,
                 rmsEnergy: state.transcriptCandidate?.rmsEnergy,
@@ -178,7 +178,8 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 cleanupMs: timing?.cleanupMs,
                 insertMs: elapsedMs,
                 totalMs: timing?.pipelineStartedAt.elapsedMilliseconds(),
-                insertMethod: result.method.rawValue
+                insertMethod: result.method.rawValue,
+                submission: result.submission == .notRequested ? nil : result.submission.rawValue
             )
             return true
         } else {

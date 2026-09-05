@@ -23,6 +23,31 @@ private final class ScriptedInsertService: TextInserting {
 
 final class TextInsertionCoordinatorTests: XCTestCase {
     @MainActor
+    func testSubmissionReceiptDistinguishesEnterPostedAndSkippedWithoutRetryingInsertion() async throws {
+        for submission: InsertResult.Submission in [.enterPosted, .skipped] {
+            let state = AppState()
+            let service = ScriptedInsertService()
+            service.result = InsertResult(method: .simulatedPaste, success: true,
+                fallbackUsed: true, errorCode: nil, submission: submission)
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("submission-\(UUID()).jsonl")
+            defer { try? FileManager.default.removeItem(at: file) }
+            let coordinator = TextInsertionCoordinator(state: state, insertService: service,
+                audit: InsertionAuditLog(fileURL: file))
+            let policy = TextInsertionPolicy.verbatim.withSubmission(true)
+            let success = await coordinator.insertText("/research", statusSuffix: "Prompt inserted",
+                targetApp: nil, timing: nil, policy: policy)
+            XCTAssertTrue(success, "Text already landed even when Enter was skipped")
+            XCTAssertEqual(service.insertedTexts, ["/research"])
+            XCTAssertEqual(service.policies, [policy])
+            XCTAssertEqual(state.failedInsertCount, 0)
+            XCTAssertEqual(state.statusLine, "Prompt inserted" + submission.statusSuffix)
+            let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            XCTAssertEqual(row["submission"] as? String, submission.rawValue)
+            XCTAssertEqual(row["text"] as? String, "/research")
+        }
+    }
+
+    @MainActor
     func testSkillCommandReachesInsertionVerbatimWithTimingReceipt() async throws {
         let state = AppState()
         let service = ScriptedInsertService()

@@ -2,6 +2,28 @@
 
 Approved for end-to-end execution by Zola's attached instructions, September 4, 2026. Work is proceeding on `feature/reliability-vocabulary-skills`.
 
+**September 5 amendment approved in conversation**
+
+Zola named the feature **Voice Action Prompts** and explicitly requested optional
+automatic Enter, then a selectable menu covering custom prompts and ordinary
+dictation. This supersedes the original unconditional “no Enter” requirement
+below. Deliver Off (default), Voice Action Prompts only, ordinary dictation only,
+and both; preserve the chosen scope at capture start, show it in the palette,
+and persist it locally without importing it from shared profiles. A separate
+receipt field records whether Enter was posted or skipped. Manual/review flows
+remain outside this automatic quick-dictation control.
+
+Live testing also exposed movement between two windows of the same application.
+Retain the original AX window/field identities, refuse a known target change,
+and require a verified unchanged target before automatic Enter. Exercise this
+with disposable windows and a terminal input probe that records submissions
+without executing its input.
+
+Zola also proposed a registry of deterministic Python computer actions and later
+model-assisted selection of explicitly defined actions. Scope selection for that
+extension was requested while the submission controls are being completed; it is
+separate from speech translation or changing the current STT/polish providers.
+
 **Outcome and scope**
 
 Deliver a dependable local dictation update with fewer confirmed failures, measured performance improvements, portable vocabulary, and configurable spoken skill shortcuts. Complete implementation, regression checks, documentation, a signed local installation, and a reviewable source change.

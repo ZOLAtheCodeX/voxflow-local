@@ -3,12 +3,29 @@ import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
 
-enum TextInsertionPolicy: Sendable {
-    case prose
-    case verbatim
+struct TextInsertionPolicy: Sendable, Equatable {
+    let isVerbatim: Bool
+    let submits: Bool
+    let capturedFocus: CapturedInsertionFocus?
+
+    static let prose = Self(isVerbatim: false, submits: false, capturedFocus: nil)
+    static let verbatim = Self(isVerbatim: true, submits: false, capturedFocus: nil)
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.isVerbatim == rhs.isVerbatim && lhs.submits == rhs.submits
+            && lhs.capturedFocus === rhs.capturedFocus
+    }
+
+    func withSubmission(_ enabled: Bool) -> Self {
+        Self(isVerbatim: isVerbatim, submits: enabled, capturedFocus: capturedFocus)
+    }
+
+    func withCapturedFocus(_ focus: CapturedInsertionFocus?) -> Self {
+        Self(isVerbatim: isVerbatim, submits: submits, capturedFocus: focus)
+    }
 
     func adjusted(_ text: String, precedingCharacter: Character?) -> String {
-        self == .verbatim ? text : SmartSpacing.adjusted(text, precedingCharacter: precedingCharacter)
+        isVerbatim ? text : SmartSpacing.adjusted(text, precedingCharacter: precedingCharacter)
     }
 }
 
@@ -134,12 +151,15 @@ final class AccessibilityInsertService: TextInserting {
             return InsertResult(method: .failed, success: false, fallbackUsed: false,
                                 errorCode: Task.isCancelled ? "CANCELLED" : "TARGET_UNAVAILABLE")
         }
+        guard policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else {
+            return InsertResult(method: .failed, success: false, fallbackUsed: false, errorCode: "TARGET_CHANGED")
+        }
         // R5.0: boundary-aware spacing — successive dictations used to land
         // back-to-back ("test.I've tested"). The AX read returns nil in
         // Electron/web/terminals (the paste-fallback apps), so fall back to the
         // trailing char of our own last insertion into the same target.
         let preceding = SmartSpacing.effectivePrecedingCharacter(
-            axRead: policy == .verbatim ? .unreadable : precedingAXRead(targetPID: targetApp.processIdentifier),
+            axRead: policy.isVerbatim ? .unreadable : precedingAXRead(targetPID: targetApp.processIdentifier),
             prior: priorInsertion,
             currentTargetPid: targetApp.processIdentifier
         )
@@ -151,18 +171,43 @@ final class AccessibilityInsertService: TextInserting {
         // path) explicitly freeze against. The parameterless overload
         // above keeps the legacy "use frontmost" behaviour available, but
         // makes the choice explicit at the call site.
+        let directFocus = policy.submits ? copyOwnedFocusedElement(targetPID: targetApp.processIdentifier) : nil
         if insertDirectly(text: text, targetPID: targetApp.processIdentifier) {
             recordPriorInsertion(text, targetApp: targetApp)
-            return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
+            return InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil,
+                                submission: submitIfRequested(policy, targetApp: targetApp, expectedFocus: directFocus))
         }
 
-        let posted = await simulatePaste(text: text, targetApp: targetApp)
-        let result = Self.pasteOutcome(
-            posted: posted, secureInputActive: IsSecureEventInputEnabled())
+        let paste = await simulatePaste(text: text, targetApp: targetApp, policy: policy)
+        var result = Self.pasteOutcome(
+            posted: paste.posted, secureInputActive: IsSecureEventInputEnabled())
         if result.success {
             recordPriorInsertion(text, targetApp: targetApp)
+            result.submission = submitIfRequested(policy, targetApp: targetApp, expectedFocus: paste.focus)
         }
         return result
+    }
+
+    /// No suspension between the final focus/cancellation checks and Return.
+    /// A paste has already waited for the client to consume its clipboard text.
+    private func submitIfRequested(_ policy: TextInsertionPolicy, targetApp: NSRunningApplication,
+                                   expectedFocus: AXUIElement?) -> InsertResult.Submission {
+        guard policy.submits else { return .notRequested }
+        let currentFocus = copyOwnedFocusedElement(targetPID: targetApp.processIdentifier)
+        let unchanged = (expectedFocus.flatMap { expected in currentFocus.map { CFEqual(expected, $0) } } ?? false)
+            && policy.capturedFocus?.matchesForSubmission(targetPID: targetApp.processIdentifier) == true
+        guard Self.maySubmit(cancelled: Task.isCancelled, targetActive: targetApp.isActive,
+                             targetTerminated: targetApp.isTerminated, focusUnchanged: unchanged,
+                             secureInputActive: IsSecureEventInputEnabled()) else { return .skipped }
+        guard simulateKeyPress(virtualKey: 0x24, flags: []) else { return .skipped }
+        // The next dictation belongs to a new prompt/line, not the old boundary.
+        priorInsertion = nil
+        return .enterPosted
+    }
+
+    nonisolated static func maySubmit(cancelled: Bool, targetActive: Bool, targetTerminated: Bool,
+                                      focusUnchanged: Bool, secureInputActive: Bool) -> Bool {
+        !cancelled && targetActive && !targetTerminated && focusUnchanged && !secureInputActive
     }
 
     /// Maps the paste attempt to an honest result. `posted` only proves the
@@ -231,15 +276,16 @@ final class AccessibilityInsertService: TextInserting {
         return false
     }
 
-    private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil) async -> Bool {
-        guard let targetApp, !targetApp.isTerminated, !Task.isCancelled else { return false }
+    private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil,
+                               policy: TextInsertionPolicy = .prose) async -> (posted: Bool, focus: AXUIElement?) {
+        guard let targetApp, !targetApp.isTerminated, !Task.isCancelled else { return (false, nil) }
         let pasteboard = NSPasteboard.general
 
         // Save the user's current clipboard so we can restore it after pasting
         let previousContents = pasteboard.string(forType: .string)
 
         pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else { return false }
+        guard pasteboard.setString(text, forType: .string) else { return (false, nil) }
         // Snapshot the pasteboard generation after OUR write. If the user
         // copies something during the paste window below, changeCount moves
         // past this value and we must NOT clobber their new clipboard with
@@ -265,7 +311,9 @@ final class AccessibilityInsertService: TextInserting {
 
         // Activation can fail, and cancellation can arrive during either wait.
         // Never post Cmd+V to the unrelated app that still owns the keyboard.
-        guard !Task.isCancelled, targetApp.isActive, !targetApp.isTerminated else { return false }
+        guard !Task.isCancelled, targetApp.isActive, !targetApp.isTerminated else { return (false, nil) }
+        guard policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else { return (false, nil) }
+        let focus = policy.submits ? copyOwnedFocusedElement(targetPID: targetApp.processIdentifier) : nil
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
 
         // Restore the user's previous clipboard after a brief delay
@@ -276,7 +324,7 @@ final class AccessibilityInsertService: TextInserting {
             // Even if cancelled, we fall through to restore
         }
 
-        return pasted
+        return (pasted, focus)
     }
 
     nonisolated static func ownsFocusedElement(targetPID: pid_t?, focusedPID: pid_t?) -> Bool {

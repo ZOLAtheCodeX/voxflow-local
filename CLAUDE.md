@@ -147,7 +147,10 @@ atomic save succeeds.
 `SkillProfileStore` caches an immutable matcher. Quick Dictation snapshots it
 alongside the target app at capture start; accepted skill utterances bypass
 vocabulary substitutions and prose cleanup. Use `.verbatim` insertion for exact
-commands and never synthesize Enter. Keep profiles explicitly selected, bound
+commands. Automatic Enter is opt-in with Off / Voice Action Prompts only /
+ordinary dictation only / both scopes; freeze the choice and AX window/field at
+capture start. Post Return only after successful insertion and final target,
+focus, cancellation, and secure-input checks. Record submission separately. Keep profiles explicitly selected, bound
 to allowed app bundle IDs, and separate from cockpit commands and snippets.
 Commands reject newlines/control characters. Unit tests use insertion fakes.
 
