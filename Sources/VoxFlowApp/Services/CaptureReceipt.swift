@@ -7,7 +7,7 @@ import Foundation
 /// writer's "non-finite" sentinel in a numeric slot) decodes to nil instead of
 /// failing the whole line.
 struct CaptureReceipt: Equatable {
-    enum Event: String { case insert, reject }
+    enum Event: String { case insert, reject, computerAction = "computer_action" }
 
     let event: Event
     let ts: Date
@@ -20,6 +20,9 @@ struct CaptureReceipt: Equatable {
     let peakAmplitude: Double?
     let reason: String?
     let audioFile: String?
+    var actionID: String? = nil
+    var actionOutcome: String? = nil
+    var actionMs: Int? = nil
 
     var sourceLabel: SourceLabel { SourceLabel.parse(source ?? "") }
 }
@@ -30,6 +33,9 @@ extension CaptureReceipt: Decodable {
         case audioSeconds = "audio_seconds"
         case peakAmplitude = "peak_amplitude"
         case audioFile = "audio_file"
+        case actionID = "action_id"
+        case actionOutcome = "outcome"
+        case actionMs = "action_ms"
     }
 
     init(from decoder: Decoder) throws {
@@ -57,6 +63,9 @@ extension CaptureReceipt: Decodable {
         peakAmplitude = try? c.decode(Double.self, forKey: .peakAmplitude)
         reason = try? c.decode(String.self, forKey: .reason)
         audioFile = try? c.decode(String.self, forKey: .audioFile)
+        actionID = try? c.decode(String.self, forKey: .actionID)
+        actionOutcome = try? c.decode(String.self, forKey: .actionOutcome)
+        actionMs = try? c.decode(Int.self, forKey: .actionMs)
     }
 
     // FormatStyle is a Sendable struct, so these are safe as static lets under

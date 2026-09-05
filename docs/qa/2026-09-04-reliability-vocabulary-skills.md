@@ -10,7 +10,8 @@ An isolated VS Code attempt posted a paste event but its test file stayed empty
 when the user changed windows; that check is not counted as a verified insertion.
 
 On September 5, Zola named the feature **Voice Action Prompts** and requested a
-selectable Automatic Enter menu. That extension and capture-time window/field
+selectable Automatic Enter menu, followed by custom/built-in/all action modes
+and direct computer commands. Those extensions and capture-time window/field
 guards are implemented and pass automated checks. **The final expanded build's
 installation and live submission checks remain pending while the Mac is locked.**
 The operator-approved native Accessibility/keyboard harness resumes after unlock.
@@ -151,7 +152,10 @@ includes the time spent speaking.
 - [ ] Install the expanded Automatic Enter build and verify all four choices,
   actual submission, same-app window changes, cancellation, setting revocation,
   and restart persistence.
-- [ ] Restore original vocabulary/profile configuration and leave Automatic Enter Off.
+- [ ] Validate the action-mode menu, individual toggles, built-in actions, and
+  action history in disposable targets; verify revocation and focus guards.
+- [ ] Restore original vocabulary/profile configuration and leave Automatic Enter
+  Off with built-in actions disabled.
 - [x] [Draft PR #16](https://github.com/ZOLAtheCodeX/voxflow-local/pull/16)
   created with the current acceptance status.
 
@@ -239,3 +243,48 @@ zero failures**. The release bundle was rebuilt and its stable Apple Development
 signature passed deep/strict verification. Installation and live submission
 checks remain pending desktop unlock. The Python implementation is unchanged
 by this extension; the existing 564-pass/26-skip result still applies.
+
+
+## Selectable computer actions: September 5 extension
+
+The first set includes twelve built-ins: opening Finder, Safari, Terminal, Notes,
+and Calculator; copy, paste, select all, undo, redo, find, and new tab. Settings
+and the palette expose Off / Custom prompts only / Built-in computer actions
+only / All, with individual action checkboxes. Built-ins require opting in;
+custom-profile defaults remain compatible. Updates do not automatically select
+newly introduced actions. These controls are separate from Automatic Enter.
+
+Python validates a versioned registry request and prepares a typed operation in
+an isolated process. The signed native bridge applies the permitted operation.
+There is no model/server load or arbitrary code execution in that path. The
+service and bridge recheck revoked permissions, and shortcuts require unchanged
+known Accessibility target identities. Recognized failures do not fall through
+to text insertion. Receipts and the capture history distinguish application opens
+from posted shortcuts without recording clipboard contents.
+
+Final automated coverage: **749 Swift tests, three opt-in skips, zero failures**;
+**582 Python tests passed, 26 skipped**, with the same seven dependency warnings.
+Ruff passed on the new Python module and tests. The new tests cover complete
+phrase matching, disabled modes/actions, preference persistence, conservative
+upgrade selection, malformed/unknown operations, permission revocation during
+preparation, bridge errors without retry, and the displayed action receipt.
+Python subprocess checks only prepare JSON and verify that model/server modules
+are absent; Swift execution tests inject fakes.
+
+A run inside the restricted execution sandbox produced failures in existing
+Core Audio and Keychain tests. Re-running with the authorized host access passed
+the entire suite. This was an execution-environment issue; those production paths
+were not changed to make the run pass.
+
+Standalone preparation measurement: one excluded warm-up followed by 30 requests
+for `copy_selection`, each starting `.venv/bin/python -I -S` and validating the
+registry/JSON result. Median **25.490 ms**, nearest-rank p95 **31.572 ms**. This
+includes process startup and preparation; it excludes speech recognition and any
+OS action. No action was performed during measurement. Raw samples are retained
+in [computer-action-preparation.json](reliability-vocabulary-skills-20260904/computer-action-preparation.json).
+
+The final expanded release bundle is built with the stable Apple Development
+identity. Installation, actual action/submission effects, UI persistence, and QA
+configuration restoration are still pending the locked desktop. The successful
+live observations earlier in this document apply to the original vocabulary and
+skill-profile build, not the newer direct-action/Automatic Enter extension.

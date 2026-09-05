@@ -53,17 +53,23 @@ final class CapturedInsertionFocus {
         !submissionRevoked && expected.matches(Self.read(application: application, processID: targetPID), requireKnown: true)
     }
 
-    private static func read(application: AXUIElement, processID: pid_t) -> InsertionFocusSnapshot<AXFocusIdentity> {
-        InsertionFocusSnapshot(processID: processID,
-            window: element(kAXFocusedWindowAttribute, on: application).map(AXFocusIdentity.init),
-            field: element(kAXFocusedUIElementAttribute, on: application).map(AXFocusIdentity.init))
+    func matchesForAction(targetPID: pid_t) -> Bool {
+        expected.matches(Self.read(application: application, processID: targetPID), requireKnown: true)
     }
 
-    private static func element(_ attribute: String, on application: AXUIElement) -> AXUIElement? {
+    private static func read(application: AXUIElement, processID: pid_t) -> InsertionFocusSnapshot<AXFocusIdentity> {
+        InsertionFocusSnapshot(processID: processID,
+            window: element(kAXFocusedWindowAttribute, on: application, expectedPID: processID).map(AXFocusIdentity.init),
+            field: element(kAXFocusedUIElementAttribute, on: application, expectedPID: processID).map(AXFocusIdentity.init))
+    }
+
+    private static func element(_ attribute: String, on application: AXUIElement, expectedPID: pid_t) -> AXUIElement? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(application, attribute as CFString, &value) == .success,
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         let element = unsafeDowncast(value, to: AXUIElement.self)
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(element, &owner) == .success, owner == expectedPID else { return nil }
         var roleValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue) == .success,
               let role = roleValue as? String, role != kAXApplicationRole else { return nil }

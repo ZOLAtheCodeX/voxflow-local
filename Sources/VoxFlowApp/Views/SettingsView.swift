@@ -444,6 +444,8 @@ struct SettingsView: View {
     private var toolsTab: some View {
         Form {
             VocabularySettingsSection(dictionary: dictionary)
+            ComputerActionSettingsSection(settings: coordinator.computerActionSettings,
+                selectMode: coordinator.selectVoiceActionMode, setEnabled: coordinator.setComputerActionEnabled)
             SkillProfileSettingsSection(store: coordinator.skillProfiles)
 
             Section("Automatic Enter") {

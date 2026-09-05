@@ -47,6 +47,12 @@ profile for your terminal or editor and select it from the VoxFlow menu. For
 example, “use the research skill” can insert your configured `/research` or
 `$research` invocation verbatim. Profiles support portable JSON and a phrase preview.
 
+**Voice action controls** let you choose Off, Custom prompts only, Built-in
+computer actions only, or All, with a checklist for individual actions. Say
+“Voxflow, open Finder”, “Voxflow, copy that”, or “Voxflow, undo that”. Twelve
+built-ins cover common apps and shortcuts; their action stage needs no language
+model. Built-ins remain disabled until selected in the mode menu.
+
 Automatic Enter starts Off. In **Settings → Dictation Tools → Automatic Enter**,
 choose Voice Action Prompts only, ordinary dictation only, or both to submit
 automatically after insertion. The receiving application determines what Enter does.

@@ -48,9 +48,9 @@ behavior. Duplicate spoken forms in legacy files keep their first match.
 
 ## Voice Action Prompts and skill profiles
 
-**Voice Action Prompts** are configured spoken phrases that prepare an action by
-inserting its exact command. Configure them under **Voice Action Prompts** in
-Dictation Tools. The application receiving the command runs it on submission.
+**Voice Action Prompts** include your configured CLI commands and selectable
+built-in computer actions. Configure custom commands under **Voice Action Prompts**
+in Dictation Tools. The receiving CLI runs a command when it is submitted.
 
 A profile describes the CLI you are using, its allowed applications, and the
 exact command for each spoken skill. It does not install the skill into that CLI.
@@ -113,6 +113,59 @@ translation, meeting, prompt mode, and cockpit recording keep their existing
 behavior. Cockpit review commands such as `undo`, `memo`, and `copy` are unchanged.
 Existing ordinary voice snippets remain in their own section.
 
+## Selectable computer actions
+
+Under **Dictation Tools → Voice action controls**, choose:
+
+| Choice | Custom skill profile | Selected built-in computer actions |
+|---|---|---|
+| Off | Disabled | Disabled |
+| Custom prompts only (default) | Enabled when a profile is selected | Disabled |
+| Built-in computer actions only | Disabled | Enabled |
+| All | Enabled when a profile is selected | Enabled |
+
+The same menu is available in the palette. Expand **Built-in computer actions**
+to toggle each action and see its spoken phrase. Selecting All honors these
+individual choices. New action types introduced by a later update remain
+unselected until you enable them. Importing skill profiles does not enable
+computer actions or change these local preferences.
+
+| Action | Say |
+|---|---|
+| Open Finder, Safari, Terminal, Notes, or Calculator | “Voxflow, open Finder” (or the other app name) |
+| Copy selection | “Voxflow, copy that” |
+| Paste clipboard | “Voxflow, paste that” |
+| Select all | “Voxflow, select all” |
+| Undo / redo | “Voxflow, undo that” / “Voxflow, redo that” |
+| Find | “Voxflow, find in this app” |
+| New tab | “Voxflow, new tab” |
+
+Use normal quick Dictation; your existing capture-target setting still applies
+(Any app allows capture outside a text field). Built-in actions require the complete phrase and the
+Voxflow prefix; ordinary speech containing one of these phrases stays dictation.
+The spelling “Vox flow” and punctuation after the name are also recognized.
+Your selected custom skill mapping takes precedence if it matches the same phrase.
+The existing speech confidence and rejection rules still apply.
+
+App actions open their named application. Keyboard actions use the receiving
+app’s normal macOS shortcuts and require its original window/input to remain
+focused and available through Accessibility. Find and New tab depend on the
+receiving app’s shortcut support. Clipboard paste does not add Enter, including
+when Automatic Enter is set to Both. The submission menu applies only to dictated
+text and custom command insertion.
+
+Changing the action mode or an individual toggle withdraws pending voice actions;
+it cannot authorize audio already captured. Failed actions are not retried or
+inserted as text. The capture history shows the action and whether an application
+opened, a shortcut was sent, execution was cancelled, or execution failed.
+“Shortcut sent” records dispatch; the receiving app may handle it differently.
+
+The built-in registry is deterministic Python, running as a short-lived isolated
+process with standard-library imports only. It validates the action and prepares
+a typed operation; the signed macOS app applies it after checking permissions,
+cancellation, focus, and secure input. No model or backend server is needed for
+this action stage. Model-assisted multi-step planning is not included.
+
 ## Persistence and recovery
 
 Configuration lives under `~/Library/Application Support/VoxFlow/`:
@@ -171,3 +224,7 @@ be verified, it stays inserted and the status says **Enter skipped**. No second
 insertion or automatic retry follows. Receipts distinguish `enterPosted` from
 `skipped`; posting a key is not proof that the receiving application completed
 the requested action.
+
+Voice-action mode and individual action choices are local preferences. Shared
+version-1 skill-profile files retain their existing format. Built-in definitions
+ship with the application; importing a profile cannot replace them.

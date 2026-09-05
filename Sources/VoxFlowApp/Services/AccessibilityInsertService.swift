@@ -7,21 +7,27 @@ struct TextInsertionPolicy: Sendable, Equatable {
     let isVerbatim: Bool
     let submits: Bool
     let capturedFocus: CapturedInsertionFocus?
+    let voiceActionPermission: CapturedVoiceActions?
 
-    static let prose = Self(isVerbatim: false, submits: false, capturedFocus: nil)
-    static let verbatim = Self(isVerbatim: true, submits: false, capturedFocus: nil)
+    static let prose = Self(isVerbatim: false, submits: false, capturedFocus: nil, voiceActionPermission: nil)
+    static let verbatim = Self(isVerbatim: true, submits: false, capturedFocus: nil, voiceActionPermission: nil)
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.isVerbatim == rhs.isVerbatim && lhs.submits == rhs.submits
             && lhs.capturedFocus === rhs.capturedFocus
+            && lhs.voiceActionPermission === rhs.voiceActionPermission
     }
 
     func withSubmission(_ enabled: Bool) -> Self {
-        Self(isVerbatim: isVerbatim, submits: enabled, capturedFocus: capturedFocus)
+        Self(isVerbatim: isVerbatim, submits: enabled, capturedFocus: capturedFocus, voiceActionPermission: voiceActionPermission)
     }
 
     func withCapturedFocus(_ focus: CapturedInsertionFocus?) -> Self {
-        Self(isVerbatim: isVerbatim, submits: submits, capturedFocus: focus)
+        Self(isVerbatim: isVerbatim, submits: submits, capturedFocus: focus, voiceActionPermission: voiceActionPermission)
+    }
+
+    func withVoiceActionPermission(_ permission: CapturedVoiceActions?) -> Self {
+        Self(isVerbatim: isVerbatim, submits: submits, capturedFocus: capturedFocus, voiceActionPermission: permission)
     }
 
     func adjusted(_ text: String, precedingCharacter: Character?) -> String {
@@ -151,7 +157,8 @@ final class AccessibilityInsertService: TextInserting {
             return InsertResult(method: .failed, success: false, fallbackUsed: false,
                                 errorCode: Task.isCancelled ? "CANCELLED" : "TARGET_UNAVAILABLE")
         }
-        guard policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else {
+        guard policy.voiceActionPermission?.revoked != true,
+              policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else {
             return InsertResult(method: .failed, success: false, fallbackUsed: false, errorCode: "TARGET_CHANGED")
         }
         // R5.0: boundary-aware spacing — successive dictations used to land
@@ -196,6 +203,7 @@ final class AccessibilityInsertService: TextInserting {
         let currentFocus = copyOwnedFocusedElement(targetPID: targetApp.processIdentifier)
         let unchanged = (expectedFocus.flatMap { expected in currentFocus.map { CFEqual(expected, $0) } } ?? false)
             && policy.capturedFocus?.matchesForSubmission(targetPID: targetApp.processIdentifier) == true
+            && policy.voiceActionPermission?.revoked != true
         guard Self.maySubmit(cancelled: Task.isCancelled, targetActive: targetApp.isActive,
                              targetTerminated: targetApp.isTerminated, focusUnchanged: unchanged,
                              secureInputActive: IsSecureEventInputEnabled()) else { return .skipped }
@@ -312,7 +320,8 @@ final class AccessibilityInsertService: TextInserting {
         // Activation can fail, and cancellation can arrive during either wait.
         // Never post Cmd+V to the unrelated app that still owns the keyboard.
         guard !Task.isCancelled, targetApp.isActive, !targetApp.isTerminated else { return (false, nil) }
-        guard policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else { return (false, nil) }
+        guard policy.voiceActionPermission?.revoked != true,
+              policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else { return (false, nil) }
         let focus = policy.submits ? copyOwnedFocusedElement(targetPID: targetApp.processIdentifier) : nil
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
 

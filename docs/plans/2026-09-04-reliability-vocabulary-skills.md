@@ -19,10 +19,12 @@ and require a verified unchanged target before automatic Enter. Exercise this
 with disposable windows and a terminal input probe that records submissions
 without executing its input.
 
-Zola also proposed a registry of deterministic Python computer actions and later
-model-assisted selection of explicitly defined actions. Scope selection for that
-extension was requested while the submission controls are being completed; it is
-separate from speech translation or changing the current STT/polish providers.
+Zola also requested selectable custom/built-in/all action modes and deterministic
+Python computer commands. The first implemented set contains 12 actions, a
+per-action checklist, a Python registry and a signed native execution bridge; see
+[the action plan](2026-09-05-voice-action-prompts.md). Later model-assisted planning
+remains separate from this increment and from speech translation or changing
+the current STT/polish providers.
 
 **Outcome and scope**
 

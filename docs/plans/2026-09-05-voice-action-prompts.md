@@ -1,87 +1,94 @@
-# Voice Action Prompts: direct computer actions
+# Voice Action Prompts: selectable computer actions
 
-Product direction from Zola, September 5, 2026. This records the next extension;
-the current implementation inserts configured commands and optionally sends Enter.
-Direct Python actions and model-assisted action planning are not implemented yet.
+Product direction from Zola, September 5, 2026. The implemented increment contains
+custom CLI command insertion, optional Automatic Enter, selectable action modes,
+and twelve deterministic built-in computer actions. The expanded build still
+needs signed installation and live acceptance after desktop unlock.
 
-## Current increment
+## User controls
 
-The user names a phrase, its exact command, and the applications where it applies.
-Automatic Enter has independent scopes for Voice Action Prompts and ordinary
-dictation, with Off as the default. The app retains capture-time target identities,
-records insertion and submission separately, and withdraws pending Enter when
-the user changes its setting. This increment needs to pass its installed-app
-acceptance checks before direct actions are layered onto it.
+- Voice actions: Off, Custom prompts only (default), Built-in computer actions
+  only, or All. The palette and Settings expose the same choice.
+- A checklist enables or disables each built-in action. All honors that checklist;
+  a later software update does not silently select new actions.
+- Custom skill profiles retain their existing portable version-1 format and
+  explicit application restrictions. Profile import never changes local action
+  permissions or Automatic Enter preferences.
+- Automatic Enter has independent Off / Voice Action Prompts only / Ordinary
+  dictation only / Both scopes. It only follows successful automatic text or
+  custom-command insertion. Direct computer actions never inherit Enter.
 
-## First direct-action increment
+## Implemented first set
 
-Add a versioned action registry implemented in Python, with typed arguments and
-a signed macOS bridge for Accessibility operations. Each configured phrase chooses
-one action explicitly. Matching stays deterministic and complete-phrase based.
-Keep command insertion as an existing action type so saved profiles still work.
+Open Finder, Safari, Terminal, Notes, and Calculator; copy selection; paste
+clipboard; select all; undo; redo; find; and new tab. Each has a complete explicit
+phrase, such as “Voxflow, open Finder” or “Voxflow, copy that”. The alternative
+transcription “Vox flow” is accepted. Partial phrases, longer prose, and unprefixed
+built-in names do not trigger a computer action. An explicitly configured custom
+skill wins if both match. Existing transcript gates remain in force.
 
-The first candidate batch is deliberately concrete:
+The Python registry, `backend/app/computer_actions.py` and its versioned JSON
+catalogue, validates a registered action ID and prepares a typed operation. Its
+isolated process uses only the standard library; it does not start the backend
+server, load a model, interpret generated code, or perform an OS effect. The
+signed macOS bridge owns LaunchServices and keyboard effects, preserving the
+application’s identity for macOS permissions. Both sides validate the operation
+and arguments against defined application/shortcut sets.
 
-| Action | Configuration | Observable result |
-|---|---|---|
-| Open application | Selected bundle ID | The selected application launches |
-| Focus application | Selected running application | That application becomes active |
-| Open web address | Configured HTTP(S) address | Default browser opens that address |
-| Reveal file or folder | Path selected by the user | Finder reveals the configured item |
-| Copy text | Configured literal text | Clipboard contains the exact text |
-| Paste clipboard | Frozen editable target | Clipboard text is pasted into that target |
-| Select all | Frozen editable target | Text in that input is selected |
-| Undo | Frozen editable target | The receiving app handles its ordinary Undo command |
+The first set is fixed and shipped with the app. It does not yet provide arbitrary
+custom direct actions, user-selected URLs/files, or a direct-action import format.
+Users can already supply their own vocabulary and custom CLI skill profiles.
 
-This is a proposed initial batch, not a claim that these actions already ship.
-File deletion, sending email, purchases, and unrestricted shell execution are
-outside this batch. A profile should expose each action's effect and let the user
-choose automatic execution or review. Existing Automatic Enter modes apply to
-dictation/command insertion; they must not implicitly submit a separate clipboard
-action or add a keystroke after a non-text action.
+## Execution contract
 
-## Implementation contract
+Quick Dictation freezes action mode, enabled IDs, custom matcher, target process,
+and available Accessibility window/input identities at capture start. It matches
+the original accepted transcript before vocabulary corrections or prose cleanup.
+Changing action controls revokes pending commands; enabling controls cannot
+retroactively authorize earlier audio. The execution service checks permissions
+both before and after the cancellable Python preparation step.
 
-- Define an action ID, argument schema, handler, and result schema for each entry.
-  Reject unknown IDs, extra arguments, control characters where inappropriate,
-  oversized payloads, and unsupported schema versions before dispatch.
-- Python dispatches registered functions with validated arguments. Use fixed
-  executable argument arrays for OS helpers; do not interpolate a spoken phrase
-  into a shell command or execute generated Python.
-- Keep basic actions independent of model loading. The lightweight dispatcher
-  must not import Torch or start an LLM to open an application or copy text.
-- The signed macOS app owns focus-sensitive key/clipboard operations. Pass the
-  retained target and cancellation identity to that bridge and verify them
-  immediately before an effect. Do not infer a destination from the later
-  frontmost window.
-- Extend profile import/export with an explicit version migration. Imported
-  actions stay inactive until selected, and imports do not enable submission or
-  change local execution preferences.
-- Record action ID, execution status, timing, target, and whether the effect was
-  merely dispatched or actually observed. Avoid claiming an application finished
-  its work just because a process or key event was launched.
+The native bridge checks cancellation, screen lock, secure input, and supported
+arguments. App opens address the named destination through LaunchServices.
+Shortcuts require the original target to remain active with the same known
+window/input identities; there is no activation of a later input or retry after
+an uncertain effect. Failed recognized actions do not fall through to dictation.
 
-## Model-assisted actions afterward
+Receipts record action ID, destination, preparation-plus-dispatch time, and
+`applicationOpened`, `keyPosted`, `canceled`, or `failed`. Capture history renders
+those outcomes. No clipboard content is logged. Posting a key does not prove the
+receiving application completed its work. Python preparation has a two-second
+limit and cannot itself change the computer.
 
-Add a provider-neutral planner that can propose calls to the same registry.
-Claude Code, Codex, or a local model can be separate adapters after their actual
-interfaces are verified. The planner returns a structured plan of registered
-action IDs and arguments. It does not receive an unrestricted execution channel.
+## Validation and delivery
 
-Profiles define which actions the planner may propose and which can run without
-review. Show multi-step plans with their destinations and effects, validate each
-step again at execution, stop on failure/cancellation, and preserve completed-step
-receipts. Do not retry an effect automatically when its completion is unknown.
+Tests use fake preparation/execution boundaries and disposable configuration.
+Coverage includes exact phrase routing, disabled modes/actions, preference
+persistence, conservative upgrade selection, unknown/malformed operations,
+revocation during preparation, failures without retries, and honest receipts.
+Python protocol tests also confirm isolated startup without model/server imports.
+See [the validation record](../qa/2026-09-04-reliability-vocabulary-skills.md) for
+measured preparation costs, final suite results, and pending live checks.
 
-## Acceptance for the next increment
+Remaining acceptance: install the signed expanded bundle, exercise all settings
+and submission scopes, run controlled direct actions in disposable apps/documents,
+verify same-app window-change rejection and cancellation, restore QA configuration,
+and leave automatic submission and built-in actions disabled for ordinary use.
 
-Use mocked OS bridges for unit tests and disposable targets for live checks.
-Verify each action's normal result, invalid inputs, unavailable targets,
-cancellation, changes of window/field, and failed helpers. Confirm no model is
-loaded for deterministic actions. Test profile migrations and imported defaults.
-For a planner, test unknown tool names, malformed arguments, disallowed actions,
-interrupted plans, and ambiguous completion before enabling real effects.
+## Later model-assisted actions
 
-Deliver the registry, the chosen first batch, configuration UI, examples, measured
-dispatch costs, a signed installation, and an accurate live validation record as
-one bounded follow-up. Add further actions only through that same contract.
+A provider-neutral planner can propose calls to this same registry. Claude Code,
+Codex, and local/open-source model adapters require separate interface verification
+and implementation. No planner adapter or external model invocation is included
+in this increment.
+
+Profiles should define which actions a planner may propose and which need review.
+Show multi-step plans with destinations and effects; validate every step again
+at execution; stop on failure/cancellation and retain completed-step receipts.
+Never retry an ambiguous effect automatically or expose generated shell/Python
+execution as an alternative path around the registry.
+
+Future extensions can add user-selected applications, URLs and files, literal
+clipboard text, richer accessibility operations, and a versioned custom-action
+configuration format through the same contract. Each should ship with its own
+input validation, target handling, meaningful tests, and observed live acceptance.

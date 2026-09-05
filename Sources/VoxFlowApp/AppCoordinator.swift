@@ -156,6 +156,9 @@ final class AppCoordinator: ObservableObject {
     }()
     private(set) lazy var cockpitSnippets: SnippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
     private(set) lazy var skillProfiles = SkillProfileStore()
+    private(set) lazy var computerActionSettings = ComputerActionSettings()
+    private lazy var computerActions = ComputerActionService(
+        preparer: PythonComputerActionPreparer(), bridge: NativeComputerActionBridge())
     // BYOM (R3.6): providers.json store — shared file the backend registry
     // reads at launch. Mutations are followed by a backend restart so chains
     // take effect (SettingsView calls applyProviderChanges()).
@@ -216,6 +219,7 @@ final class AppCoordinator: ObservableObject {
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
     private var capturedSkillMatcher: SpokenSkillMatcher?
+    private var capturedVoiceActions: CapturedVoiceActions?
     private var capturedAutoSubmitMode: AutoSubmitMode = .off
     private var capturedInsertionFocus: CapturedInsertionFocus?
     private var lastTranscriptionConfidence: Double = 0.0
@@ -259,6 +263,7 @@ final class AppCoordinator: ObservableObject {
                 if newState == .idle {
                     self?.capturedTargetApp = nil
                     self?.capturedSkillMatcher = nil
+                    self?.capturedVoiceActions = nil
                     self?.capturedAutoSubmitMode = .off
                     self?.capturedInsertionFocus = nil
                     self?.lastTranscriptionConfidence = 0.0
@@ -692,7 +697,8 @@ final class AppCoordinator: ObservableObject {
         // audio is flowing — the manager defers it until this clears.
         backendManager.setCaptureActive(true)
         capturedTargetApp = NSWorkspace.shared.frontmostApplication
-        capturedSkillMatcher = commandLane ? nil : skillProfiles.activeMatcher
+        capturedVoiceActions = commandLane ? nil : computerActionSettings.snapshot()
+        capturedSkillMatcher = capturedVoiceActions?.mode.includesCustomPrompts == true ? skillProfiles.activeMatcher : nil
         capturedAutoSubmitMode = commandLane ? .off : state.autoSubmitMode
         capturedInsertionFocus = commandLane ? nil : CapturedInsertionFocus.capture(for: capturedTargetApp)
         focusMonitor.freeze()
@@ -961,9 +967,14 @@ final class AppCoordinator: ObservableObject {
             && state.onboardingPhase != .calibrating
             ? capturedSkillMatcher?.resolve(recognizedText, targetBundleID: capturedTargetApp?.bundleIdentifier)
             : nil
+        let resolvedAction: ComputerAction? = state.workflowMode == .dictation && !commandLane
+            && state.onboardingPhase != .calibrating && resolvedSkill == nil
+            && capturedVoiceActions?.mode.includesComputerActions == true
+            ? computerActionSettings.catalog.resolve(recognizedText, enabledIDs: capturedVoiceActions?.enabledIDs ?? [])
+            : nil
         // A recognized skill passes the same gate on its original utterance;
         // dictionary corrections cannot turn its name into a different command.
-        let rawText = resolvedSkill == nil ? cockpitDictionary.apply(to: recognizedText) : recognizedText
+        let rawText = resolvedSkill == nil && resolvedAction == nil ? cockpitDictionary.apply(to: recognizedText) : recognizedText
         lastTranscriptionConfidence = transcription.confidenceEstimate
         lastCaptureAudioStats = (
             audioSeconds: capturedAudio.durationSeconds,
@@ -1053,6 +1064,36 @@ final class AppCoordinator: ObservableObject {
 
         // Match the accepted original utterance before personal corrections can
         // rename a skill. Both the profile and target were frozen at capture start.
+        if resolvedSkill != nil || resolvedAction != nil, capturedVoiceActions?.revoked == true {
+            state.statusLine = "Voice action canceled — settings changed"
+            state.sessionState = .idle
+            return
+        }
+        if let action = resolvedAction, let permissions = capturedVoiceActions {
+            let started = ContinuousClock.now
+            let target = capturedTargetApp
+            let destination = action.operation == .openApplication ? action.argument : target?.localizedName
+            let status: String
+            do {
+                let outcome = try await computerActions.execute(action, permissions: permissions,
+                    target: target, focus: capturedInsertionFocus)
+                status = "\(action.name) — \(outcome.label)"
+                insertionAudit.recordComputerAction(id: action.id, name: action.name, outcome: outcome.rawValue,
+                    targetApp: destination, durationMs: started.elapsedMilliseconds())
+            } catch {
+                let canceled = Self.isUserCancellation(error)
+                status = canceled ? "Voice action canceled" : error.localizedDescription
+                insertionAudit.recordComputerAction(id: action.id, name: action.name, outcome: canceled ? "canceled" : "failed",
+                    targetApp: destination, durationMs: started.elapsedMilliseconds())
+            }
+            // LaunchServices may finish an already dispatched open after cancel.
+            // Keep its receipt, but never reset a newer capture's UI to idle.
+            guard !Task.isCancelled else { return }
+            state.statusLine = status
+            state.recordingDuration = 0
+            state.sessionState = .idle
+            return
+        }
         if let skill = resolvedSkill {
             try Task.checkCancellation()
             _ = await textInsertion.insertText(
@@ -1061,7 +1102,7 @@ final class AppCoordinator: ObservableObject {
                 timing: InsertTimingContext(pipelineStartedAt: trace.startedAt,
                                             sttMs: transcription.processingTimeMs, cleanupMs: 0),
                 policy: .verbatim.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: true))
-                    .withCapturedFocus(capturedInsertionFocus))
+                    .withCapturedFocus(capturedInsertionFocus).withVoiceActionPermission(capturedVoiceActions))
             state.recordingDuration = 0
             state.sessionState = .idle
             return
@@ -1430,6 +1471,18 @@ final class AppCoordinator: ObservableObject {
     func selectAutoSubmitMode(_ mode: AutoSubmitMode) {
         if mode != state.autoSubmitMode { capturedInsertionFocus?.revokeSubmission() }
         settings.selectAutoSubmitMode(mode)
+    }
+    func selectVoiceActionMode(_ mode: VoiceActionMode) {
+        if mode != computerActionSettings.mode {
+            capturedVoiceActions?.revoke()
+            capturedInsertionFocus?.revokeSubmission()
+        }
+        computerActionSettings.setMode(mode)
+        state.statusLine = "Voice actions: \(mode.displayName)"
+    }
+    func setComputerActionEnabled(_ enabled: Bool, id: String) {
+        if computerActionSettings.enabledIDs.contains(id) != enabled { capturedVoiceActions?.revoke() }
+        computerActionSettings.setEnabled(enabled, id: id)
     }
     func updateAppProfile(bundleID: String, profile: AppProfile?) { settings.updateAppProfile(bundleID: bundleID, profile: profile) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }

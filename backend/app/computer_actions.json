@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "actions": [
+    {"id":"open_finder","name":"Open Finder","phrases":["open finder"],"operation":"openApplication","argument":"com.apple.finder"},
+    {"id":"open_safari","name":"Open Safari","phrases":["open safari"],"operation":"openApplication","argument":"com.apple.Safari"},
+    {"id":"open_terminal","name":"Open Terminal","phrases":["open terminal"],"operation":"openApplication","argument":"com.apple.Terminal"},
+    {"id":"open_notes","name":"Open Notes","phrases":["open notes"],"operation":"openApplication","argument":"com.apple.Notes"},
+    {"id":"open_calculator","name":"Open Calculator","phrases":["open calculator"],"operation":"openApplication","argument":"com.apple.calculator"},
+    {"id":"copy_selection","name":"Copy selection","phrases":["copy that","copy selection"],"operation":"shortcut","argument":"copy"},
+    {"id":"paste_clipboard","name":"Paste clipboard","phrases":["paste that","paste clipboard"],"operation":"shortcut","argument":"paste"},
+    {"id":"select_all","name":"Select all","phrases":["select all"],"operation":"shortcut","argument":"selectAll"},
+    {"id":"undo","name":"Undo","phrases":["undo that","undo"],"operation":"shortcut","argument":"undo"},
+    {"id":"redo","name":"Redo","phrases":["redo that","redo"],"operation":"shortcut","argument":"redo"},
+    {"id":"find","name":"Find in this app","phrases":["find in this app","open find"],"operation":"shortcut","argument":"find"},
+    {"id":"new_tab","name":"New tab","phrases":["new tab","open a new tab"],"operation":"shortcut","argument":"newTab"}
+  ]
+}
