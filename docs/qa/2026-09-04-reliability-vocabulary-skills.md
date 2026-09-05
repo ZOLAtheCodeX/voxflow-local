@@ -288,3 +288,14 @@ identity. Installation, actual action/submission effects, UI persistence, and QA
 configuration restoration are still pending the locked desktop. The successful
 live observations earlier in this document apply to the original vocabulary and
 skill-profile build, not the newer direct-action/Automatic Enter extension.
+
+
+The bundled Python interpreter also prepared all twelve shipped action IDs and
+returned their exact registered operations in a host-access smoke check (no keys
+or app opens). A first restricted-sandbox bundled probe timed out after three
+seconds; subsequent host-access probes passed, including a 44.9 ms single request
+and the complete registry pass. Cold startup of the installed build remains part
+of live acceptance; the warm preparation benchmark is not a cold-start guarantee.
+Deep/strict verification of the final signed bundle passed. GitHub CI passed Swift
+build/tests, Python tests, and the non-blocking Ruff job on source commit
+`11e52bb` ([run](https://github.com/ZOLAtheCodeX/voxflow-local/actions/runs/33996929866)).

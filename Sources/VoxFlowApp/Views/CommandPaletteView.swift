@@ -54,6 +54,8 @@ struct CommandPaletteView: View {
             lastCaptureRow
 
             SkillProfileMenu(store: coordinator.skillProfiles)
+                .font(VF.captionFont)
+                .padding(.horizontal, VF.spacingLarge)
             VoiceActionModeMenu(settings: coordinator.computerActionSettings, selectMode: coordinator.selectVoiceActionMode)
                 .font(VF.captionFont)
                 .padding(.horizontal, VF.spacingLarge)
