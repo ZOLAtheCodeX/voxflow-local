@@ -155,6 +155,7 @@ final class AppCoordinator: ObservableObject {
         return DictionaryStore(fileURL: base.appendingPathComponent("dictionary.json"))
     }()
     private(set) lazy var cockpitSnippets: SnippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
+    private(set) lazy var skillProfiles = SkillProfileStore()
     // BYOM (R3.6): providers.json store — shared file the backend registry
     // reads at launch. Mutations are followed by a backend restart so chains
     // take effect (SettingsView calls applyProviderChanges()).
@@ -214,6 +215,7 @@ final class AppCoordinator: ObservableObject {
     private var fnTriggeredCaptureInProgress = false
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
+    private var capturedSkillMatcher: SpokenSkillMatcher?
     private var lastTranscriptionConfidence: Double = 0.0
     /// Audio stats of the last decoded capture (true input level, pre-gain),
     /// threaded onto the workflow request → candidate → insert receipt so
@@ -254,6 +256,7 @@ final class AppCoordinator: ObservableObject {
                 self?.recordingOverlay.sessionStateChanged(newState)
                 if newState == .idle {
                     self?.capturedTargetApp = nil
+                    self?.capturedSkillMatcher = nil
                     self?.lastTranscriptionConfidence = 0.0
                     self?.state.recordingDuration = 0
                     self?.focusMonitor.unfreeze()
@@ -685,6 +688,7 @@ final class AppCoordinator: ObservableObject {
         // audio is flowing — the manager defers it until this clears.
         backendManager.setCaptureActive(true)
         capturedTargetApp = NSWorkspace.shared.frontmostApplication
+        capturedSkillMatcher = commandLane ? nil : skillProfiles.activeMatcher
         focusMonitor.freeze()
         sessionCounter += 1
         state.isCommandLaneActive = commandLane
@@ -946,8 +950,14 @@ final class AppCoordinator: ObservableObject {
         // R5.1: dictionary post-correction now applies on the quick path too
         // (it was cockpit-only). Biasing improves recognition; this catches
         // what biasing missed.
-        let rawText = cockpitDictionary.apply(
-            to: transcription.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let recognizedText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedSkill: SpokenSkill? = state.workflowMode == .dictation && !commandLane
+            && state.onboardingPhase != .calibrating
+            ? capturedSkillMatcher?.resolve(recognizedText, targetBundleID: capturedTargetApp?.bundleIdentifier)
+            : nil
+        // A recognized skill passes the same gate on its original utterance;
+        // dictionary corrections cannot turn its name into a different command.
+        let rawText = resolvedSkill == nil ? cockpitDictionary.apply(to: recognizedText) : recognizedText
         lastTranscriptionConfidence = transcription.confidenceEstimate
         lastCaptureAudioStats = (
             audioSeconds: capturedAudio.durationSeconds,
@@ -1032,6 +1042,21 @@ final class AppCoordinator: ObservableObject {
 
         if commandLane {
             executeCommandLane(rawText: rawText)
+            return
+        }
+
+        // Match the accepted original utterance before personal corrections can
+        // rename a skill. Both the profile and target were frozen at capture start.
+        if let skill = resolvedSkill {
+            try Task.checkCancellation()
+            _ = await textInsertion.insertText(
+                skill.command, statusSuffix: "Skill ‘\(skill.name)’ inserted",
+                targetApp: capturedTargetApp,
+                timing: InsertTimingContext(pipelineStartedAt: trace.startedAt,
+                                            sttMs: transcription.processingTimeMs, cleanupMs: 0),
+                policy: .verbatim)
+            state.recordingDuration = 0
+            state.sessionState = .idle
             return
         }
 

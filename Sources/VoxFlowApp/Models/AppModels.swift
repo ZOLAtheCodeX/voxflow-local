@@ -821,6 +821,8 @@ struct DictionaryEntry: Codable, Identifiable, Equatable, Sendable {
     let right: String
     var context: String?
     let learnedAt: Date
+    /// Optional for compatibility with dictionaries saved before prioritization.
+    var prioritized: Bool? = nil
 }
 
 enum SnippetScope: String, Codable, CaseIterable, Sendable {

@@ -53,6 +53,10 @@ struct CommandPaletteView: View {
 
             lastCaptureRow
 
+            SkillProfileMenu(store: coordinator.skillProfiles)
+                .font(VF.captionFont)
+                .padding(.horizontal, VF.spacingLarge)
+
             footerBar
         }
         .padding(.vertical, VF.spacingMedium)
