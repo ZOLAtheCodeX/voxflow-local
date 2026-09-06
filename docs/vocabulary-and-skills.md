@@ -158,6 +158,12 @@ receiving app’s shortcut support. Clipboard paste does not add Enter, includin
 when Automatic Enter is set to Both. The submission menu applies only to dictated
 text and custom command insertion.
 
+Changing the active skill profile—including switching it Off, deleting it, editing
+its mappings or application list, or replacing it through import—withdraws pending
+custom commands and their Enter permission. The captured command stays canceled;
+it does not turn into ordinary dictation. Failed saves and changes to inactive
+profiles leave current captures alone.
+
 Changing the action mode, prefix choice, or an individual toggle withdraws pending voice actions;
 it cannot authorize audio already captured. Failed actions are not retried or
 inserted as text. The capture history shows the action and whether an application

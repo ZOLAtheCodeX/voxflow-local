@@ -1,0 +1,75 @@
+# Profile revocation: independent review and fix
+
+Reviewed baseline: c871045 (PR #16). This follow-up supersedes broad revocation
+claims in the original delivery record; the original live checks covered the
+master action mode, built-in switches, prefix setting, and Automatic Enter—not
+Skills → Off or active-profile edits during a capture.
+
+## Findings verified independently
+
+1. Skills → Off, active-profile deletion/switching, and edits/import replacement
+   changed SkillProfileStore without revoking AppCoordinator’s captured matcher
+   permission. The old command could still insert and, with the captured Enter
+   setting enabled and unchanged target focus, submit. This is a fix-before-merge
+   defect. Clearing the captured matcher would be incorrect because it permits
+   ordinary-dictation fallback instead of cancellation.
+2. Temporary paste preserves only a string, losing other clipboard representations
+   and failing to restore an empty clipboard. The same code exists on master.
+   Track it separately in [issue #17](https://github.com/ZOLAtheCodeX/voxflow-local/issues/17).
+3. Related cancellation gap: if permissions are withdrawn while the insertion
+   service is waiting to paste, that service can refuse the effect but the text
+   coordinator would still make a recovery clipboard copy. The new guard covers
+   that consequence of revocation; it does not rewrite pasteboard preservation.
+
+Installed preferences were read independently before any change: Automatic Enter
+Off, action mode All, prefix optional. The prefix preference controls built-in
+computer actions only; custom skill names already support bare phrases. The
+installed setup therefore limits automatic submission, but does not cure finding 1.
+
+The previous nine observed computer-action effects were not re-tested as part of
+this focused fix. Notes recognition, Safari foreground, Terminal New tab, and the
+short-command [Pop] annotation retain their earlier verification limits.
+
+## Implementation
+
+AppCoordinator installs one synchronous subscription to the store’s profiles and
+active-profile ID. It derives the effective active profile, removes duplicate
+values, and ignores the initial emission. A changed active profile revokes the
+current capture’s voice-action permission and pending Enter when that capture
+permits custom prompts. It retains the original matcher to classify old audio as
+a canceled command. Store notifications occur after successful persistence, so
+failed saves do not withdraw valid permissions. Inactive-profile changes and
+no-op saves do not revoke. Built-in-only captures are unaffected.
+
+The text coordinator rejects already revoked commands before entering insertion,
+and avoids the failure clipboard fallback when permission is revoked during an
+await. Already posted text keeps its receipt; the insertion service independently
+withholds Enter. A narrow injected failure-copy closure allows regression tests
+to prove the absence of clipboard side effects without rewriting the pasteboard.
+
+## Verification
+
+Eight regression tests exercise the exact subscription installed by AppCoordinator,
+real temporary profile-store commits, the real TextInsertionCoordinator, and fake
+insertion/clipboard boundaries. They do not instantiate the AppCoordinator
+singleton or operate the microphone, keyboard, Accessibility insertion, or system
+clipboard. Coverage includes:
+
+- Off, removal, switching, command/alias/application edits, removing a mapping,
+  and replacing the active profile through import;
+- retained old-command classification and no insertion under all four Enter modes;
+- initial emission, no-op updates, inactive-profile edits, conflict keep behavior,
+  invalid changes, and failed persistence;
+- revocation during insertion wait without a recovery copy;
+- already-posted text retaining its skipped-Enter receipt without retry;
+- ordinary insertion failures retaining their intentional recovery copy;
+- new settings not granting authority to old audio and fresh captures remaining
+  usable; profile changes leaving built-in-only captures alone.
+
+The initial eight tests and the combined 36 focused tests passed. A first controlled
+mutation check was blocked by the nested Swift manifest sandbox and is not counted
+as a test result. The production sources were restored afterward. Both host-access mutation checks then failed as intended when their respective
+fix was removed, and restored sources passed the full Swift suite: **759 tests,
+3 skipped, 0 failures**. This verifies the new tests detect missing revocation
+wiring and the stale recovery-copy path separately. Signed installation and CI
+results are recorded in the delivery continuation below.

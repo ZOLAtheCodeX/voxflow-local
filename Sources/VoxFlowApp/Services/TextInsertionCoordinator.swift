@@ -30,14 +30,20 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     private let log = Logger(subsystem: "local.voxflow.app", category: "TextInsertion")
     private let state: AppState
     private let insertService: TextInserting
+    private let copyFailedInsertion: (String) -> Void
 
     /// Ghost-text forensics: every insertion gets a local JSONL receipt.
     private let audit: InsertionAuditLog
 
-    init(state: AppState, insertService: TextInserting, audit: InsertionAuditLog? = nil) {
+    init(state: AppState, insertService: TextInserting, audit: InsertionAuditLog? = nil,
+         copyFailedInsertion: @escaping (String) -> Void = {
+             NSPasteboard.general.clearContents()
+             NSPasteboard.general.setString($0, forType: .string)
+         }) {
         self.state = state
         self.insertService = insertService
         self.audit = audit ?? InsertionAuditLog()
+        self.copyFailedInsertion = copyFailedInsertion
     }
 
     func insertCurrentText() async {
@@ -142,13 +148,15 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
         _ text: String, statusSuffix: String, targetApp: NSRunningApplication?,
         timing: InsertTimingContext?, policy: TextInsertionPolicy
     ) async -> Bool {
-        guard !text.isEmpty, !Task.isCancelled else { return false }
+        guard !text.isEmpty, !Task.isCancelled, policy.voiceActionPermission?.revoked != true else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
         let started = ContinuousClock.now
         let result = await insertService.insert(text: text, targetApp: targetApp, policy: policy)
-        // A cancellation before posting must not fall through to a stale clipboard copy.
-        guard result.success || !Task.isCancelled else { return false }
+        // Permission withdrawal during the paste wait is cancellation too. Do
+        // not turn a withheld command into a clipboard fallback. If text already
+        // landed, retain its receipt; the service independently withholds Enter.
+        guard result.success || (!Task.isCancelled && policy.voiceActionPermission?.revoked != true) else { return false }
         let elapsedMs = started.elapsedMilliseconds()
         log.info("insertText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
@@ -184,8 +192,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             return true
         } else {
             state.failedInsertCount += 1
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            copyFailedInsertion(text)
             state.statusLine = "Auto-insert failed — copied to clipboard"
             return false
         }

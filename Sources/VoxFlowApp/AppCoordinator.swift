@@ -273,6 +273,11 @@ final class AppCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        Self.observeSkillProfileChanges(in: skillProfiles,
+            capturedPermission: { [weak self] in self?.capturedVoiceActions },
+            revokeSubmission: { [weak self] in self?.capturedInsertionFocus?.revokeSubmission() })
+            .store(in: &cancellables)
+
         cockpit.onHandoffRequested = { [weak self] in self?.requestAssistantHandoff() }
 
         // Stale-backend hardening (2026-06-12): an open cockpit makes
@@ -1474,6 +1479,28 @@ final class AppCoordinator: ObservableObject {
         if mode != state.autoSubmitMode { capturedInsertionFocus?.revokeSubmission() }
         settings.selectAutoSubmitMode(mode)
     }
+    /// Shared with the wiring tests: no coordinator singleton, microphone, or
+    /// keyboard services are needed to exercise real store notifications.
+    static func observeSkillProfileChanges(
+        in store: SkillProfileStore,
+        capturedPermission: @escaping () -> CapturedVoiceActions?,
+        revokeSubmission: @escaping () -> Void
+    ) -> AnyCancellable {
+        store.$profiles.combineLatest(store.$activeProfileID)
+            .map { profiles, activeID in profiles.first { $0.id == activeID } }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { _ in
+                // Store mutations publish synchronously on MainActor, only after
+                // saving succeeds. Ignore inactive-profile edits and no-op saves.
+                guard let permission = capturedPermission(), permission.mode.includesCustomPrompts else { return }
+                permission.revoke()
+                revokeSubmission()
+                // Keep the captured matcher: clearing it would turn a canceled
+                // command into ordinary dictation, potentially followed by Enter.
+            }
+    }
+
     func selectVoiceActionMode(_ mode: VoiceActionMode) {
         if mode != computerActionSettings.mode {
             capturedVoiceActions?.revoke()

@@ -19,6 +19,13 @@ profile removed, and the app restarted with STT ready. The personal setup retain
 All selected actions with optional naming and Automatic Enter Off. Fresh-install
 defaults remain custom prompts only, naming required, and Automatic Enter Off.
 
+**September 6 audit correction:** the original revocation checks did not cover
+Skills → Off, active-profile removal, or mapping edits. Those paths had a separate
+permission gap. See the [independent review and fix](2026-09-06-profile-revocation.md)
+for the precise coverage and follow-up validation. Original clipboard restoration
+below refers to the private acceptance harness; the app’s temporary paste path
+still has the separately tracked [clipboard issue #17](https://github.com/ZOLAtheCodeX/voxflow-local/issues/17).
+
 ## Confirmed changes
 
 - Accepted captures no longer disappear solely because their duration is at or

@@ -152,7 +152,11 @@ ordinary dictation only / both scopes; freeze the choice and AX window/field at
 capture start. Post Return only after successful insertion and final target,
 focus, cancellation, and secure-input checks. Record submission separately. Keep profiles explicitly selected, bound
 to allowed app bundle IDs, and separate from cockpit commands and snippets.
-Commands reject newlines/control characters. Unit tests use insertion fakes.
+Commands reject newlines/control characters. Successful changes to the effective
+active skill profile revoke captured permissions and pending Enter through the
+coordinator subscription. Retain the captured matcher so cancellation cannot fall
+through to prose. Revoked insertion failures must not become recovery clipboard
+copies. Unit tests use insertion fakes and the shared subscription seam.
 
 Built-in computer actions use `computer_actions.json` and a standalone isolated
 Python preparer, then `ComputerActionService` and the signed native bridge. Keep
