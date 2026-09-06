@@ -8,8 +8,6 @@ struct SettingsView: View {
     @ObservedObject var snippetStore: SnippetStore
     @ObservedObject var chainStore: ChainStore
     @ObservedObject var providerStore: ProviderConfigStore
-    @State private var newWrong = ""
-    @State private var newRight = ""
     @State private var newSnippetKeyword = ""
     @State private var newSnippetText = ""
     @State private var newSnippetScope: SnippetScope = .global
@@ -445,32 +443,23 @@ struct SettingsView: View {
 
     private var toolsTab: some View {
         Form {
-            Section("Dictionary") {
-                if dictionary.entries.isEmpty {
-                    Text("No corrections yet. Fix a mangled term in the cockpit review to teach VoxFlow.")
-                        .font(VF.captionFont).foregroundStyle(.secondary)
-                }
-                ForEach(dictionary.entries) { entry in
-                    HStack {
-                        Text(entry.wrong).foregroundStyle(.secondary)
-                        Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
-                        Text(entry.right)
-                        Spacer()
-                        Button(role: .destructive) { dictionary.remove(entry.id) } label: {
-                            Image(systemName: "trash")
-                        }.buttonStyle(.borderless)
+            VocabularySettingsSection(dictionary: dictionary)
+            ComputerActionSettingsSection(settings: coordinator.computerActionSettings,
+                selectMode: coordinator.selectVoiceActionMode, setEnabled: coordinator.setComputerActionEnabled,
+                setRequiresPrefix: coordinator.setComputerActionRequiresPrefix)
+            SkillProfileSettingsSection(store: coordinator.skillProfiles)
+
+            Section("Automatic Enter") {
+                Picker("Press Enter after", selection: Binding(
+                    get: { state.autoSubmitMode },
+                    set: { coordinator.selectAutoSubmitMode($0) }
+                )) {
+                    ForEach(AutoSubmitMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
                     }
                 }
-                HStack {
-                    TextField("recognized", text: $newWrong)
-                    Image(systemName: "arrow.right")
-                    TextField("correct", text: $newRight)
-                    Button("Add") {
-                        guard !newWrong.isEmpty, !newRight.isEmpty else { return }
-                        dictionary.add(wrong: newWrong, right: newRight, context: "manual")
-                        newWrong = ""; newRight = ""
-                    }
-                }
+                Text("Press Enter once after successful automatic insertion. Depending on the app, Enter submits a message, runs a command, or adds a new line. Off leaves submission to you.")
+                    .font(VF.captionFont).foregroundStyle(.secondary)
             }
 
             Section("Voice Snippets") {

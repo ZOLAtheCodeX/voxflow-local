@@ -2,6 +2,24 @@
   "_comment": "Shared behavioral contract for the Whisper hallucination filter. Consumed by backend/tests/test_utils.py (Python) and Tests/VoxFlowAppTests/HallucinationFilterTests.swift (Swift). Every case must produce `expected` in BOTH implementations. short_audio means source clip < 3s.",
   "cases": [
     {
+      "text": "[BLANK_AUDIO]",
+      "short_audio": true,
+      "expected": true,
+      "note": "Observed decoder marker on a short synthetic ambient-noise clip"
+    },
+    {
+      "text": "[BLANK_AUDIO]",
+      "short_audio": false,
+      "expected": true,
+      "note": "A non-speech marker is not dictated content at any duration"
+    },
+    {
+      "text": "Please remove the blank audio from the recording.",
+      "short_audio": true,
+      "expected": false,
+      "note": "Ordinary speech about audio remains content"
+    },
+    {
       "text": "Hello.",
       "short_audio": true,
       "expected": true,

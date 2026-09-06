@@ -155,6 +155,10 @@ final class AppCoordinator: ObservableObject {
         return DictionaryStore(fileURL: base.appendingPathComponent("dictionary.json"))
     }()
     private(set) lazy var cockpitSnippets: SnippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
+    private(set) lazy var skillProfiles = SkillProfileStore()
+    private(set) lazy var computerActionSettings = ComputerActionSettings()
+    private lazy var computerActions = ComputerActionService(
+        preparer: PythonComputerActionPreparer(), bridge: NativeComputerActionBridge())
     // BYOM (R3.6): providers.json store — shared file the backend registry
     // reads at launch. Mutations are followed by a backend restart so chains
     // take effect (SettingsView calls applyProviderChanges()).
@@ -214,6 +218,10 @@ final class AppCoordinator: ObservableObject {
     private var fnTriggeredCaptureInProgress = false
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
+    private var capturedSkillMatcher: SpokenSkillMatcher?
+    private var capturedVoiceActions: CapturedVoiceActions?
+    private var capturedAutoSubmitMode: AutoSubmitMode = .off
+    private var capturedInsertionFocus: CapturedInsertionFocus?
     private var lastTranscriptionConfidence: Double = 0.0
     /// Audio stats of the last decoded capture (true input level, pre-gain),
     /// threaded onto the workflow request → candidate → insert receipt so
@@ -254,11 +262,20 @@ final class AppCoordinator: ObservableObject {
                 self?.recordingOverlay.sessionStateChanged(newState)
                 if newState == .idle {
                     self?.capturedTargetApp = nil
+                    self?.capturedSkillMatcher = nil
+                    self?.capturedVoiceActions = nil
+                    self?.capturedAutoSubmitMode = .off
+                    self?.capturedInsertionFocus = nil
                     self?.lastTranscriptionConfidence = 0.0
                     self?.state.recordingDuration = 0
                     self?.focusMonitor.unfreeze()
                 }
             }
+            .store(in: &cancellables)
+
+        Self.observeSkillProfileChanges(in: skillProfiles,
+            capturedPermission: { [weak self] in self?.capturedVoiceActions },
+            revokeSubmission: { [weak self] in self?.capturedInsertionFocus?.revokeSubmission() })
             .store(in: &cancellables)
 
         cockpit.onHandoffRequested = { [weak self] in self?.requestAssistantHandoff() }
@@ -685,6 +702,10 @@ final class AppCoordinator: ObservableObject {
         // audio is flowing — the manager defers it until this clears.
         backendManager.setCaptureActive(true)
         capturedTargetApp = NSWorkspace.shared.frontmostApplication
+        capturedVoiceActions = commandLane ? nil : computerActionSettings.snapshot()
+        capturedSkillMatcher = capturedVoiceActions?.mode.includesCustomPrompts == true ? skillProfiles.activeMatcher : nil
+        capturedAutoSubmitMode = commandLane ? .off : state.autoSubmitMode
+        capturedInsertionFocus = commandLane ? nil : CapturedInsertionFocus.capture(for: capturedTargetApp)
         focusMonitor.freeze()
         sessionCounter += 1
         state.isCommandLaneActive = commandLane
@@ -946,8 +967,21 @@ final class AppCoordinator: ObservableObject {
         // R5.1: dictionary post-correction now applies on the quick path too
         // (it was cockpit-only). Biasing improves recognition; this catches
         // what biasing missed.
-        let rawText = cockpitDictionary.apply(
-            to: transcription.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let recognizedText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedSkill: SpokenSkill? = state.workflowMode == .dictation && !commandLane
+            && state.onboardingPhase != .calibrating
+            ? capturedSkillMatcher?.resolve(recognizedText, targetBundleID: capturedTargetApp?.bundleIdentifier)
+            : nil
+        let resolvedAction: ComputerAction? = state.workflowMode == .dictation && !commandLane
+            && state.onboardingPhase != .calibrating && resolvedSkill == nil
+            && capturedVoiceActions?.mode.includesComputerActions == true
+            ? computerActionSettings.catalog.resolve(recognizedText,
+                enabledIDs: capturedVoiceActions?.enabledIDs ?? [],
+                requiresPrefix: capturedVoiceActions?.requiresPrefix ?? true)
+            : nil
+        // A recognized skill passes the same gate on its original utterance;
+        // dictionary corrections cannot turn its name into a different command.
+        let rawText = resolvedSkill == nil && resolvedAction == nil ? cockpitDictionary.apply(to: recognizedText) : recognizedText
         lastTranscriptionConfidence = transcription.confidenceEstimate
         lastCaptureAudioStats = (
             audioSeconds: capturedAudio.durationSeconds,
@@ -1035,6 +1069,52 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
+        // Match the accepted original utterance before personal corrections can
+        // rename a skill. Both the profile and target were frozen at capture start.
+        if resolvedSkill != nil || resolvedAction != nil, capturedVoiceActions?.revoked == true {
+            state.statusLine = "Voice action canceled — settings changed"
+            state.sessionState = .idle
+            return
+        }
+        if let action = resolvedAction, let permissions = capturedVoiceActions {
+            let started = ContinuousClock.now
+            let target = capturedTargetApp
+            let destination = action.operation == .openApplication ? action.argument : target?.localizedName
+            let status: String
+            do {
+                let outcome = try await computerActions.execute(action, permissions: permissions,
+                    target: target, focus: capturedInsertionFocus)
+                status = "\(action.name) — \(outcome.label)"
+                insertionAudit.recordComputerAction(id: action.id, name: action.name, outcome: outcome.rawValue,
+                    targetApp: destination, durationMs: started.elapsedMilliseconds())
+            } catch {
+                let canceled = Self.isUserCancellation(error)
+                status = canceled ? "Voice action canceled" : error.localizedDescription
+                insertionAudit.recordComputerAction(id: action.id, name: action.name, outcome: canceled ? "canceled" : "failed",
+                    targetApp: destination, durationMs: started.elapsedMilliseconds())
+            }
+            // LaunchServices may finish an already dispatched open after cancel.
+            // Keep its receipt, but never reset a newer capture's UI to idle.
+            guard !Task.isCancelled else { return }
+            state.statusLine = status
+            state.recordingDuration = 0
+            state.sessionState = .idle
+            return
+        }
+        if let skill = resolvedSkill {
+            try Task.checkCancellation()
+            _ = await textInsertion.insertText(
+                skill.command, statusSuffix: "Skill ‘\(skill.name)’ inserted",
+                targetApp: capturedTargetApp,
+                timing: InsertTimingContext(pipelineStartedAt: trace.startedAt,
+                                            sttMs: transcription.processingTimeMs, cleanupMs: 0),
+                policy: .verbatim.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: true))
+                    .withCapturedFocus(capturedInsertionFocus).withVoiceActionPermission(capturedVoiceActions))
+            state.recordingDuration = 0
+            state.sessionState = .idle
+            return
+        }
+
         // Personal voice snippets (quick-dictation surface). A snippet is verbatim
         // local user text: insert the expansion into the frozen target and short-
         // circuit before cleanup/polish/privacy-gate — it must NOT be polished or
@@ -1057,7 +1137,9 @@ final class AppCoordinator: ObservableObject {
             _ = await textInsertion.insertText(
                 snippet.text,
                 statusSuffix: "Snippet '\(snippet.keyword)' inserted — \(appLabel)",
-                targetApp: capturedTargetApp
+                targetApp: capturedTargetApp, timing: nil,
+                policy: .prose.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: false))
+                    .withCapturedFocus(capturedInsertionFocus)
             )
             state.recordingDuration = 0
             state.sessionState = .idle
@@ -1393,6 +1475,48 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Settings Forwarding
 
     func selectInsertBehavior(_ behavior: InsertBehavior) { settings.selectInsertBehavior(behavior) }
+    func selectAutoSubmitMode(_ mode: AutoSubmitMode) {
+        if mode != state.autoSubmitMode { capturedInsertionFocus?.revokeSubmission() }
+        settings.selectAutoSubmitMode(mode)
+    }
+    /// Tested directly without the coordinator singleton, microphone, or keyboard
+    /// services. Helper tests do not cover its installation in init above.
+    static func observeSkillProfileChanges(
+        in store: SkillProfileStore,
+        capturedPermission: @escaping () -> CapturedVoiceActions?,
+        revokeSubmission: @escaping () -> Void
+    ) -> AnyCancellable {
+        store.$profiles.combineLatest(store.$activeProfileID)
+            .map { profiles, activeID in profiles.first { $0.id == activeID } }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { _ in
+                // Store mutations publish synchronously on MainActor, only after
+                // saving succeeds. Ignore inactive-profile edits and no-op saves.
+                guard let permission = capturedPermission(), permission.mode.includesCustomPrompts else { return }
+                permission.revoke()
+                revokeSubmission()
+                // Keep the captured matcher: clearing it would turn a canceled
+                // command into ordinary dictation, potentially followed by Enter.
+            }
+    }
+
+    func selectVoiceActionMode(_ mode: VoiceActionMode) {
+        if mode != computerActionSettings.mode {
+            capturedVoiceActions?.revoke()
+            capturedInsertionFocus?.revokeSubmission()
+        }
+        computerActionSettings.setMode(mode)
+        state.statusLine = "Voice actions: \(mode.displayName)"
+    }
+    func setComputerActionEnabled(_ enabled: Bool, id: String) {
+        if computerActionSettings.enabledIDs.contains(id) != enabled { capturedVoiceActions?.revoke() }
+        computerActionSettings.setEnabled(enabled, id: id)
+    }
+    func setComputerActionRequiresPrefix(_ required: Bool) {
+        if computerActionSettings.requiresPrefix != required { capturedVoiceActions?.revoke() }
+        computerActionSettings.setRequiresPrefix(required)
+    }
     func updateAppProfile(bundleID: String, profile: AppProfile?) { settings.updateAppProfile(bundleID: bundleID, profile: profile) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }
     func setMeetingModeEnabled(_ isEnabled: Bool) { settings.setMeetingModeEnabled(isEnabled) }
@@ -1733,6 +1857,8 @@ final class AppCoordinator: ObservableObject {
             // stage the pipeline already recorded before handing off here.
             request.pipelineStartedAt = trace.startedAt
             request.sttMs = trace.durationMs(of: "stt")
+            request.autoSubmit = self.capturedAutoSubmitMode.includes(voiceActionPrompt: false)
+            request.insertionFocus = self.capturedInsertionFocus
 
             try await self.dictationWorkflow.processDictation(request) { name, startedAt, detail in
                 trace.recordStage(name, startedAt: startedAt, detail: detail)
@@ -2033,7 +2159,11 @@ final class AppCoordinator: ObservableObject {
         // Observe sessionState and commandLane for icon updates + auto-open on review
         state.$sessionState
             .combineLatest(state.$isCommandLaneActive)
-            .receive(on: RunLoop.main)
+            // Keep this deferred (Published emits before the properties update),
+            // but deliver through the main dispatch executor. A live release
+            // capture exposed a crash in the CF run-loop executor's isolation
+            // check when entering this MainActor-isolated sink.
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] newState, _ in
                 guard let self else { return }
                 self.menuBarPanel?.updateIcon(state: Self.menuBarIconState(for: self.state.sessionState, commandLane: self.state.isCommandLaneActive))

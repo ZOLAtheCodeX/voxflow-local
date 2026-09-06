@@ -14,10 +14,19 @@ struct CaptureReceiptRowModel: Equatable {
     let audioFileURL: URL?
 
     init(receipt: CaptureReceipt, now: Date = Date()) {
-        isReject = receipt.event == .reject
+        isReject = receipt.event == .reject || (receipt.event == .computerAction && receipt.actionOutcome == "failed")
         relativeTime = Self.relative(receipt.ts, now: now)
         let label = receipt.sourceLabel
-        chips = label.tokens
+        if receipt.event == .computerAction {
+            let outcome: String = switch receipt.actionOutcome {
+            case "applicationOpened": "Application opened"
+            case "keyPosted": "Shortcut sent"
+            case "canceled": "Canceled"
+            case "failed": "Failed"
+            default: "Status unavailable"
+            }
+            chips = ["Computer action", outcome]
+        } else { chips = label.tokens }
         targetLabel = receipt.target ?? label.appLabel
         var parts: [String] = []
         if let seconds = receipt.audioSeconds {
@@ -26,8 +35,9 @@ struct CaptureReceiptRowModel: Equatable {
         if let confidence = receipt.confidence {
             parts.append("\(Int((confidence * 100).rounded()))%")
         }
+        if let milliseconds = receipt.actionMs { parts.append("\(milliseconds) ms") }
         detail = parts.joined(separator: " · ")
-        let text = receipt.text ?? ""
+        let text = receipt.event == .computerAction ? (receipt.source ?? receipt.actionID ?? "Computer action") : (receipt.text ?? "")
         snippet = text.count > 60 ? String(text.prefix(60)) + "…" : text
         rejectReason = receipt.reason
         audioFileURL = receipt.audioFile.map { URL(fileURLWithPath: $0) }

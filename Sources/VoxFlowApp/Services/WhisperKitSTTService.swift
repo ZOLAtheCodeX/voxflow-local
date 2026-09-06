@@ -59,11 +59,17 @@ final class WhisperKitSTTService: ChunkTranscribing {
     /// fallbacks instead of 5 (up to 6 full passes on exactly the marginal
     /// clips that already struggle; high-T passes mostly produced garbage
     /// the gate then had to catch).
-    nonisolated static func makeDecodeOptions(promptTokens: [Int]?) -> DecodingOptions {
-        DecodingOptions(
+    nonisolated static func makeDecodeOptions(
+        promptTokens: [Int]?, audioDurationSeconds: Double? = nil
+    ) -> DecodingOptions {
+        // WhisperKit skips windows no longer than windowClipTime. Keep the
+        // normal one-second tail guard, but let accepted short captures decode.
+        let shortCapture = audioDurationSeconds.map { $0 > 0 && $0 <= 1 } ?? false
+        return DecodingOptions(
             language: "en",
             temperatureFallbackCount: 3,
             wordTimestamps: false,
+            windowClipTime: shortCapture ? 0 : 1,
             promptTokens: promptTokens,
             compressionRatioThreshold: 2.4,
             logProbThreshold: -1.0,
@@ -163,7 +169,8 @@ final class WhisperKitSTTService: ChunkTranscribing {
         // noSpeechThreshold marks a segment silent when noSpeechProb exceeds
         // it AND avgLogprob falls below logProbThreshold; segment noSpeechProb
         // also feeds TranscriptionConfidence regardless of this gate.
-        let decodeOptions = Self.makeDecodeOptions(promptTokens: vocabularyPromptTokens())
+        let decodeOptions = Self.makeDecodeOptions(
+            promptTokens: vocabularyPromptTokens(), audioDurationSeconds: audio.durationSeconds)
         let inferenceStarted = ContinuousClock.now
         var results: [TranscriptionResult] = try await pipe.transcribe(
             audioArray: floatSamples, decodeOptions: decodeOptions)
@@ -173,6 +180,7 @@ final class WhisperKitSTTService: ChunkTranscribing {
         // reproduce under an identical replay.
         if Self.shouldRetryEmptyDecode(
             segmentCount: results.flatMap(\.segments).count, rmsEnergy: rawRMS) {
+            try Task.checkCancellation()
             log.info("WhisperKit returned 0 segments on audio with rms \(String(format: "%.4f", rawRMS)) — retrying decode once with varied options")
             results = try await pipe.transcribe(
                 audioArray: floatSamples, decodeOptions: Self.retryDecodeOptions(from: decodeOptions))

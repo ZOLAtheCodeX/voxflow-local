@@ -8,6 +8,12 @@ import XCTest
 private final class ScriptedInsertService: TextInserting {
     var result = InsertResult(method: .accessibilityDirect, success: true, fallbackUsed: false, errorCode: nil)
     private(set) var insertedTexts: [String] = []
+    private(set) var policies: [TextInsertionPolicy] = []
+
+    func insert(text: String, targetApp: NSRunningApplication?, policy: TextInsertionPolicy) async -> InsertResult {
+        policies.append(policy)
+        return await insert(text: text, targetApp: targetApp)
+    }
 
     func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
         insertedTexts.append(text)
@@ -16,6 +22,64 @@ private final class ScriptedInsertService: TextInserting {
 }
 
 final class TextInsertionCoordinatorTests: XCTestCase {
+    @MainActor
+    func testSubmissionReceiptDistinguishesEnterPostedAndSkippedWithoutRetryingInsertion() async throws {
+        for submission: InsertResult.Submission in [.enterPosted, .skipped] {
+            let state = AppState()
+            let service = ScriptedInsertService()
+            service.result = InsertResult(method: .simulatedPaste, success: true,
+                fallbackUsed: true, errorCode: nil, submission: submission)
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("submission-\(UUID()).jsonl")
+            defer { try? FileManager.default.removeItem(at: file) }
+            let coordinator = TextInsertionCoordinator(state: state, insertService: service,
+                audit: InsertionAuditLog(fileURL: file))
+            let policy = TextInsertionPolicy.verbatim.withSubmission(true)
+            let success = await coordinator.insertText("/research", statusSuffix: "Prompt inserted",
+                targetApp: nil, timing: nil, policy: policy)
+            XCTAssertTrue(success, "Text already landed even when Enter was skipped")
+            XCTAssertEqual(service.insertedTexts, ["/research"])
+            XCTAssertEqual(service.policies, [policy])
+            XCTAssertEqual(state.failedInsertCount, 0)
+            XCTAssertEqual(state.statusLine, "Prompt inserted" + submission.statusSuffix)
+            let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            XCTAssertEqual(row["submission"] as? String, submission.rawValue)
+            XCTAssertEqual(row["text"] as? String, "/research")
+        }
+    }
+
+    @MainActor
+    func testSkillCommandReachesInsertionVerbatimWithTimingReceipt() async throws {
+        let state = AppState()
+        let service = ScriptedInsertService()
+        service.result = InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("insertion-\(UUID()).jsonl")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let coordinator = TextInsertionCoordinator(state: state, insertService: service, audit: InsertionAuditLog(fileURL: file))
+        let success = await coordinator.insertText("$research --local", statusSuffix: "Skill inserted",
+            targetApp: nil, timing: InsertTimingContext(pipelineStartedAt: .now, sttMs: 123, cleanupMs: 0), policy: .verbatim)
+        XCTAssertTrue(success)
+        XCTAssertEqual(service.insertedTexts, ["$research --local"])
+        XCTAssertEqual(service.policies, [.verbatim])
+        XCTAssertEqual(state.lastInsertedText, "$research --local")
+        let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        XCTAssertEqual(row["stt_ms"] as? Int, 123)
+        XCTAssertEqual(row["cleanup_ms"] as? Int, 0)
+    }
+
+    @MainActor
+    func testCancelledSkillCaptureNeverCallsInsertion() async {
+        let state = AppState()
+        let service = ScriptedInsertService()
+        let coordinator = TextInsertionCoordinator(state: state, insertService: service)
+        let task = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await coordinator.insertText("/research", statusSuffix: "Skill inserted", targetApp: nil,
+                                                timing: nil, policy: .verbatim)
+        }
+        let success = await task.value
+        XCTAssertFalse(success)
+        XCTAssertTrue(service.insertedTexts.isEmpty)
+    }
 
     @MainActor
     private func makeSUT() -> (TextInsertionCoordinator, AppState) {

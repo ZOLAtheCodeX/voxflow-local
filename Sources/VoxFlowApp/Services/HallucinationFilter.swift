@@ -31,6 +31,7 @@ enum HallucinationFilter {
            (stripped.hasPrefix("(") && stripped.hasSuffix(")")) ||
            (stripped.hasPrefix("*") && stripped.hasSuffix("*")) {
             let inner = stripped.dropFirst().dropLast().trimmingCharacters(in: .whitespaces).lowercased()
+            if inner == "blank_audio" { return true }
             if inner.contains("typing") || inner.contains("clack") || inner.contains("keyboard") || inner.contains("silence") || inner.contains("noise") {
                 return true
             }

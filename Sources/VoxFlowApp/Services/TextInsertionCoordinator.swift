@@ -10,12 +10,16 @@ import os.log
     /// Timing-aware variant: stamps stage/total latency + insert method into
     /// the receipt. Conformers that don't measure fall back to the 3-arg form.
     func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) async -> Bool
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?, policy: TextInsertionPolicy) async -> Bool
     func copyCurrentText()
     func copyMeetingMarkdownTemplate()
     func copyMeetingNotionTemplate()
 }
 
 extension TextInsertionCoordinating {
+    func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?, policy: TextInsertionPolicy) async -> Bool {
+        await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp, timing: timing)
+    }
     func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) async -> Bool {
         await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp)
     }
@@ -26,14 +30,20 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     private let log = Logger(subsystem: "local.voxflow.app", category: "TextInsertion")
     private let state: AppState
     private let insertService: TextInserting
+    private let copyFailedInsertion: (String) -> Void
 
     /// Ghost-text forensics: every insertion gets a local JSONL receipt.
     private let audit: InsertionAuditLog
 
-    init(state: AppState, insertService: TextInserting, audit: InsertionAuditLog? = nil) {
+    init(state: AppState, insertService: TextInserting, audit: InsertionAuditLog? = nil,
+         copyFailedInsertion: @escaping (String) -> Void = {
+             NSPasteboard.general.clearContents()
+             NSPasteboard.general.setString($0, forType: .string)
+         }) {
         self.state = state
         self.insertService = insertService
         self.audit = audit ?? InsertionAuditLog()
+        self.copyFailedInsertion = copyFailedInsertion
     }
 
     func insertCurrentText() async {
@@ -130,11 +140,23 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     func insertText(
         _ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?
     ) async -> Bool {
-        guard !text.isEmpty else { return false }
+        await insertText(text, statusSuffix: statusSuffix, targetApp: targetApp, timing: timing, policy: .prose)
+    }
+
+    @discardableResult
+    func insertText(
+        _ text: String, statusSuffix: String, targetApp: NSRunningApplication?,
+        timing: InsertTimingContext?, policy: TextInsertionPolicy
+    ) async -> Bool {
+        guard !text.isEmpty, !Task.isCancelled, policy.voiceActionPermission?.revoked != true else { return false }
 
         let appName = state.focusTarget.appName ?? "Unknown App"
         let started = ContinuousClock.now
-        let result = await insertService.insert(text: text, targetApp: targetApp)
+        let result = await insertService.insert(text: text, targetApp: targetApp, policy: policy)
+        // Permission withdrawal during the paste wait is cancellation too. Do
+        // not turn a withheld command into a clipboard fallback. If text already
+        // landed, retain its receipt; the service independently withholds Enter.
+        guard result.success || (!Task.isCancelled && policy.voiceActionPermission?.revoked != true) else { return false }
         let elapsedMs = started.elapsedMilliseconds()
         log.info("insertText: duration=\(elapsedMs)ms, method=\(String(describing: result.method)), success=\(result.success), fallback=\(result.fallbackUsed), app=\(appName)")
         state.lastInsertResult = result
@@ -149,12 +171,12 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(text, forType: .string)
             }
-            state.statusLine = statusSuffix
+            state.statusLine = statusSuffix + result.submission.statusSuffix
             state.lastInsertedText = text
             audit.recordInsertion(
                 text: text,
                 targetApp: targetApp?.localizedName ?? appName,
-                source: statusSuffix,
+                source: state.statusLine,
                 confidence: state.transcriptCandidate?.confidence,
                 audioSeconds: state.transcriptCandidate?.audioSeconds,
                 rmsEnergy: state.transcriptCandidate?.rmsEnergy,
@@ -164,13 +186,13 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
                 cleanupMs: timing?.cleanupMs,
                 insertMs: elapsedMs,
                 totalMs: timing?.pipelineStartedAt.elapsedMilliseconds(),
-                insertMethod: result.method.rawValue
+                insertMethod: result.method.rawValue,
+                submission: result.submission == .notRequested ? nil : result.submission.rawValue
             )
             return true
         } else {
             state.failedInsertCount += 1
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            copyFailedInsertion(text)
             state.statusLine = "Auto-insert failed — copied to clipboard"
             return false
         }
