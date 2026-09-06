@@ -158,3 +158,10 @@ Review the complete diff, remove accidental artifacts, and make logical commits 
 The plan is complete when the confirmed core regressions pass, both bounded configuration features work end to end, existing behavior passes the required checks, performance has been compared honestly, and the signed build and reviewable source are delivered. A failed check is resolved or reported as an explicit blocker; it is not replaced with a completion claim.
 
 Proceed through these approved steps without routine permission requests. Surface only material scope changes or concrete blockers. Record completion evidence in the accompanying validation record.
+
+### September 5: optional command name prefix
+
+Zola requested direct commands without always saying Voxflow. Add a persisted
+Command phrases choice: require the name (default), or accept complete registered
+commands with or without it. Preserve individual toggles, frozen capture settings,
+custom-profile precedence, and rejection of commands embedded in longer prose.

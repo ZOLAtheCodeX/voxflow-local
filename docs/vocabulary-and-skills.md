@@ -141,8 +141,12 @@ computer actions or change these local preferences.
 | New tab | “Voxflow, new tab” |
 
 Use normal quick Dictation; your existing capture-target setting still applies
-(Any app allows capture outside a text field). Built-in actions require the complete phrase and the
-Voxflow prefix; ordinary speech containing one of these phrases stays dictation.
+(Any app allows capture outside a text field). Built-in actions require the complete phrase. **Command phrases** defaults to
+**Require ‘Voxflow’**. Choose **With or without ‘Voxflow’** to say “open Safari”,
+“copy that”, “copy”, “paste”, “undo”, or any other listed command directly.
+The prefixed form still works. Longer sentences containing these phrases stay
+dictation; an exact command alone performs the enabled action. Use the usual
+dictation hotkey in either mode.
 The spelling “Vox flow” and punctuation after the name are also recognized.
 Your selected custom skill mapping takes precedence if it matches the same phrase.
 The existing speech confidence and rejection rules still apply.
@@ -154,7 +158,7 @@ receiving app’s shortcut support. Clipboard paste does not add Enter, includin
 when Automatic Enter is set to Both. The submission menu applies only to dictated
 text and custom command insertion.
 
-Changing the action mode or an individual toggle withdraws pending voice actions;
+Changing the action mode, prefix choice, or an individual toggle withdraws pending voice actions;
 it cannot authorize audio already captured. Failed actions are not retried or
 inserted as text. The capture history shows the action and whether an application
 opened, a shortcut was sent, execution was cancelled, or execution failed.

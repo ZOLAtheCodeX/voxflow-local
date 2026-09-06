@@ -5,8 +5,10 @@ import Foundation
 final class ComputerActionSettings: ObservableObject {
     static let modeKey = "voxflow.voiceActions.mode"
     static let enabledKey = "voxflow.voiceActions.enabledIDs"
+    static let prefixKey = "voxflow.voiceActions.requiresPrefix"
     @Published private(set) var mode: VoiceActionMode
     @Published private(set) var enabledIDs: Set<String>
+    @Published private(set) var requiresPrefix: Bool
     let catalog: ComputerActionCatalog
     let loadError: String?
     private let defaults: UserDefaults
@@ -22,6 +24,7 @@ final class ComputerActionSettings: ObservableObject {
         }
         // Preserve existing custom-profile behavior. New built-ins require opt-in.
         mode = defaults.string(forKey: Self.modeKey).map { VoiceActionMode(rawValue: $0) ?? .off } ?? .customPrompts
+        requiresPrefix = defaults.object(forKey: Self.prefixKey) as? Bool ?? true
         let known = Set(self.catalog.actions.map(\.id))
         if let saved = defaults.array(forKey: Self.enabledKey) as? [String] {
             enabledIDs = Set(saved).intersection(known)
@@ -43,7 +46,13 @@ final class ComputerActionSettings: ObservableObject {
         if enabled { enabledIDs.insert(id) } else { enabledIDs.remove(id) }
         defaults.set(enabledIDs.sorted(), forKey: Self.enabledKey)
     }
-    func snapshot() -> CapturedVoiceActions { CapturedVoiceActions(mode: mode, enabledIDs: enabledIDs) }
+    func setRequiresPrefix(_ required: Bool) {
+        requiresPrefix = required
+        defaults.set(required, forKey: Self.prefixKey)
+    }
+    func snapshot() -> CapturedVoiceActions {
+        CapturedVoiceActions(mode: mode, enabledIDs: enabledIDs, requiresPrefix: requiresPrefix)
+    }
 }
 
 enum ComputerActionResources {

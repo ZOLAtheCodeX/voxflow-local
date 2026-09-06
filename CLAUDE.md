@@ -156,9 +156,10 @@ Commands reject newlines/control characters. Unit tests use insertion fakes.
 
 Built-in computer actions use `computer_actions.json` and a standalone isolated
 Python preparer, then `ComputerActionService` and the signed native bridge. Keep
-Swift/Python operation allowlists aligned. Only complete Voxflow-prefixed phrases
-match. Freeze action permissions at capture start and revoke pending actions on
-mode/toggle changes. Recheck after preparation; no model/server loading, arbitrary
+Swift/Python operation allowlists aligned. Only complete registered phrases
+match. The name prefix is required by default and can be made optional in Settings.
+Freeze prefix choice and action permissions at capture start; revoke pending actions
+on mode/toggle/prefix changes. Recheck after preparation; no model/server loading, arbitrary
 shell execution, automatic retries, or implicit Enter in this path. Tests inject
 `ComputerActionPreparing` and `ComputerActionPerforming` fakes. Preserve the
 separate `computer_action` audit event and its dispatch-versus-opened outcome.

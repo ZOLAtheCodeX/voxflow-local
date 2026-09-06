@@ -2,13 +2,15 @@
 
 Product direction from Zola, September 5, 2026. The implemented increment contains
 custom CLI command insertion, optional Automatic Enter, selectable action modes,
-and twelve deterministic built-in computer actions. The expanded build still
-needs signed installation and live acceptance after desktop unlock.
+and twelve deterministic built-in computer actions. The signed expanded build
+has been installed; final live acceptance is underway.
 
 ## User controls
 
 - Voice actions: Off, Custom prompts only (default), Built-in computer actions
   only, or All. The palette and Settings expose the same choice.
+- Command phrases: Require ‘Voxflow’ (default), or With or without ‘Voxflow’.
+  The latter accepts complete bare commands such as “copy that” and “open Safari”.
 - A checklist enables or disables each built-in action. All honors that checklist;
   a later software update does not silently select new actions.
 - Custom skill profiles retain their existing portable version-1 format and
@@ -23,8 +25,8 @@ needs signed installation and live acceptance after desktop unlock.
 Open Finder, Safari, Terminal, Notes, and Calculator; copy selection; paste
 clipboard; select all; undo; redo; find; and new tab. Each has a complete explicit
 phrase, such as “Voxflow, open Finder” or “Voxflow, copy that”. The alternative
-transcription “Vox flow” is accepted. Partial phrases, longer prose, and unprefixed
-built-in names do not trigger a computer action. An explicitly configured custom
+transcription “Vox flow” is accepted. Partial phrases and longer prose do not
+trigger actions. Bare commands work when the user makes the prefix optional. An explicitly configured custom
 skill wins if both match. Existing transcript gates remain in force.
 
 The Python registry, `backend/app/computer_actions.py` and its versioned JSON
@@ -41,7 +43,7 @@ Users can already supply their own vocabulary and custom CLI skill profiles.
 
 ## Execution contract
 
-Quick Dictation freezes action mode, enabled IDs, custom matcher, target process,
+Quick Dictation freezes action mode, prefix choice, enabled IDs, custom matcher, target process,
 and available Accessibility window/input identities at capture start. It matches
 the original accepted transcript before vocabulary corrections or prose cleanup.
 Changing action controls revokes pending commands; enabling controls cannot

@@ -445,7 +445,8 @@ struct SettingsView: View {
         Form {
             VocabularySettingsSection(dictionary: dictionary)
             ComputerActionSettingsSection(settings: coordinator.computerActionSettings,
-                selectMode: coordinator.selectVoiceActionMode, setEnabled: coordinator.setComputerActionEnabled)
+                selectMode: coordinator.selectVoiceActionMode, setEnabled: coordinator.setComputerActionEnabled,
+                setRequiresPrefix: coordinator.setComputerActionRequiresPrefix)
             SkillProfileSettingsSection(store: coordinator.skillProfiles)
 
             Section("Automatic Enter") {

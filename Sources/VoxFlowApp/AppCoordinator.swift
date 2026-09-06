@@ -970,7 +970,9 @@ final class AppCoordinator: ObservableObject {
         let resolvedAction: ComputerAction? = state.workflowMode == .dictation && !commandLane
             && state.onboardingPhase != .calibrating && resolvedSkill == nil
             && capturedVoiceActions?.mode.includesComputerActions == true
-            ? computerActionSettings.catalog.resolve(recognizedText, enabledIDs: capturedVoiceActions?.enabledIDs ?? [])
+            ? computerActionSettings.catalog.resolve(recognizedText,
+                enabledIDs: capturedVoiceActions?.enabledIDs ?? [],
+                requiresPrefix: capturedVoiceActions?.requiresPrefix ?? true)
             : nil
         // A recognized skill passes the same gate on its original utterance;
         // dictionary corrections cannot turn its name into a different command.
@@ -1483,6 +1485,10 @@ final class AppCoordinator: ObservableObject {
     func setComputerActionEnabled(_ enabled: Bool, id: String) {
         if computerActionSettings.enabledIDs.contains(id) != enabled { capturedVoiceActions?.revoke() }
         computerActionSettings.setEnabled(enabled, id: id)
+    }
+    func setComputerActionRequiresPrefix(_ required: Bool) {
+        if computerActionSettings.requiresPrefix != required { capturedVoiceActions?.revoke() }
+        computerActionSettings.setRequiresPrefix(required)
     }
     func updateAppProfile(bundleID: String, profile: AppProfile?) { settings.updateAppProfile(bundleID: bundleID, profile: profile) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }

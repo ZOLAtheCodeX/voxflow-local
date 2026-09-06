@@ -44,6 +44,42 @@ final class ComputerActionTests: XCTestCase {
         XCTAssertThrowsError(try ComputerActionCatalog.decode(future))
     }
 
+    func testOptionalPrefixAcceptsEveryCompleteAliasButNeverEmbeddedCommands() throws {
+        let catalog = try catalog()
+        let enabled = Set(catalog.actions.map(\.id))
+        for action in catalog.actions {
+            for phrase in action.phrases {
+                for utterance in [phrase, "  \(phrase.uppercased())! ", "Voxflow, \(phrase).", "Vox flow: \(phrase)"] {
+                    XCTAssertEqual(catalog.resolve(utterance, enabledIDs: enabled, requiresPrefix: false), action)
+                    XCTAssertNil(catalog.resolve(utterance, enabledIDs: enabled.subtracting([action.id]), requiresPrefix: false))
+                }
+                for prose in ["Please write about \(phrase)", "\(phrase) when you are ready", "\(phrase) and undo", "Voxflow, \(phrase) tomorrow"] {
+                    XCTAssertNil(catalog.resolve(prose, enabledIDs: enabled, requiresPrefix: false))
+                }
+            }
+        }
+        XCTAssertEqual(catalog.resolve("copy", enabledIDs: enabled, requiresPrefix: false)?.id, "copy_selection")
+        XCTAssertEqual(catalog.resolve("paste", enabledIDs: enabled, requiresPrefix: false)?.id, "paste_clipboard")
+    }
+
+    func testPrefixChoicePersistsAndCaptureRetainsOriginalGrammar() throws {
+        let suite = "voxflow-action-prefix-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let catalog = try catalog()
+        let settings = ComputerActionSettings(defaults: defaults, catalog: catalog)
+        XCTAssertTrue(settings.requiresPrefix)
+        let originalCapture = settings.snapshot()
+        settings.setRequiresPrefix(false)
+        XCTAssertTrue(originalCapture.requiresPrefix)
+        XCTAssertFalse(settings.snapshot().requiresPrefix)
+        XCTAssertFalse(ComputerActionSettings(defaults: defaults, catalog: catalog).requiresPrefix)
+        settings.setRequiresPrefix(true)
+        XCTAssertTrue(ComputerActionSettings(defaults: defaults, catalog: catalog).requiresPrefix)
+        defaults.set("invalid", forKey: ComputerActionSettings.prefixKey)
+        XCTAssertTrue(ComputerActionSettings(defaults: defaults, catalog: catalog).requiresPrefix)
+    }
+
     func testModesAndIndividualChoicesPersistWithoutEnablingFutureActions() throws {
         let suite = "voxflow-computer-actions-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

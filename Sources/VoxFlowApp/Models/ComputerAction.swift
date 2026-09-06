@@ -30,6 +30,10 @@ struct ComputerAction: Codable, Equatable, Identifiable, Sendable {
         (operation == .openApplication ? Self.applications : Self.shortcuts).contains(argument)
     }
     var example: String { "Voxflow, \(phrases.first ?? name.lowercased())" }
+    func examples(requiresPrefix: Bool) -> String {
+        let commands = phrases.map { requiresPrefix ? "Voxflow, \($0)" : $0 }
+        return commands.joined(separator: " · ")
+    }
 }
 
 struct ComputerActionCatalog: Decodable, Sendable {
@@ -53,12 +57,17 @@ struct ComputerActionCatalog: Decodable, Sendable {
         return result
     }
 
-    func resolve(_ utterance: String, enabledIDs: Set<String>) -> ComputerAction? {
+    func resolve(_ utterance: String, enabledIDs: Set<String>, requiresPrefix: Bool = true) -> ComputerAction? {
         guard let phrase = SpokenSkillRouter.normalizedPhrase(utterance) else { return nil }
-        // An explicit name prefix and complete phrase distinguish actions from prose.
+        // Optional naming still requires an exact, complete registered command.
         let prefixes = ["voxflow ", "voxflow, ", "voxflow: ", "vox flow ", "vox flow, ", "vox flow: "]
-        guard let prefix = prefixes.first(where: phrase.hasPrefix) else { return nil }
-        let command = String(phrase.dropFirst(prefix.count))
+        let command: String
+        if let prefix = prefixes.first(where: phrase.hasPrefix) {
+            command = String(phrase.dropFirst(prefix.count))
+        } else {
+            guard !requiresPrefix else { return nil }
+            command = phrase
+        }
         return actions.first { enabledIDs.contains($0.id) && $0.phrases.contains(command) }
     }
 }
@@ -81,10 +90,12 @@ enum ComputerActionError: LocalizedError {
 final class CapturedVoiceActions {
     let mode: VoiceActionMode
     let enabledIDs: Set<String>
+    let requiresPrefix: Bool
     private(set) var revoked = false
-    init(mode: VoiceActionMode, enabledIDs: Set<String>) {
+    init(mode: VoiceActionMode, enabledIDs: Set<String>, requiresPrefix: Bool = true) {
         self.mode = mode
         self.enabledIDs = enabledIDs
+        self.requiresPrefix = requiresPrefix
     }
     func revoke() { revoked = true }
 }
