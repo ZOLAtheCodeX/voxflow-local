@@ -49,8 +49,9 @@ example, “use the research skill” can insert your configured `/research` or
 
 **Voice action controls** let you choose Off, Custom prompts only, Built-in
 computer actions only, or All, with a checklist for individual actions. Say
-“Voxflow, open Finder”, “Voxflow, copy that”, or “Voxflow, undo that”. Set **Command phrases → With or without ‘Voxflow’** to say “open Finder”, “copy that”, or “undo” directly. Twelve
-built-ins cover common apps and shortcuts; their action stage needs no language
+“Voxflow, open Finder”, “Voxflow, copy that”, or “Voxflow, undo that”. Set
+**Command phrases → With or without ‘Voxflow’** to say “open Finder”, “copy that”,
+or “undo” directly. Twelve built-ins cover common apps and shortcuts; their action stage needs no language
 model. Built-ins remain disabled until selected in the mode menu.
 
 Automatic Enter starts Off. In **Settings → Dictation Tools → Automatic Enter**,

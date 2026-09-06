@@ -3,19 +3,21 @@
 Dates: September 4–5, 2026 (Pacific). Baseline: `3cc226b` on `master`.
 Working branch: `feature/reliability-vocabulary-skills`.
 
-The original reliability/vocabulary/skill-profile build is installed with an
-Apple Development signature and a verified rollback. Live Settings, TextEdit,
-Terminal, focus-switch, cancellation, and acoustic vocabulary checks passed.
-An isolated VS Code attempt posted a paste event but its test file stayed empty
-when the user changed windows; that check is not counted as a verified insertion.
+The signed update is installed and ready. The original reliability, vocabulary,
+and portable skill-profile acceptance is complete, including an isolated VS Code
+file containing exactly `/research`. The September 5 extensions add selectable
+Automatic Enter, computer-action modes and individual switches, and optional
+Voxflow naming. All eight submission combinations and live cancellation, setting
+revocation, and same-app window-change checks passed.
 
-On September 5, Zola named the feature **Voice Action Prompts** and requested a
-selectable Automatic Enter menu, followed by custom/built-in/all action modes
-and direct computer commands. Those extensions and capture-time window/field
-guards are implemented and pass automated checks. **The final expanded build's
-installation and live submission checks remain pending while the Mac is locked.**
-The operator-approved native Accessibility/keyboard harness resumes after unlock.
-Temporary QA vocabulary/profiles still need restoration after live acceptance.
+Nine of twelve computer actions have verified live effects. Safari's voice launch
+returned success but foreground behavior was not confirmed; New tab posted the
+shortcut without a verified new Terminal tab; Notes attempts were misrecognized
+or rejected. Those limitations are recorded below rather than counted as passes.
+The original five vocabulary entries and clipboard were restored, the disposable
+profile removed, and the app restarted with STT ready. The personal setup retains
+All selected actions with optional naming and Automatic Enter Off. Fresh-install
+defaults remain custom prompts only, naming required, and Automatic Enter Off.
 
 ## Confirmed changes
 
@@ -146,16 +148,18 @@ includes the time spent speaking.
 - [x] Settings: create/edit a profile and application selection, try phrases,
   import/export, select and disable it from the menu; verify restart persistence.
 - [x] Controlled TextEdit and Terminal insertion, exact command syntax, default no Enter.
-- [ ] Finish the isolated VS Code editor check with retained window/field identities.
+- [x] Isolated VS Code editor: observed Insert mode, actual acoustic capture,
+  saved file verified as exactly `/research`.
 - [x] Live focus-switch/cancellation/fallback and speaker-to-microphone dictation
   on the installed menu-callback fix.
-- [ ] Install the expanded Automatic Enter build and verify all four choices,
+- [x] Install the expanded Automatic Enter build and verify all four choices,
   actual submission, same-app window changes, cancellation, setting revocation,
   and restart persistence.
-- [ ] Validate the action-mode menu, individual toggles, built-in actions, and
-  action history in disposable targets; verify revocation and focus guards.
-- [ ] Restore original vocabulary/profile configuration and leave Automatic Enter
-  Off with built-in actions disabled.
+- [x] Exercise action modes, individual switches, receipts, revocation, and focus
+  guards. Nine live action effects verified; three limitations detailed below.
+- [x] Restore original vocabulary/profile configuration and leave Automatic Enter
+  Off. Following the request for bare commands, retain All selected actions and
+  optional naming locally; verify those settings after restart.
 - [x] [Draft PR #16](https://github.com/ZOLAtheCodeX/voxflow-local/pull/16)
   created with the current acceptance status.
 
@@ -241,7 +245,7 @@ and accurate success-versus-skipped receipts without duplicate insertion.
 The complete post-review Swift suite passed: **741 tests, three opt-in skips,
 zero failures**. The release bundle was rebuilt and its stable Apple Development
 signature passed deep/strict verification. Installation and live submission
-checks remain pending desktop unlock. The Python implementation is unchanged
+were pending at this stage; the continuation below records their completion. The Python implementation is unchanged
 by this extension; the existing 564-pass/26-skip result still applies.
 
 
@@ -283,11 +287,9 @@ includes process startup and preparation; it excludes speech recognition and any
 OS action. No action was performed during measurement. Raw samples are retained
 in [computer-action-preparation.json](reliability-vocabulary-skills-20260904/computer-action-preparation.json).
 
-The final expanded release bundle is built with the stable Apple Development
-identity. Installation, actual action/submission effects, UI persistence, and QA
-configuration restoration are still pending the locked desktop. The successful
-live observations earlier in this document apply to the original vocabulary and
-skill-profile build, not the newer direct-action/Automatic Enter extension.
+The expanded release was installed after desktop unlock with the stable Apple
+Development identity. The September 5 continuation below records actual effects
+and distinguishes them from the earlier vocabulary/profile acceptance.
 
 
 The bundled Python interpreter also prepared all twelve shipped action IDs and
@@ -299,3 +301,119 @@ of live acceptance; the warm preparation benchmark is not a cold-start guarantee
 Deep/strict verification of the final signed bundle passed. GitHub CI passed Swift
 build/tests, Python tests, and the non-blocking Ruff job on source commit
 `11e52bb` ([run](https://github.com/ZOLAtheCodeX/voxflow-local/actions/runs/33996929866)).
+
+
+## September 5 continuation: installed actions, Enter, and optional naming
+
+The expanded `fc60b01` build was installed and reached STT ready. The installer
+re-signs the bundle, so compiled identity was checked with the code-directory hash
+and Mach-O UUID rather than expecting the entire signed file SHA256 to stay fixed.
+
+- All eight combinations of Automatic Enter mode (Off, prompts only, ordinary
+  dictation only, Both) and input type (custom `/research`, ordinary “Approved.”)
+  passed through actual speaker-to-microphone WhisperKit capture in a disposable
+  Terminal input recorder. The recorder never executes its input. Each enabled
+  case received exactly one Enter; disabled cases received none.
+- “Voxflow, open Calculator” opened Calculator. Its action receipt recorded
+  `applicationOpened`, 293 ms preparation plus opening; Enter set to Both did not
+  add a submission.
+- With All selected but Finder individually disabled, “Voxflow, open Finder”
+  remained dictation in the disposable TextEdit document; TextEdit stayed active.
+- “Voxflow, select all” selected the entire synthetic TextEdit document, verified
+  through the actual Accessibility selection range.
+- The four action modes, four Enter modes, and twelve individual choices were
+  observed in Settings. Focus changes by the user interrupted some subsequent
+  harness attempts before capture; those attempts are not counted as action tests.
+
+Zola then requested commands without always saying Voxflow. Source `8daa4c8` adds
+**Command phrases → With or without ‘Voxflow’**, retaining name-required defaults,
+complete-phrase matching, individual choices, custom-profile precedence, and
+capture-time settings. Copy and paste also accept their one-word forms. Prefix
+changes revoke pending actions.
+
+The full Swift suite passed **751 tests, 3 skipped, 0 failures**; all **18 Python
+action protocol tests** passed after the alias additions. CI passed Swift build
+and tests, Python tests, and Ruff on this source
+([run](https://github.com/ZOLAtheCodeX/voxflow-local/actions/runs/34001208068)).
+The release was built and installed using the repository scripts. Deep/strict
+signature verification passed; installed and staged code-directory hashes match:
+`0a3bfd257174ae1156c991083c092cc82a172be1`, team `7J4FA23ZCN`.
+Settings exposed both naming choices; the optional choice was selected through
+Accessibility. Final live effects and restoration are recorded below.
+
+
+Bare-command acoustic limitation observed: synthetic Samantha playback of “Copy
+that.” through the Mac speakers was transcribed as `[Pop] Copy that.` twice at
+100% speaker output and `[POP] Copy that.` once at 50%. The lower-volume capture
+was not clipped (peak 0.271), so clipping alone does not explain it. Exact command
+matching correctly left these as dictation; with the QA Enter mode Both, the
+synthetic text was inserted and submitted in the disposable TextEdit document.
+These are failed recognition attempts, not successful copy actions. Routing was
+not broadened to discard arbitrary transcript annotations.
+
+
+### Final live effects and handoff
+
+On the installed optional-prefix build, real acoustic capture produced and
+verified these effects in disposable targets:
+
+| Command | Observed effect |
+|---|---|
+| Copy selection | Clipboard exactly matched the selected synthetic text |
+| Paste that | Text duplicated exactly; no Enter, even with submission mode Both |
+| Undo / Redo | Actual pasted text removed and restored |
+| Voxflow, find in this app | TextEdit search field received focus |
+| Open Finder / Open Terminal | Named app became frontmost |
+| Voxflow, select all | Full synthetic text selected (earlier expanded build) |
+| Voxflow, open Calculator | Calculator opened (earlier expanded build) |
+
+The prefix-required routing is covered for every shipped phrase in automated
+tests; the optional setting accepts both forms and all registered aliases. Longer
+prose and individually disabled actions remain unmatched. The installed settings
+were observed before and after restart.
+
+- Turning Enter Off during capture inserted `/research` into the nonexecuting
+  Terminal recorder with `submission: skipped` and no new submitted line.
+- Changing action mode or requiring the name during a pending bare command
+  canceled it: no app opening, inserted text, or Enter.
+- Clicking the recording overlay canceled a pending action with no effect.
+- Switching to a second TextEdit window during dictation left both synthetic
+  documents unchanged; no Enter was sent.
+- The isolated VS Code editor was visually confirmed in Vim Insert mode. Actual
+  acoustic “Deep research” inserted `/research` via paste; Cmd-S saved exactly
+  those nine characters. Receipt: 976 ms STT, 369 ms insertion, 1,434 ms total.
+  This is one integration observation, not a general latency benchmark.
+
+Additional observations and limits:
+
+- Bare “Open Notes” was heard as “Open nodes” and remained dictation. A later
+  prefixed Notes capture returned an empty transcript and was rejected. Neither
+  attempt is a verified Notes opening. Existing STT can still misrecognize or
+  reject speech; this update does not eliminate all empty-result failures.
+- Bare “Open Safari” returned `applicationOpened` from LaunchServices, but Safari
+  did not remain frontmost in the immediate check. A later ordinary macOS
+  `open -a Safari` did bring Safari forward. The voice foreground result is
+  inconclusive, not a passed app-effect test.
+- Bare “New tab” returned `keyPosted`, but the tracked Terminal window retained
+  one tab. A direct Command-T comparison also did not immediately increase its
+  tab count. No receiving-app tab effect is claimed. Find/New tab remain dependent
+  on the receiving app and its shortcut handling.
+- The tests exposed and retained the short-command `[Pop]` recognition limitation
+  described above. No arbitrary annotation removal or fuzzy action matching was
+  added to conceal it.
+
+Restoration was performed with Voxflow quit after observing Idle. The original
+five dictionary entries were unchanged; only the four identified QA additions
+were removed. The only skill profile was the disposable QA profile, which was
+removed. The original clipboard was restored while it still contained known QA
+text, without printing its contents. Speaker output returned to its original 100%.
+The two disposable TextEdit documents, two disposable Code windows, and Python
+input-recorder Terminal window were closed; unrelated windows were preserved.
+The signed app restarted with **STT ready**, five vocabulary entries, profile Off,
+voice-action mode All, optional naming, and Automatic Enter Off. Test capture
+receipts remain in the local audit as evidence.
+
+The original delivery milestone is complete. The optional computer-action
+extension has the explicit live-verification limits above; model-assisted planning
+and translation remain outside this delivery. The branch remains a draft PR,
+with no merge or public release.

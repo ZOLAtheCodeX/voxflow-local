@@ -3,7 +3,7 @@
 Product direction from Zola, September 5, 2026. The implemented increment contains
 custom CLI command insertion, optional Automatic Enter, selectable action modes,
 and twelve deterministic built-in computer actions. The signed expanded build
-has been installed; final live acceptance is underway.
+has been installed; live acceptance and restoration are recorded in the QA report.
 
 ## User controls
 
@@ -70,12 +70,15 @@ persistence, conservative upgrade selection, unknown/malformed operations,
 revocation during preparation, failures without retries, and honest receipts.
 Python protocol tests also confirm isolated startup without model/server imports.
 See [the validation record](../qa/2026-09-04-reliability-vocabulary-skills.md) for
-measured preparation costs, final suite results, and pending live checks.
+measured preparation costs, final suite results, and live verification limits.
 
-Remaining acceptance: install the signed expanded bundle, exercise all settings
-and submission scopes, run controlled direct actions in disposable apps/documents,
-verify same-app window-change rejection and cancellation, restore QA configuration,
-and leave automatic submission and built-in actions disabled for ordinary use.
+Delivery: signed installation, all eight submission cases, setting revocation,
+cancellation, same-app focus protection, isolated Code output, and QA restoration
+are complete. Nine computer-action effects were observed live. Safari foreground,
+Notes recognition, and Terminal New tab have the documented limits in the QA
+record. The personal setup retains selected actions with optional naming and
+Automatic Enter Off; fresh-install defaults remain conservative. No model planner
+or public release is part of this increment.
 
 ## Later model-assisted actions
 
