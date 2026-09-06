@@ -73,3 +73,32 @@ fix was removed, and restored sources passed the full Swift suite: **759 tests,
 3 skipped, 0 failures**. This verifies the new tests detect missing revocation
 wiring and the stale recovery-copy path separately. Signed installation and CI
 results are recorded in the delivery continuation below.
+
+
+## Delivery continuation
+
+Functional source commit: `0ca7e0e`. GitHub CI passed Swift build/tests, Python
+checks, and Ruff ([run](https://github.com/ZOLAtheCodeX/voxflow-local/actions/runs/34041841898)).
+The repository release and install scripts built and installed the update at
+`~/Applications/VoxFlow.app`, launched through LaunchServices. Voxflow was not
+running before replacement, so no active capture was interrupted.
+
+Deep/strict signature verification passed. Installed and staged code-directory
+hashes match: `746831c41b2c16fa97278609271cb00a2799f7b9`, team `7J4FA23ZCN`.
+The relaunched installed app was observed at **STT ready**. This is a signed
+startup smoke check, not a claim that the new revocation scenarios were repeated
+through live acoustic input; those scenarios were verified through the real
+coordinator subscription/store and fake effect boundaries described above.
+
+The current app and configuration were retained privately under
+`~/Documents/Codex/voxflow-rollbacks/2026-09-06-before-profile-revocation/`.
+Vocabulary and profile files matched the pre-install backup byte-for-byte (including
+an absent profile file remaining absent). All four affected preferences matched
+the backup: Automatic Enter Off, voice actions All, prefix optional, and unchanged
+individual action IDs. No test vocabulary or skill profiles were added to the
+installed app during this follow-up.
+
+PR #16’s description now separates the previously tested live controls from the
+new profile-revocation regression tests. It explicitly distinguishes private QA
+clipboard restoration from the app limitation in issue #17. The PR remains a
+draft; no merge or public release was performed.
