@@ -1479,8 +1479,8 @@ final class AppCoordinator: ObservableObject {
         if mode != state.autoSubmitMode { capturedInsertionFocus?.revokeSubmission() }
         settings.selectAutoSubmitMode(mode)
     }
-    /// Shared with the wiring tests: no coordinator singleton, microphone, or
-    /// keyboard services are needed to exercise real store notifications.
+    /// Tested directly without the coordinator singleton, microphone, or keyboard
+    /// services. Helper tests do not cover its installation in init above.
     static func observeSkillProfileChanges(
         in store: SkillProfileStore,
         capturedPermission: @escaping () -> CapturedVoiceActions?,

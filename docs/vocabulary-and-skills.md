@@ -97,8 +97,9 @@ Explicitly switch profiles when changing CLI clients. VoxFlow cannot infer
 whether a VS Code window is showing an editor, Claude Code, or Codex. Application
 restrictions constrain which app receives shortcuts; the selected input within
 that app remains your responsibility. A capture snapshots its profile and target
-at the start, so changing settings during transcription affects the next capture.
-Choose **Off** to disable skill shortcuts for subsequent captures.
+at the start. New mappings apply to the next capture; changing the active profile
+also cancels pending voice actions as described below. Choose **Off** to disable
+skill shortcuts for subsequent captures.
 
 Profiles support JSON import/export with `schema_version: 1` and a `profiles`
 array. Each profile has `name`, `applications` (macOS bundle identifiers), and
@@ -158,11 +159,15 @@ receiving app’s shortcut support. Clipboard paste does not add Enter, includin
 when Automatic Enter is set to Both. The submission menu applies only to dictated
 text and custom command insertion.
 
-Changing the active skill profile—including switching it Off, deleting it, editing
-its mappings or application list, or replacing it through import—withdraws pending
-custom commands and their Enter permission. The captured command stays canceled;
-it does not turn into ordinary dictation. Failed saves and changes to inactive
-profiles leave current captures alone.
+Changing the active skill profile—including enabling one from Off, switching it Off
+or to another profile,
+deleting it, editing its mappings or application list, or replacing it through
+import—withdraws pending voice actions and their Enter permission when the capture
+uses **Custom prompts only** or **All**. In All mode this also cancels a pending
+built-in computer action. A captured custom command stays canceled; it does not
+turn into ordinary dictation. New mappings apply to the next capture. Captures in
+**Built-in computer actions only** mode, failed saves, unchanged saves, and edits
+to inactive profiles are unaffected by profile changes.
 
 Changing the action mode, prefix choice, or an individual toggle withdraws pending voice actions;
 it cannot authorize audio already captured. Failed actions are not retried or
@@ -216,8 +221,9 @@ quick-dictation insertions should be followed by one Enter key:
 
 Enter can submit a chat message, run a terminal command, or add a new line in an
 editor. Position the cursor in the intended input before recording. The palette
-shows the selected mode. Turning a skill profile Off makes its phrases ordinary
-dictation, so they follow the ordinary-dictation column.
+shows the selected mode. With the skill profile Off when recording starts, its
+phrases are ordinary dictation and follow the ordinary-dictation column. Turning
+it Off during a capture instead cancels a pending custom command and its Enter.
 
 The selection is saved locally and captured at recording start. Changing it
 withdraws any pending automatic Enter; the new choice applies to the next capture.

@@ -2,9 +2,10 @@ import Combine
 import XCTest
 @testable import VoxFlowApp
 
-/// Exercises the exact subscription installed by AppCoordinator, using real store
-/// commits and the real text coordinator. Never instantiate AppCoordinator.shared
-/// or native audio/AX services. Every possible clipboard fallback is a spy.
+/// Calls AppCoordinator's subscription helper directly using real store commits
+/// and the real text coordinator; does not cover the initializer installing it.
+/// Never instantiate AppCoordinator.shared or native audio/AX services.
+/// Every possible clipboard fallback is a spy.
 @MainActor
 final class SkillProfileRevocationTests: XCTestCase {
     func testEveryActiveProfileMutationRevokesTheOriginalCaptureWithoutProseFallback() async throws {
