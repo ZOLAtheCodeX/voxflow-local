@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VoxFlow Local — dictation you actually own</title>
+<meta name="description" content="On-device macOS dictation. Speech to text and text polish run on your Mac, it learns your professional vocabulary, and it speaks commands straight into Claude Code and Codex. Open source, MIT, no cloud." />
+<meta name="theme-color" content="#14161b" />
+<!-- Open Graph / social unfurl -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="VoxFlow Local — dictation you actually own" />
+<meta property="og:description" content="On-device macOS dictation. Private by default, learns your vocabulary, and drives your coding agent. Open source." />
+<meta property="og:url" content="https://ailexintelligence.com/" />
+<meta property="og:site_name" content="VoxFlow Local" />
+<meta property="og:image" content="https://ailexintelligence.com/social-preview.png" />
+<meta property="og:image:width" content="1280" />
+<meta property="og:image:height" content="640" />
+<meta property="og:image:alt" content="VoxFlow Local — local-first dictation for macOS" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="VoxFlow Local — dictation you actually own" />
+<meta name="twitter:description" content="On-device macOS dictation. Private by default, learns your vocabulary, drives your coding agent. Open source." />
+<meta name="twitter:image" content="https://ailexintelligence.com/social-preview.png" />
+<!-- favicon: waveline mark -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect width='120' height='120' rx='26' fill='%2314161b'/%3E%3Cpath d='M14 60 Q 28 36 42 60 T 70 60 Q 84 40 96 60 L 100 60' fill='none' stroke='%232fd4c5' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='104' cy='60' r='7' fill='%232fd4c5'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink-900:#0d0f13; --ink-800:#14161b; --ink-700:#1a1d24; --ink-600:#22252e; --ink-500:#2c303a;
+    --paper:#f4f2ec; --paper-2:#e9e6dc; --paper-ink:#16181d; --paper-dim:#a09f96;
+    --teal:#2fd4c5; --indigo:#5b67f2; --amber:#e0a458;
+    --line:rgba(244,242,236,0.12); --line-soft:rgba(244,242,236,0.06);
+    --serif:'Fraunces',Georgia,'Times New Roman',serif;
+    --sans:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,monospace;
+    --wrap:1140px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--ink-800); color:var(--paper); font-family:var(--sans);
+    font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased; position:relative; overflow-x:hidden;
+    background-image:
+      radial-gradient(1100px 560px at 86% -8%, rgba(47,212,197,0.10), transparent 60%),
+      radial-gradient(820px 480px at -5% 3%, rgba(91,103,242,0.10), transparent 55%),
+      radial-gradient(rgba(244,242,236,0.045) 1px, transparent 1.4px);
+    background-size:auto, auto, 23px 23px; background-attachment:fixed;
+  }
+  body::after{content:""; position:fixed; inset:0; pointer-events:none; z-index:90; opacity:.045; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+  .wrap{max-width:var(--wrap); margin:0 auto; padding:0 30px}
+  a{color:inherit; text-decoration:none}
+  .eyebrow{font-family:var(--mono); font-size:11.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--teal); font-weight:500; display:inline-flex; align-items:center; gap:9px}
+  .eyebrow::before{content:""; width:18px; height:1px; background:currentColor}
+  .eyebrow.indigo{color:var(--indigo)}
+  h1,h2,h3{font-family:var(--serif); font-weight:500; line-height:1.05; letter-spacing:-0.015em}
+  h2{font-size:clamp(30px,4.4vw,52px)} h3{font-size:22px}
+  p{color:rgba(244,242,236,0.80)} strong{color:var(--paper); font-weight:600}
+  em{font-style:italic; font-family:var(--serif)}
+  .mono{font-family:var(--mono)}
+
+  .wave .dot{fill:var(--teal)} .wave path{stroke:var(--teal); fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} .wave .dot{animation:pulse 1.8s ease-in-out infinite}
+  .waverule{height:16px; width:100%; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='52' height='16' viewBox='0 0 52 16'%3E%3Cpath d='M0 8 Q 13 -1 26 8 T 52 8' fill='none' stroke='%232fd4c5' stroke-width='1.4'/%3E%3C/svg%3E") repeat-x center; opacity:.4}
+
+  /* nav */
+  .nav{position:sticky; top:0; z-index:50; backdrop-filter:blur(9px); background:rgba(13,15,19,0.72); border-bottom:1px solid var(--line)}
+  .nav .wrap{display:flex; align-items:center; justify-content:space-between; height:60px}
+  .logo{display:flex; align-items:center; gap:11px; font-family:var(--serif); font-size:20px; font-weight:600}
+  .logo .sub{font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--paper-dim); font-weight:400}
+  .nav .links{display:flex; align-items:center; gap:24px; font-family:var(--mono); font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--paper-dim)}
+  .nav .links a{transition:color .2s} .nav .links a:hover{color:var(--teal)}
+  .nav .ghostbtn{border:1px solid var(--line); color:var(--paper); padding:8px 16px; border-radius:7px}
+  .nav .ghostbtn:hover{border-color:var(--teal); color:var(--teal)}
+  /* mobile nav toggle (CSS-only, no JS) — hidden on desktop */
+  .navtoggle{display:none}
+  .hamburger{display:none; flex-direction:column; justify-content:center; gap:5px; width:34px; height:34px; cursor:pointer; padding:6px}
+  .hamburger span{height:2px; width:100%; background:var(--paper); border-radius:2px; transition:transform .2s,opacity .2s}
+
+  /* experimental marker */
+  .xp{font-family:var(--mono); font-size:9px; letter-spacing:.12em; text-transform:uppercase; color:var(--amber);
+    border:1px solid rgba(224,164,88,.45); border-radius:20px; padding:2px 7px; margin-left:8px; font-weight:600; vertical-align:middle; white-space:nowrap}
+
+  .btn{font-family:var(--mono); font-size:13px; letter-spacing:.03em; padding:13px 24px; border-radius:8px; font-weight:500; border:1px solid transparent; transition:transform .15s,background .2s; display:inline-flex; align-items:center; gap:9px}
+  .btn.primary{background:var(--teal); color:var(--ink-900); font-weight:600}
+  .btn.ghost{border-color:var(--line); color:var(--paper)} .btn:hover{transform:translateY(-2px)}
+  .btn.ghost:hover{border-color:var(--teal)}
+
+  /* hero */
+  .hero{padding:84px 0 56px; text-align:center; position:relative}
+  .hero .eyebrow{justify-content:center; margin-bottom:22px}
+  .hero h1{font-size:clamp(46px,8vw,104px); line-height:.96; max-width:13ch; margin:0 auto; letter-spacing:-0.02em}
+  .hero h1 .cur{display:inline-block; width:.5ch; height:.8em; background:var(--teal); transform:translateY(.05em); margin-left:.1em; animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .hero .sub{max-width:60ch; margin:26px auto 0; font-size:clamp(18px,2.1vw,21px); color:rgba(244,242,236,0.80)}
+  .hero .cta{display:flex; gap:13px; justify-content:center; margin-top:34px; flex-wrap:wrap}
+  .hero .builton{margin-top:48px; display:flex; flex-direction:column; align-items:center; gap:14px}
+  .hero .builton .lbl{font-family:var(--mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--paper-dim)}
+  .hero .builton .row{display:flex; flex-wrap:wrap; gap:10px 26px; justify-content:center; font-family:var(--mono); font-size:13px; color:rgba(244,242,236,0.66)}
+  .hero .builton .row span{display:inline-flex; align-items:center; gap:8px}
+  .hero .builton .row span::before{content:""; width:5px; height:5px; border-radius:50%; background:var(--teal)}
+  .hero .herowave{margin:54px auto 0; width:min(680px,90%); height:30px; display:block}
+  .hero .herowave path{stroke:var(--teal); fill:none; stroke-width:1.4; opacity:.65} .hero .herowave .d{fill:var(--teal)}
+
+  /* stat strip */
+  .stats{border-top:1px solid var(--line); border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap}
+  .stats .s{flex:1; min-width:170px; text-align:center; padding:26px 14px; border-right:1px solid var(--line-soft)}
+  .stats .s:last-child{border-right:none}
+  .stats .v{font-family:var(--serif); font-size:30px; color:var(--teal); font-weight:600}
+  .stats .k{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--paper-dim); margin-top:6px}
+
+  section{padding:84px 0}
+  .sec-head{max-width:62ch; margin:0 auto 48px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:16px}
+  .sec-head .eyebrow{justify-content:center}
+
+  /* demo cards */
+  .demogrid{display:grid; grid-template-columns:1fr 1fr; gap:20px; max-width:980px; margin:0 auto}
+  .dcard{border:1px solid var(--line); border-radius:14px; background:var(--ink-900); padding:28px 28px 24px; position:relative; overflow:hidden}
+  .dcard::before{content:""; position:absolute; left:0; top:0; height:3px; width:100%; background:var(--teal)}
+  .dcard.cmd::before{background:var(--indigo)}
+  .dcard .lbl{font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--teal)}
+  .dcard.cmd .lbl{color:var(--indigo)}
+  .dcard .wave-sm{height:22px; width:100%; margin:18px 0 14px; display:block}
+  .dcard .wave-sm path{stroke:var(--teal); fill:none; stroke-width:1.4; opacity:.7}
+  .dline{font-family:var(--mono); font-size:13.5px; line-height:1.7}
+  .dline.raw{color:var(--paper-dim)} .dline.raw b{color:rgba(244,242,236,0.45); font-weight:400}
+  .transform{display:flex; align-items:center; gap:12px; margin:14px 0; font-family:var(--mono); font-size:10.5px; color:var(--teal); text-transform:uppercase; letter-spacing:.14em}
+  .transform::before,.transform::after{content:""; flex:1; height:1px; background:var(--line)}
+  .dline.clean{font-family:var(--sans); font-size:17px; color:var(--paper); line-height:1.5}
+  .dline.clean .hl{color:var(--teal); font-weight:600}
+  .dcard .say{font-family:var(--mono); font-size:13px; color:rgba(244,242,236,0.72); margin-top:18px}
+  .dcard .say b{color:var(--indigo); font-weight:600}
+  .mterm{background:#0a0c10; border:1px solid var(--line); border-radius:9px; padding:15px 16px; font-family:var(--mono); font-size:13.5px; margin:14px 0}
+  .mterm .you{color:rgba(244,242,236,0.80)} .mterm .you .pr{color:var(--indigo)}
+  .mterm .you .slash{color:var(--teal); font-weight:600}
+  .mterm .you .cur{display:inline-block; width:.55ch; height:1.05em; background:var(--teal); vertical-align:-2px; margin-left:1px; animation:blink 1.1s steps(1) infinite}
+  .mterm .out{color:var(--paper-dim); margin-top:9px; font-size:12.5px}
+  .dfoot{margin-top:16px; font-family:var(--mono); font-size:11.5px; color:var(--paper-dim); line-height:1.6}
+
+  /* pillars */
+  .pillars{display:grid; grid-template-columns:repeat(3,1fr); gap:20px}
+  .pillar{border:1px solid var(--line); border-radius:10px; padding:30px 26px; background:var(--ink-700); position:relative; overflow:hidden}
+  .pillar .edge{position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--teal)}
+  .pillar.vocab .edge{background:var(--paper)} .pillar.commands .edge{background:var(--indigo)}
+  .pillar .role{font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--teal)}
+  .pillar.vocab .role{color:var(--paper)} .pillar.commands .role{color:var(--indigo)}
+  .pillar h3{font-size:25px; margin:12px 0 10px}
+  .pillar p{font-size:15px; color:rgba(244,242,236,0.76)}
+  .pillar .chip{display:inline-block; margin-top:18px; font-family:var(--mono); font-size:12.5px; color:var(--paper-dim); background:var(--ink-900); border:1px solid var(--line); border-radius:7px; padding:8px 12px}
+  .pillar .chip b{color:var(--teal); font-weight:600}
+
+  /* why local — paper spread */
+  .paper-spread{background:var(--paper); color:var(--paper-ink); position:relative}
+  .paper-spread::before,.paper-spread::after{content:""; position:absolute; left:0; right:0; height:16px; opacity:.16;
+    background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='52' height='16' viewBox='0 0 52 16'%3E%3Cpath d='M0 8 Q 13 -1 26 8 T 52 8' fill='none' stroke='%2316181d' stroke-width='1.2'/%3E%3C/svg%3E") repeat-x center}
+  .paper-spread::before{top:0}.paper-spread::after{bottom:0}
+  .paper-spread .eyebrow{color:var(--indigo)} .paper-spread h2{color:var(--paper-ink)}
+  .paper-spread .sec-head p{color:rgba(20,22,27,0.66)}
+  .why{display:grid; grid-template-columns:repeat(2,1fr); gap:1px; background:rgba(20,22,27,0.12); border:1px solid rgba(20,22,27,0.14); border-radius:10px; overflow:hidden}
+  .why .c{background:var(--paper-2); padding:30px}
+  .why .c h3{color:var(--paper-ink); font-size:20px; margin-bottom:8px}
+  .why .c p{color:rgba(20,22,27,0.70); font-size:14.5px}
+  .why .c .n{font-family:var(--mono); font-size:11px; color:var(--indigo); letter-spacing:.1em}
+
+  /* comparison */
+  .cmp{width:100%; border-collapse:collapse; font-size:15px; max-width:920px; margin:0 auto}
+  .cmp th,.cmp td{text-align:left; padding:15px 18px; border-bottom:1px solid var(--line-soft)}
+  .cmp thead th{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--paper-dim); border-bottom:1px solid var(--line)}
+  .cmp thead th.vox{color:var(--teal)}
+  .cmp td:first-child{color:var(--paper-dim); font-family:var(--mono); font-size:13px}
+  .cmp td.yes{color:var(--paper)} .cmp td.no{color:#8a8881}
+  .cmp tbody tr:hover td{background:rgba(244,242,236,0.02)}
+
+  /* quickstart */
+  .start{max-width:780px; margin:0 auto}
+  .term{background:var(--ink-900); border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-top:8px}
+  .term .bar{display:flex; align-items:center; gap:7px; padding:11px 16px; border-bottom:1px solid var(--line); background:var(--ink-600)}
+  .term .bar i{width:11px; height:11px; border-radius:50%; background:#3a3e48; display:block}
+  .term .bar .t{margin-left:10px; font-family:var(--mono); font-size:11.5px; color:var(--paper-dim)}
+  .term pre{padding:22px 22px; font-family:var(--mono); font-size:13.5px; line-height:1.9; color:rgba(244,242,236,0.9); overflow-x:auto}
+  .term .p{color:var(--teal)} .term .c{color:var(--paper-dim)}
+  .start .note{font-family:var(--mono); font-size:12.5px; color:var(--paper-dim); margin-top:16px; text-align:center}
+  .start .note a{color:var(--teal); text-decoration:underline}
+
+  /* final cta */
+  .final{text-align:center; padding:100px 0; background:radial-gradient(700px 320px at 50% 130%, rgba(91,103,242,0.16), transparent 60%)}
+  .final h2{max-width:18ch; margin:0 auto}
+  .final .cta{display:flex; gap:13px; justify-content:center; margin-top:30px; flex-wrap:wrap}
+
+  footer{border-top:1px solid var(--line); padding:40px 0}
+  footer .wrap{display:flex; flex-wrap:wrap; gap:18px; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:12.5px; color:var(--paper-dim)}
+  footer .made{display:flex; align-items:center; gap:11px}
+  footer .made b{color:var(--paper); font-family:var(--serif); font-size:16px; font-weight:600}
+  footer .flinks{display:flex; gap:20px} footer .flinks a:hover{color:var(--teal)}
+
+  .fade{opacity:0; transform:translateY(15px); animation:rise .85s cubic-bezier(.2,.7,.2,1) forwards}
+  @keyframes rise{to{opacity:1; transform:none}}
+  .d1{animation-delay:.04s}.d2{animation-delay:.14s}.d3{animation-delay:.26s}.d4{animation-delay:.4s}.d5{animation-delay:.54s}
+
+  @media(max-width:860px){
+    .hamburger{display:flex}
+    .nav .links{position:absolute; top:60px; left:0; right:0; flex-direction:column; align-items:stretch; gap:0;
+      background:rgba(13,15,19,0.97); border-bottom:1px solid var(--line); padding:0;
+      max-height:0; overflow:hidden; transition:max-height .25s ease}
+    .navtoggle:checked ~ .links{max-height:360px}
+    .nav .links a{padding:15px 30px; border-top:1px solid var(--line-soft); text-transform:none; letter-spacing:0; font-size:14px}
+    .nav .links .ghostbtn{border:none; border-radius:0; color:var(--teal)}
+    .navtoggle:checked ~ .hamburger span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+    .navtoggle:checked ~ .hamburger span:nth-child(2){opacity:0}
+    .navtoggle:checked ~ .hamburger span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+    .pillars,.why,.demogrid{grid-template-columns:1fr}
+    .stats .s{min-width:50%}
+  }
+
+  @media(prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important}
+    .fade{opacity:1; transform:none}
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="waveline" viewBox="0 0 120 24">
+    <path d="M2 12 Q 10 2, 18 12 T 34 12 Q 42 4, 50 12 T 66 12 L 108 12"/>
+    <circle class="dot" cx="112" cy="12" r="3.4"/>
+  </symbol>
+</svg>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="logo" href="/"><svg class="wave" width="42" height="14"><use href="#waveline"/></svg> VoxFlow <span class="sub">Local</span></a>
+    <input type="checkbox" id="navtoggle" class="navtoggle" />
+    <label for="navtoggle" class="hamburger" aria-label="Toggle menu"><span></span><span></span><span></span></label>
+    <div class="links">
+      <a href="#private">Private</a>
+      <a href="#vocab">Vocabulary</a>
+      <a href="#commands">Commands</a>
+      <a href="#start">Get started</a>
+      <a class="ghostbtn" href="https://github.com/ZOLAtheCodeX/voxflow-local">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow fade d1">VoxFlow Local · macOS dictation</span>
+    <h1 class="fade d2">Dictation you actually own.<span class="cur"></span></h1>
+    <p class="sub fade d3">On-device speech to text, your professional vocabulary, and a voice line straight into your coding agent. Nothing leaves your Mac unless you say so.</p>
+    <div class="cta fade d4">
+      <a class="btn primary" href="#start">Clone and build</a>
+      <a class="btn ghost" href="https://github.com/ZOLAtheCodeX/voxflow-local">Star on GitHub</a>
+    </div>
+    <div class="builton fade d5">
+      <span class="lbl">Built on</span>
+      <div class="row">
+        <span>WhisperKit</span><span>Ollama</span><span>Apple Silicon</span><span>Gemma</span><span>Swift 6</span>
+      </div>
+    </div>
+    <svg class="herowave" viewBox="0 0 680 30" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 15 Q 28 2 56 15 T 112 15 Q 140 -2 168 15 T 224 15 Q 252 4 280 15 T 336 15 Q 364 -3 392 15 T 448 15 Q 476 3 504 15 T 560 15 Q 588 1 616 15 L 668 15"/>
+      <circle class="d" cx="673" cy="15" r="4"/>
+    </svg>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="s"><div class="v">100%</div><div class="k">On-device</div></div>
+  <div class="s"><div class="v">0 bytes</div><div class="k">To the cloud, by default</div></div>
+  <div class="s"><div class="v">Your terms</div><div class="k">Vocabulary</div></div>
+  <div class="s"><div class="v">Your tools</div><div class="k">Commands</div></div>
+</div>
+
+<!-- demo -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">See it work</span>
+      <h2>Speak. It polishes. It acts.</h2>
+      <p>Dictate a paragraph, watch it clean up on-device, then fire a command into your open agent. Fifteen seconds, no cloud round trip.</p>
+    </div>
+    <div class="demogrid">
+      <div class="dcard dict">
+        <div class="lbl">Dictation · private + vocabulary</div>
+        <svg class="wave-sm" viewBox="0 0 320 22" preserveAspectRatio="none" aria-hidden="true"><path d="M0 11 Q 16 1 32 11 T 64 11 Q 80 19 96 11 T 128 11 Q 144 2 160 11 T 192 11 Q 208 18 224 11 T 256 11 Q 272 4 288 11 L 320 11"/></svg>
+        <div class="dline raw">"um, the parties agreed to <b>iso forty two thousand one</b>, comma, effective today"</div>
+        <div class="transform">on-device polish</div>
+        <div class="dline clean">The parties agreed to <span class="hl">ISO 42001</span>, effective today.</div>
+        <div class="dfoot">WhisperKit and a local model. Your vocabulary applied. 0 bytes uploaded by default.</div>
+      </div>
+      <div class="dcard cmd">
+        <div class="lbl">Command lane · drives your agent</div>
+        <div class="say">You hold the key and say <b>"security review"</b></div>
+        <div class="mterm">
+          <div class="you"><span class="pr">claude ❯</span> <span class="slash">/security-review</span><span class="cur"></span></div>
+          <div class="out">Reviewing the current diff for security issues...</div>
+        </div>
+        <div class="dfoot">Resolved on-device, then typed into your open Claude Code or Codex session. You press enter.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="waverule"></div>
+
+<!-- pillars -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Three things that matter</span>
+      <h2>Private work. Your vocabulary. Your commands.</h2>
+    </div>
+    <div class="pillars">
+      <div class="pillar private" id="private"><div class="edge"></div>
+        <div class="role">Private work</div>
+        <h3>Private by default</h3>
+        <p>WhisperKit speech to text and a local model run entirely on your Mac. Cloud fallback is off by default and redacted when you turn it on. No account, no telemetry, no upload.</p>
+        <div class="chip">stt_fallback_active: <b>false</b></div>
+      </div>
+      <div class="pillar vocab" id="vocab"><div class="edge"></div>
+        <div class="role">Vocabulary</div>
+        <h3>Knows your words</h3>
+        <p>Teach it once. It biases recognition before it guesses and corrects after the fact. ISO 42001, GDPR, RCW, the names in your matters. Built for how professionals actually speak.</p>
+        <div class="chip">"iso forty two thousand one" → <b>ISO 42001</b></div>
+      </div>
+      <div class="pillar commands" id="commands"><div class="edge"></div>
+        <div class="role">Commands <span class="xp">Experimental</span></div>
+        <h3>Drives your agent</h3>
+        <p>Hold a key, speak, and the command lands in your open Claude Code or Codex session. Connectors are plain files, so you and anyone who forks it can add their own.</p>
+        <div class="chip">"security review" → <b>/security-review</b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- why local: paper spread -->
+<section class="paper-spread">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow indigo">Why local</span>
+      <h2>Your voice, on your own terms.</h2>
+      <p>The same reasons the best local-first tools exist, applied to dictation.</p>
+    </div>
+    <div class="why">
+      <div class="c"><div class="n">01</div><h3>Own your data</h3><p>Audio and transcripts stay on the machine. There is no server to trust, breach, or subpoena.</p></div>
+      <div class="c"><div class="n">02</div><h3>No subscription</h3><p>You run it. No per-seat pricing that climbs every year, no usage caps, no lock-in.</p></div>
+      <div class="c"><div class="n">03</div><h3>Fork it, extend it</h3><p>Add vocabulary packs, write new agent connectors, wire in your own tools. The codebase is yours to shape.</p></div>
+      <div class="c"><div class="n">04</div><h3>Audit every line</h3><p>Open source under MIT. No black box around how audio is handled or how text is cleaned.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- comparison -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">vs cloud dictation</span>
+      <h2>What you give up with the cloud.</h2>
+    </div>
+    <table class="cmp">
+      <thead><tr><th></th><th class="vox">VoxFlow Local</th><th>Cloud dictation (Wispr, Otter, cloud STT)</th></tr></thead>
+      <tbody>
+        <tr><td>Where audio goes</td><td class="yes">Stays on your Mac</td><td class="no">Uploaded to a server</td></tr>
+        <tr><td>Monthly cost</td><td class="yes">Free, you run it</td><td class="no">Subscription, per seat</td></tr>
+        <tr><td>Your vocabulary</td><td class="yes">Learned and biased on-device</td><td class="no">Generic, often capped</td></tr>
+        <tr><td>Drives your agent</td><td class="yes">Voice into Claude Code / Codex <span class="xp">Experimental</span></td><td class="no">No</td></tr>
+        <tr><td>Source code</td><td class="yes">Open, MIT, fork it</td><td class="no">Closed</td></tr>
+        <tr><td>Works offline</td><td class="yes">Yes</td><td class="no">No</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="waverule"></div>
+
+<!-- quickstart -->
+<section id="start">
+  <div class="wrap start">
+    <div class="sec-head">
+      <span class="eyebrow">Get started</span>
+      <h2>Clone it. Build it. Keep your voice.</h2>
+      <p>macOS 14 or later, Apple Silicon. A free Apple ID developer certificate keeps the accessibility grant across rebuilds; ad-hoc signing works without an Apple account.</p>
+    </div>
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span class="t">zsh</span></div>
+<pre><span class="c"># 1. clone</span>
+git clone https://github.com/ZOLAtheCodeX/voxflow-local.git
+cd voxflow-local
+
+<span class="c"># 2. bootstrap the backend and models</span>
+<span class="p">./scripts/bootstrap_all.sh</span>
+
+<span class="c"># 3. run the backend, then the app</span>
+<span class="p">./scripts/run_backend.sh</span>
+swift run VoxFlowLocal</pre>
+    </div>
+    <p class="note">Full signing matrix and Ollama setup in the <a href="https://github.com/ZOLAtheCodeX/voxflow-local#readme">README</a>. Text polish uses a local Ollama model; the regex pipeline is the fallback when Ollama is not running.</p>
+  </div>
+</section>
+
+<!-- final cta -->
+<section class="final">
+  <div class="wrap">
+    <span class="eyebrow indigo" style="justify-content:center; margin-bottom:16px">Own the stack</span>
+    <h2>Dictation that never leaves your Mac.</h2>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/ZOLAtheCodeX/voxflow-local">Clone and build</a>
+      <a class="btn ghost" href="https://github.com/ZOLAtheCodeX/voxflow-local#readme">Read the docs</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="made"><svg class="wave" width="36" height="12"><use href="#waveline"/></svg> <b>VoxFlow</b> &nbsp;·&nbsp; an AILEX project</div>
+    <div class="flinks">
+      <a href="https://github.com/ZOLAtheCodeX/voxflow-local">GitHub</a>
+      <a href="https://github.com/ZOLAtheCodeX/voxflow-local#readme">Docs</a>
+      <a href="https://github.com/ZOLAtheCodeX/voxflow-local/blob/master/LICENSE">License</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
