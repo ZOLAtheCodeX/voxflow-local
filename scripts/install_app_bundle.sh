@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC_APP="${ROOT_DIR}/dist/VoxFlow.app"
+SRC_APP="${ROOT_DIR}/dist.noindex/VoxFlow.app"
 DEST_DIR="${HOME}/Applications"
 DEST_APP="${DEST_DIR}/VoxFlow.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -129,6 +129,8 @@ xattr -cr "${DEST_APP}" || true
 if [[ -x "${LSREGISTER}" ]]; then
   echo "[install] registering app with LaunchServices..."
   "${LSREGISTER}" -f "${DEST_APP}" >/dev/null 2>&1 || true
+  # Only the installed copy should answer `open -b local.voxflow.app`.
+  "${LSREGISTER}" -u "${SRC_APP}" >/dev/null 2>&1 || true
 fi
 
 if ! is_valid_bundle "${DEST_APP}"; then
