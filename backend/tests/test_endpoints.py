@@ -235,7 +235,13 @@ class TestRateLimiting:
         for _ in range(120):
             await client.get("/v1/health")
         assert (await client.get("/v1/health")).status_code == 429
-        assert (await client.get("/v1/ready")).status_code != 429
+        assert (await client.get("/v1/ready")).status_code == 200
+
+    @pytest.mark.anyio
+    async def test_authenticated_bucket_still_limits(self, client: httpx.AsyncClient):
+        for _ in range(120):
+            assert (await client.get("/v1/ready")).status_code == 200
+        assert (await client.get("/v1/ready")).status_code == 429
 
     @pytest.mark.anyio
     async def test_rejected_requests_never_count(self, client: httpx.AsyncClient):

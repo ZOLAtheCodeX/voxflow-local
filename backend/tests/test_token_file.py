@@ -63,6 +63,42 @@ def test_lifespan_writes_and_removes_token_file(monkeypatch, tmp_path):
     assert not (tmp_path / "backend.token").exists()
 
 
+def test_lifespan_survives_empty_home_without_token_dir(monkeypatch, tmp_path):
+    """No VOXFLOW_TOKEN_DIR and an empty HOME: skip the token file, keep serving."""
+    import server
+
+    monkeypatch.delenv("VOXFLOW_TOKEN_DIR", raising=False)
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setattr(server, "initialize_runtime_state", lambda: None)
+    warnings = []
+    monkeypatch.setattr(server.logger, "warning", lambda *a, **k: warnings.append(a))
+    with TestClient(server.app, base_url=TEST_BASE_URL) as client:
+        assert client.get("/v1/health").status_code == 200
+    assert warnings, "skipping the token file must be logged"
+
+
+def test_lifespan_survives_path_resolution_errors(monkeypatch):
+    import server
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(server, "token_file_path", boom)
+    monkeypatch.setattr(server, "initialize_runtime_state", lambda: None)
+    warnings = []
+    monkeypatch.setattr(server.logger, "warning", lambda *a, **k: warnings.append(a))
+    with TestClient(server.app, base_url=TEST_BASE_URL) as client:
+        assert client.get("/v1/health").status_code == 200
+    assert warnings
+
+    def oserror(*_args, **_kwargs):
+        raise OSError("nope")
+
+    monkeypatch.setattr(server, "token_file_path", oserror)
+    with TestClient(server.app, base_url=TEST_BASE_URL) as client:
+        assert client.get("/v1/health").status_code == 200
+
+
 def test_token_file_path_honours_override():
     assert token_file_path({"VOXFLOW_TOKEN_DIR": "/x"}) == Path("/x/backend.token")
     assert token_file_path({}).parts[-3:] == ("Application Support", "VoxFlow", "backend.token")

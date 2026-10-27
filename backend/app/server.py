@@ -9,6 +9,7 @@ that the 360+ existing tests continue to work without modification.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Mapping
@@ -162,13 +163,39 @@ from api.endpoints import (  # noqa: E402, F401
 # ── Application setup ────────────────────────────────────────────────
 
 
+logger = logging.getLogger("voxflow")
+
+
+def _resolve_token_path():  # type: ignore[no-untyped-def]
+    """Where to mirror the token, or ``None`` to skip the mirror.
+
+    The mirror is a convenience for scripts and adopt mode; failing to resolve
+    its path must never stop the backend. An empty ``HOME`` with no
+    ``VOXFLOW_TOKEN_DIR`` would resolve to ``/Library/...`` (``Path.home()``
+    of an empty HOME is ``/``), so it is refused rather than written.
+    """
+    try:
+        if not os.environ.get("VOXFLOW_TOKEN_DIR") and not os.environ.get("HOME"):
+            logger.warning(
+                "HOME is empty and VOXFLOW_TOKEN_DIR is unset; "
+                "not writing the backend token file"
+            )
+            return None
+        return token_file_path()
+    except (RuntimeError, OSError) as exc:
+        logger.warning("Cannot resolve the backend token file path (%s); skipping it", exc)
+        return None
+
+
 @asynccontextmanager
 async def app_lifespan(_: FastAPI):
     # Resolving the token here makes a malformed VOXFLOW_API_TOKEN stop the
     # backend at startup (SystemExit propagates) instead of failing each request.
     token = active_token()
-    token_path = token_file_path()
-    token_identity = write_token_file(token, token_path)
+    token_path = _resolve_token_path()
+    token_identity = (
+        write_token_file(token, token_path) if token_path is not None else None
+    )
     try:
         initialize_runtime_state()
         yield
@@ -241,8 +268,9 @@ def _is_loopback_host(host: str) -> bool:
 
     Literal forms only, matching the Swift launcher's whitelist
     (``BackendEndpoint.isLoopback``) — a hosts-file alias that RESOLVES to
-    loopback is still refused here (no DNS at bind time); use
-    ``scripts/run_backend.sh`` for exotic hosts.
+    loopback is still refused here (no DNS at bind time). A backend run by hand
+    must still be addressed as ``127.0.0.1``, ``localhost`` or ``[::1]``: the
+    Host-header check rejects any other name.
     """
     if host.lower() == "localhost":
         return True
@@ -294,8 +322,8 @@ def resolve_bind_host_port(env: Mapping[str, str] | None = None) -> tuple[str, i
     if not _is_loopback_host(host):
         raise SystemExit(
             f"refusing to bind non-loopback host {host!r}: the managed spawn "
-            "binds loopback only. Run the backend yourself "
-            "(scripts/run_backend.sh) for a custom host."
+            "binds loopback only, and a manually run backend must still be "
+            "addressed as 127.0.0.1, localhost, or [::1]."
         )
     return host, port
 
