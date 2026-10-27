@@ -232,8 +232,11 @@ meeting notes, manual re-insertion, and the existing command lane retain their
 own controls; this setting does not bypass review.
 
 VoxFlow retains the target window and focused element when recording starts.
-A known change within the target app blocks insertion and leaves a clipboard
-recovery. Enter is sent only after a successful insertion, with the target still
+When automatic Enter applies to the capture, or the text is an exact skill
+command, a known window or field change within the target app blocks insertion
+and leaves a clipboard recovery. Ordinary dictation without Enter checks only the
+target app, because some web and Electron fields do not report a stable identity.
+Enter is sent only after a successful insertion, with the target still
 active, the original window/field identities still available and unchanged,
 and no cancellation or secure-input block. If text lands but submission cannot
 be verified, it stays inserted and the status says **Enter skipped**. No second

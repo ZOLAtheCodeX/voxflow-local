@@ -44,7 +44,8 @@ final class CapturedInsertionFocus {
     }
 
     /// Unknown AX identities preserve the existing text-only fallback, but
-    /// cannot authorize Return. A known window/field change blocks insertion.
+    /// cannot authorize Return. A known window/field change blocks insertion
+    /// for policies that gate on it (`TextInsertionPolicy.gatesOnFocusIdentity`).
     func matchesForInsertion(targetPID: pid_t) -> Bool {
         expected.matches(Self.read(application: application, processID: targetPID), requireKnown: false)
     }

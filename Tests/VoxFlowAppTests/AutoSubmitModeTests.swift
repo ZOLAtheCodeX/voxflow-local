@@ -36,6 +36,17 @@ final class AutoSubmitModeTests: XCTestCase {
         XCTAssertEqual(prose.withSubmission(false), .prose)
     }
 
+    /// AX window/field identity can be unstable in web and Electron content,
+    /// and a false mismatch withholds the text. Only insertions that can
+    /// trigger an effect (Enter, exact commands) pay that availability cost;
+    /// ordinary dictation keeps the frozen target-process check only.
+    func testOnlyEffectfulInsertionsAreGatedOnFocusIdentity() {
+        XCTAssertFalse(TextInsertionPolicy.prose.gatesOnFocusIdentity)
+        XCTAssertTrue(TextInsertionPolicy.prose.withSubmission(true).gatesOnFocusIdentity)
+        XCTAssertTrue(TextInsertionPolicy.verbatim.gatesOnFocusIdentity)
+        XCTAssertTrue(TextInsertionPolicy.verbatim.withSubmission(true).gatesOnFocusIdentity)
+    }
+
     func testEnterIsRefusedAfterCancellationOrAnyTargetGuardFailure() {
         XCTAssertTrue(AccessibilityInsertService.maySubmit(cancelled: false, targetActive: true,
             targetTerminated: false, focusUnchanged: true, secureInputActive: false))

@@ -33,6 +33,12 @@ struct TextInsertionPolicy: Sendable, Equatable {
     func adjusted(_ text: String, precedingCharacter: Character?) -> String {
         isVerbatim ? text : SmartSpacing.adjusted(text, precedingCharacter: precedingCharacter)
     }
+
+    /// AX window/field identity can be unstable in web and Electron content and
+    /// a false mismatch withholds the text, so only insertions that can trigger
+    /// an effect (Enter, exact commands) are gated on it. Ordinary dictation
+    /// keeps the frozen target-process check.
+    var gatesOnFocusIdentity: Bool { submits || isVerbatim }
 }
 
 /// Seam for text insertion so unit tests can NEVER reach the real
@@ -158,7 +164,8 @@ final class AccessibilityInsertService: TextInserting {
                                 errorCode: Task.isCancelled ? "CANCELLED" : "TARGET_UNAVAILABLE")
         }
         guard policy.voiceActionPermission?.revoked != true,
-              policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else {
+              !policy.gatesOnFocusIdentity
+                || policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else {
             return InsertResult(method: .failed, success: false, fallbackUsed: false, errorCode: "TARGET_CHANGED")
         }
         // R5.0: boundary-aware spacing — successive dictations used to land
@@ -321,7 +328,8 @@ final class AccessibilityInsertService: TextInserting {
         // Never post Cmd+V to the unrelated app that still owns the keyboard.
         guard !Task.isCancelled, targetApp.isActive, !targetApp.isTerminated else { return (false, nil) }
         guard policy.voiceActionPermission?.revoked != true,
-              policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else { return (false, nil) }
+              !policy.gatesOnFocusIdentity
+                || policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else { return (false, nil) }
         let focus = policy.submits ? copyOwnedFocusedElement(targetPID: targetApp.processIdentifier) : nil
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
 
