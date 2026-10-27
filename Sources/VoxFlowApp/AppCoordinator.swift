@@ -255,6 +255,12 @@ final class AppCoordinator: ObservableObject {
         }
         self.settings = settingsCoordinator
         startFocusMonitoring()
+        // Adopt mode: backendManager (a stored property) already published its
+        // generated launch token, so this load, running afterwards, wins.
+        if Self.explicitAdoptRequested(ProcessInfo.processInfo.environment),
+           Self.loadAdoptedBackendToken(explicitAdopt: true, reader: BackendTokenFile()) == .missing {
+            state.backendReadiness.statusSummary = "Backend token file not found"
+        }
         beginWarmupMonitoring()
         state.$sessionState
             .removeDuplicates()
@@ -450,9 +456,9 @@ final class AppCoordinator: ObservableObject {
         var listenerResponded = false
         var reportedStamp: String?
         do {
-            let readiness = try await BackendAPIClient.readyProbe()
+            // /v1/health, never the token: the listener is not yet verified.
+            reportedStamp = try await BackendAPIClient.identityProbe()
             listenerResponded = true
-            reportedStamp = readiness.instanceStamp
         } catch {
             // Connection refused / timeout / non-JSON responder: nothing we
             // recognise is listening. A wedged or draining stray from a
@@ -488,25 +494,29 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
+        // Identity first, over /v1/health without the token: nothing that
+        // attaches the token may run until the listener is verified as ours.
+        // R4.7: a healthy port answered by a backend we didn't launch is
+        // stale/foreign — replace it instead of silently trusting it.
+        if let reportedStamp = try? await BackendAPIClient.identityProbe(),
+           !Self.adoptForeignBackendOverride,
+           BackendProcessManager.isForeignBackend(
+            reportedStamp: reportedStamp,
+            expectedStamp: backendManager.instanceStamp,
+            managerOwnsProcess: backendManager.isRunning
+           ) {
+            log.warning("Foreign/stale backend on port \(BackendEndpoint.resolved().port) (stamp mismatch) — terminating")
+            backendManager.terminateForeignListenerAsync()
+            state.backendReadiness.readyForDictation = false
+            state.backendReadiness.statusSummary = "Stale backend replaced — restarting"
+            if state.backendShouldRun {
+                backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
+            }
+            return
+        }
+
         do {
             let readiness = try await BackendAPIClient.ready()
-            // R4.7: a healthy port answered by a backend we didn't launch is
-            // stale/foreign — replace it instead of silently trusting it.
-            if !Self.adoptForeignBackendOverride,
-               BackendProcessManager.isForeignBackend(
-                reportedStamp: readiness.instanceStamp,
-                expectedStamp: backendManager.instanceStamp,
-                managerOwnsProcess: backendManager.isRunning
-            ) {
-                log.warning("Foreign/stale backend on port \(BackendEndpoint.resolved().port) (stamp mismatch) — terminating")
-                backendManager.terminateForeignListenerAsync()
-                state.backendReadiness.readyForDictation = false
-                state.backendReadiness.statusSummary = "Stale backend replaced — restarting"
-                if state.backendShouldRun {
-                    backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
-                }
-                return
-            }
             state.backendReadiness.readyForDictation = readiness.readyForDictation
             state.backendReadiness.warmupInProgress = false
             state.backendReadiness.readinessIssue = readiness.issues.first
@@ -525,6 +535,17 @@ final class AppCoordinator: ObservableObject {
         } catch {
             state.backendReadiness.readyForDictation = false
             state.backendReadiness.activeSTTModel = ""
+            if Self.isTokenRejection(error) {
+                // Verified-ours-or-adopted listener refused the token: surface
+                // it, and in adopt mode re-read the file for the next poll.
+                state.backendReadiness.warmupInProgress = false
+                state.backendReadiness.readinessIssue = "Backend rejected the app's token"
+                state.backendReadiness.statusSummary = "Backend rejected the app's token"
+                _ = Self.loadAdoptedBackendToken(
+                    explicitAdopt: Self.explicitAdoptRequested(ProcessInfo.processInfo.environment),
+                    reader: BackendTokenFile())
+                return
+            }
             if let startupIssue {
                 state.backendReadiness.warmupInProgress = false
                 state.backendReadiness.readinessIssue = startupIssue
@@ -1207,6 +1228,36 @@ final class AppCoordinator: ObservableObject {
     /// network failures are NOT cancellation and still surface.
     nonisolated static func isUserCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    /// Explicit dev opt-in to pair with a manually launched backend. Env flag
+    /// only: unlike `adoptForeignBackendOverride` it has no XCTest clause, so
+    /// it gates reading the token file and nothing else.
+    nonisolated static func explicitAdoptRequested(_ environment: [String: String]) -> Bool {
+        environment["VOXFLOW_ADOPT_FOREIGN_BACKEND"] == "1"
+    }
+
+    /// Adopt mode only: replace the process token with the one the adopted
+    /// backend published in its token file (nil when absent or malformed, so
+    /// requests go out unauthenticated rather than with a stale launch token).
+    /// A no-op that never touches the reader when not adopting.
+    nonisolated static func loadAdoptedBackendToken(
+        explicitAdopt: Bool,
+        reader: BackendTokenFileReading
+    ) -> AdoptedTokenOutcome {
+        guard explicitAdopt else { return .notAdopting }
+        if let token = reader.readToken() {
+            BackendAuthToken.set(token)
+            return .loaded
+        }
+        BackendAuthToken.set(nil)
+        return .missing
+    }
+
+    /// The backend answered but refused the app's token.
+    nonisolated static func isTokenRejection(_ error: Error) -> Bool {
+        guard case BackendError.httpError(let statusCode, _) = error else { return false }
+        return statusCode == 401
     }
 
     /// Action, skill, and snippet captures return straight to idle. A cancelled

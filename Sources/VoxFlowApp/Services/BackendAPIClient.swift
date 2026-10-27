@@ -312,13 +312,6 @@ enum BackendAPIClient {
         return try await performGetRequest(path: "v1/ready")
     }
 
-    /// Identity probe for the launch-time stale-listener check. The shared
-    /// session allows 120 s (model warmup); this must fail fast instead when
-    /// a wedged process squats on the port.
-    static func readyProbe(timeoutInterval: TimeInterval = 3) async throws -> BackendReadinessResponse {
-        return try await performGetRequest(path: "v1/ready", timeoutInterval: timeoutInterval)
-    }
-
     /// Identity probe: reads `instance_stamp` from `/v1/health` (empty string
     /// when the backend does not report one). Never sends the launch token: the
     /// route does not need it and the listener is not yet verified as ours. Uses a short
