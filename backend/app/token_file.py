@@ -52,11 +52,14 @@ def write_token_file(token: str, path: Path) -> tuple[int, int] | None:
                 handle.write(token)
                 handle.flush()
                 os.fsync(handle.fileno())
+                # Record identity from the open descriptor before the rename: a
+                # rename preserves the inode, and a stat after it could observe
+                # a successor's file that replaced ours in between.
+                written = os.fstat(handle.fileno())
             os.replace(temp_path, path)
         except BaseException:
             temp_path.unlink(missing_ok=True)
             raise
-        written = os.stat(path)
     except OSError as error:
         logger.warning("Could not write backend token file %s: %s", path, error.strerror or error)
         return None

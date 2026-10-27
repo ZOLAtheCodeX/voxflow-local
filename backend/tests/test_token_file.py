@@ -66,3 +66,26 @@ def test_lifespan_writes_and_removes_token_file(monkeypatch, tmp_path):
 def test_token_file_path_honours_override():
     assert token_file_path({"VOXFLOW_TOKEN_DIR": "/x"}) == Path("/x/backend.token")
     assert token_file_path({}).parts[-3:] == ("Application Support", "VoxFlow", "backend.token")
+
+
+def test_identity_is_recorded_before_the_rename_window(monkeypatch, tmp_path):
+    """A successor replacing the file right after our rename must not be mistaken for ours."""
+    import token_file
+
+    p = tmp_path / "backend.token"
+    real_replace = os.replace
+
+    def replace_then_successor_wins(src, dst):
+        real_replace(src, dst)
+        successor = tmp_path / ".successor"
+        successor.write_text("cd" * 32)
+        real_replace(successor, dst)  # another backend lands between our rename and any later stat
+
+    monkeypatch.setattr(token_file.os, "replace", replace_then_successor_wins)
+    mine = write_token_file("ab" * 32, p)
+    monkeypatch.undo()
+
+    successors = (p.stat().st_dev, p.stat().st_ino)
+    assert mine is not None and mine != successors
+    assert remove_token_file(p, mine) is False
+    assert p.read_text() == "cd" * 32
