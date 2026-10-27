@@ -258,13 +258,24 @@ enum BackendAPIClient {
         throw BackendError.httpError(statusCode: http.statusCode, detail: detail)
     }
 
+    /// The single place a backend request is built: base URL, method, and the
+    /// launch token header when one is held. Callers add their own
+    /// `Content-Type`, body, and timeout.
+    private static func makeRequest(path: String, method: String) -> URLRequest {
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = method
+        if let token = BackendAuthToken.current(), !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: BackendAuthToken.headerName)
+        }
+        return request
+    }
+
     private static func performRequest<Response: Decodable, Payload: Encodable>(
         path: String,
         payload: Payload,
         timeoutInterval: TimeInterval? = nil
     ) async throws -> Response {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
-        request.httpMethod = "POST"
+        var request = makeRequest(path: path, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(payload)
         if let timeoutInterval {
@@ -280,8 +291,7 @@ enum BackendAPIClient {
         path: String,
         timeoutInterval: TimeInterval? = nil
     ) async throws -> Response {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
-        request.httpMethod = "GET"
+        var request = makeRequest(path: path, method: "GET")
         if let timeoutInterval {
             request.timeoutInterval = timeoutInterval
         }
@@ -304,6 +314,16 @@ enum BackendAPIClient {
     /// a wedged process squats on the port.
     static func readyProbe(timeoutInterval: TimeInterval = 3) async throws -> BackendReadinessResponse {
         return try await performGetRequest(path: "v1/ready", timeoutInterval: timeoutInterval)
+    }
+
+    /// Identity probe: reads `instance_stamp` from the token-free `/v1/health`
+    /// route (empty string when the backend does not report one). Uses a short
+    /// timeout because the shared session allows 120 s for model warmup, and a
+    /// wedged process squatting on the port must fail fast instead.
+    static func identityProbe(timeoutInterval: TimeInterval = 3) async throws -> String {
+        struct Health: Decodable { let instanceStamp: String? }
+        let health: Health = try await performGetRequest(path: "v1/health", timeoutInterval: timeoutInterval)
+        return health.instanceStamp ?? ""
     }
 
     static func ollamaModels() async throws -> OllamaModelsResponse {
@@ -340,8 +360,7 @@ enum BackendAPIClient {
             }
         }
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/smart_action"))
-        request.httpMethod = "POST"
+        var request = makeRequest(path: "v1/smart_action", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(actionId: action.rawValue, transcript: transcript))
 
@@ -366,15 +385,22 @@ enum BackendAPIClient {
         struct Payload: Codable {
             let model: String
         }
-        let url = baseURL.appendingPathComponent("v1/ollama/pull")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        var request = makeRequest(path: "v1/ollama/pull", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Payload(model: model))
 
         let (bytes, response) = try await session.bytes(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw BackendError.httpError(statusCode: http.statusCode, detail: "Ollama pull failed")
+            // The body is a short FastAPI error JSON; read it so the caller sees
+            // the backend's own detail (e.g. a 401 token rejection) rather than a
+            // fixed string. Capped so a misbehaving listener cannot stream
+            // unbounded data into the error path.
+            var errorBody = Data()
+            for try await byte in bytes {
+                errorBody.append(byte)
+                if errorBody.count >= 8192 { break }
+            }
+            try checkHTTPStatus(response, data: errorBody)
         }
         for try await line in bytes.lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -596,8 +622,7 @@ enum BackendAPIClient {
 
     static func providerTest(providerID: String) async throws -> ProviderTestResult {
         struct Request: Encodable { let providerId: String }
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/providers/test"))
-        request.httpMethod = "POST"
+        var request = makeRequest(path: "v1/providers/test", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(providerId: providerID))
         let (data, response) = try await session.data(for: request)
@@ -608,8 +633,7 @@ enum BackendAPIClient {
     static func notionSearch(query: String, token: String) async throws -> [NotionTarget] {
         struct Request: Encodable { let notionToken: String; let query: String }
         struct Response: Decodable { let results: [NotionTarget] }
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/notion/search"))
-        request.httpMethod = "POST"
+        var request = makeRequest(path: "v1/notion/search", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(notionToken: token, query: query))
         let (data, response) = try await session.data(for: request)
@@ -620,8 +644,7 @@ enum BackendAPIClient {
     static func notionAppend(pageId: String, text: String, token: String) async throws -> Int {
         struct Request: Encodable { let notionToken: String; let pageId: String; let text: String }
         struct Response: Decodable { let appendedBlocks: Int }
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/notion/append"))
-        request.httpMethod = "POST"
+        var request = makeRequest(path: "v1/notion/append", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(notionToken: token, pageId: pageId, text: text))
         let (data, response) = try await session.data(for: request)

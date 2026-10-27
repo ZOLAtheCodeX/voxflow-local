@@ -51,11 +51,13 @@ class MockURLProtocol: URLProtocol {
 final class BackendAPIClientTests: XCTestCase {
     private var originalSession: URLSession!
     private var originalBaseURL: URL!
+    private var originalToken: String?
 
     override func setUp() {
         super.setUp()
         originalSession = BackendAPIClient.session
         originalBaseURL = BackendAPIClient.baseURL
+        originalToken = BackendAuthToken.current()
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
@@ -68,6 +70,7 @@ final class BackendAPIClientTests: XCTestCase {
         MockURLProtocol.expectedPath = nil
         BackendAPIClient.session = originalSession
         BackendAPIClient.baseURL = originalBaseURL
+        BackendAuthToken.set(originalToken)
         super.tearDown()
     }
 
@@ -225,6 +228,166 @@ final class BackendAPIClientTests: XCTestCase {
         } catch BackendError.httpError(let statusCode, let detail) {
             XCTAssertEqual(statusCode, 400)
             XCTAssertEqual(detail, "Invalid session ID")
+        } catch {
+            XCTFail("Unexpected error thrown: \(error)")
+        }
+    }
+
+    // MARK: - Launch token (trust boundary)
+
+    private static let readyBody = """
+    {"service_status":"ok","ready_for_dictation":true,"stt_backend":"whisper","active_stt_model":"m",
+     "active_stt_model_loaded":true,"stt_fallback_active":false,"offline_mode":true,
+     "python_executable":"/p","python_version":"3.12","models_dir":"/m","models_dir_exists":true,
+     "openai_audio_configured":false,"private_api_configured":false,"private_api_policy_version":"1",
+     "private_api_policy_ready":false,"issues":[]}
+    """
+
+    /// Stubs `path` with a 200 JSON body and records the token header the request carried.
+    private func stubRecordingToken(
+        _ path: String, body: String, into sink: TokenSink, method: String? = nil
+    ) {
+        MockURLProtocol.expectedPath = path
+        MockURLProtocol.requestHandler = { request in
+            sink.record(path, request.value(forHTTPHeaderField: BackendAuthToken.headerName))
+            if let method { XCTAssertEqual(request.httpMethod, method) }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(body.utf8))
+        }
+    }
+
+    final class TokenSink: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [String: String?] = [:]
+        func record(_ path: String, _ value: String?) {
+            lock.lock(); defer { lock.unlock() }
+            values[path] = .some(value)
+        }
+        var snapshot: [String: String?] {
+            lock.lock(); defer { lock.unlock() }
+            return values
+        }
+    }
+
+    func testEveryRequestBuilderAttachesToken() async throws {
+        let token = String(repeating: "ab", count: 32)
+        BackendAuthToken.set(token)
+        let sink = TokenSink()
+
+        stubRecordingToken("/v1/health", body: #"{"instance_stamp":"s"}"#, into: sink)
+        _ = try await BackendAPIClient.identityProbe()
+
+        stubRecordingToken(
+            "/v1/cleanup",
+            body: #"{"output_text":"x","mode_applied":"light","guardrail_triggered":false}"#, into: sink)
+        _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+
+        stubRecordingToken("/v1/ready", body: Self.readyBody, into: sink)
+        _ = try await BackendAPIClient.ready()
+
+        stubRecordingToken(
+            "/v1/smart_action",
+            body: #"{"action_id":"memo","output":"o","guardrail_triggered":false}"#, into: sink)
+        _ = try await BackendAPIClient.performSmartAction(.memo, transcript: "t")
+
+        stubRecordingToken(
+            "/v1/providers/test",
+            body: #"{"provider_id":"p","reachable":true,"detail":"ok"}"#, into: sink)
+        _ = try await BackendAPIClient.providerTest(providerID: "p")
+
+        stubRecordingToken("/v1/notion/search", body: #"{"results":[]}"#, into: sink)
+        _ = try await BackendAPIClient.notionSearch(query: "q", token: "notion-secret")
+
+        stubRecordingToken("/v1/notion/append", body: #"{"appended_blocks":1}"#, into: sink)
+        _ = try await BackendAPIClient.notionAppend(pageId: "pg", text: "t", token: "notion-secret")
+
+        stubRecordingToken("/v1/ollama/pull", body: "{\"status\":\"success\"}\n", into: sink)
+        try await BackendAPIClient.ollamaPull(model: "m", onProgress: { _ in })
+
+        let seen = sink.snapshot
+        XCTAssertEqual(seen.count, 8, "expected one recorded request per builder, got \(seen.keys.sorted())")
+        for (path, value) in seen {
+            XCTAssertEqual(value, token, "\(path) did not carry the token")
+        }
+    }
+
+    func testRequestsOmitTokenHeaderWhenNoneIsSet() async throws {
+        BackendAuthToken.set(nil)
+        let sink = TokenSink()
+
+        stubRecordingToken("/v1/ready", body: Self.readyBody, into: sink, method: "GET")
+        _ = try await BackendAPIClient.ready()
+
+        stubRecordingToken(
+            "/v1/cleanup",
+            body: #"{"output_text":"x","mode_applied":"light","guardrail_triggered":false}"#,
+            into: sink, method: "POST")
+        _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+
+        stubRecordingToken("/v1/ollama/pull", body: "{\"status\":\"success\"}\n", into: sink, method: "POST")
+        try await BackendAPIClient.ollamaPull(model: "m", onProgress: { _ in })
+
+        let seen = sink.snapshot
+        XCTAssertEqual(seen.count, 3)
+        for (path, value) in seen {
+            XCTAssertNil(value, "\(path) sent a token header with no token set")
+        }
+    }
+
+    func testRequestsOmitTokenHeaderWhenTokenIsEmpty() async throws {
+        BackendAuthToken.set("")
+        let sink = TokenSink()
+        stubRecordingToken("/v1/ready", body: Self.readyBody, into: sink)
+        _ = try await BackendAPIClient.ready()
+        XCTAssertNil(sink.snapshot["/v1/ready"] ?? nil)
+        XCTAssertEqual(sink.snapshot.count, 1)
+    }
+
+    func testIdentityProbeReadsInstanceStampWithoutToken() async throws {
+        BackendAuthToken.set(nil)
+        MockURLProtocol.expectedPath = "/v1/health"
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-VoxFlow-Token"))
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(#"{"instance_stamp":"previous-launch"}"#.utf8))
+        }
+        let stamp = try await BackendAPIClient.identityProbe()
+        XCTAssertEqual(stamp, "previous-launch")
+    }
+
+    func testIdentityProbeReturnsEmptyStringWhenStampAbsent() async throws {
+        MockURLProtocol.expectedPath = "/v1/health"
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"status":"ok"}"#.utf8))
+        }
+        let stamp = try await BackendAPIClient.identityProbe()
+        XCTAssertEqual(stamp, "")
+    }
+
+    func testIdentityProbeAppliesTimeoutInterval() async throws {
+        MockURLProtocol.expectedPath = "/v1/health"
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.timeoutInterval, 3, accuracy: 0.001)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(#"{"instance_stamp":"s"}"#.utf8))
+        }
+        _ = try await BackendAPIClient.identityProbe()
+    }
+
+    func testOllamaPullSurfacesBackendDetailOnError() async {
+        MockURLProtocol.expectedPath = "/v1/ollama/pull"
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"detail":"Missing or invalid token"}"#.utf8))
+        }
+        do {
+            try await BackendAPIClient.ollamaPull(model: "m", onProgress: { _ in })
+            XCTFail("Expected HTTP error to be thrown")
+        } catch BackendError.httpError(let statusCode, let detail) {
+            XCTAssertEqual(statusCode, 401)
+            XCTAssertEqual(detail, "Missing or invalid token")
         } catch {
             XCTFail("Unexpected error thrown: \(error)")
         }
