@@ -338,11 +338,14 @@ def test_real_app_requires_token_and_keeps_health_open():
     assert api_client(server.app).get("/v1/ready").status_code == 200
 
 
-def test_real_app_sends_no_cors_headers():
+def test_real_app_has_no_cors_and_trust_boundary_is_outermost():
     import server
+    from fastapi.middleware.cors import CORSMiddleware
 
-    r = api_client(server.app).get("/v1/health")
-    assert "access-control-allow-origin" not in r.headers
+    # Starlette's add_middleware inserts at index 0, so index 0 is outermost.
+    classes = [m.cls for m in server.app.user_middleware]
+    assert CORSMiddleware not in classes
+    assert classes[0] is TrustBoundaryMiddleware
 
 
 def test_ollama_pull_streams_through_middleware(monkeypatch):
