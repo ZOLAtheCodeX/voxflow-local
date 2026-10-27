@@ -32,6 +32,14 @@ final class CockpitCoordinator: ObservableObject {
     /// open cockpit makes `backendShouldRun` true, and smart actions need a
     /// live backend that nothing else in dictation mode would have spawned.
     var onCockpitOpened: (() -> Void)?
+    /// Stops an active recording and waits for the drain to finish, leaving
+    /// the session in `.reviewing`. AppCoordinator wires this to
+    /// ``CockpitCaptureCoordinator/stopRecording()``. Nil means no capture
+    /// pipeline is attached, so a still-recording session is never inserted.
+    var drainRecording: (@MainActor () async -> Void)?
+    /// Ruling R7: ⌘↩ is single-flight. A second press while the first is
+    /// draining or inserting would otherwise drain and insert twice.
+    private var insertInFlight = false
 
     func requestAssistantHandoff() { onHandoffRequested?() }
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCoordinator")
@@ -211,7 +219,18 @@ final class CockpitCoordinator: ObservableObject {
     }
 
     func insertIntoTarget() async {
-        guard let session = sessionService.currentSession else { return }
+        guard !insertInFlight else { return }
+        insertInFlight = true
+        defer { insertInFlight = false }
+
+        // ⌘↩ during recording drains first so the insert carries the whole
+        // transcript and capture is not left running behind a reset session.
+        // Without a drain hook a recording session inserts nothing.
+        if case .recording = sessionService.state {
+            await drainRecording?()
+        }
+        guard case .reviewing = sessionService.state,
+              let session = sessionService.currentSession else { return }
         let text = session.transcript
         guard !text.isEmpty else { return }
 

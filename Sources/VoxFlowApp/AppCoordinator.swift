@@ -299,6 +299,7 @@ final class AppCoordinator: ObservableObject {
         // backendShouldRun true (smart actions need the backend); spawn +
         // warmup-poll it through the existing machinery.
         cockpit.onCockpitOpened = { [weak self] in self?.scheduleRuntimeWarmupIfNeeded() }
+        cockpit.drainRecording = { [weak self] in await self?.cockpitCapture.stopRecording() }
 
         // R5.6: cockpit review can trigger protocols (gated inside the
         // coordinator on state.protocolCommandsEnabled + strict grammar).

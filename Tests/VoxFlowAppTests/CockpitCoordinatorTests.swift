@@ -284,6 +284,104 @@ final class CockpitCoordinatorTests: XCTestCase {
                       "got: \(state.statusLine)")
     }
 
+    // MARK: - Insert while recording (drain first)
+
+    /// Records inserted texts and reports success via `.simulatedPaste`, the
+    /// only method for which `TextInsertionCoordinator` skips the pasteboard.
+    private final class RecordingInsertService: TextInserting {
+        private(set) var texts: [String] = []
+        func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
+            texts.append(text)
+            return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: false, errorCode: nil)
+        }
+    }
+
+    /// Holds the continuation a suspended drain waits on.
+    private final class ContinuationBox {
+        var continuation: CheckedContinuation<Void, Never>?
+    }
+
+    private func makeInsertFixture() -> (CockpitCoordinator, LongFormSessionService, RecordingInsertService) {
+        let state = AppState()
+        let sessionDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("voxflow-cockpit-test-\(UUID().uuidString)")
+        let sessionService = LongFormSessionService(autoSaveDirectory: sessionDir)
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")
+        let inserter = RecordingInsertService()
+        let insertion = TextInsertionCoordinator(
+            state: state, insertService: inserter,
+            audit: InsertionAuditLog(fileURL: auditURL))
+        let coord = CockpitCoordinator(
+            state: state,
+            sessionService: sessionService,
+            actionService: SmartActionService(backend: StubSmartActionBackend()),
+            textInsertionCoordinator: insertion,
+            snippetStore: nil
+        )
+        return (coord, sessionService, inserter)
+    }
+
+    func test_insert_during_recording_drains_then_inserts_complete_transcript() async {
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start()
+        sessionService.appendTestChunk("first part")
+        coord.drainRecording = {
+            sessionService.appendTestChunk("tail words")
+            sessionService.stop()
+        }
+
+        await coord.insertIntoTarget()
+
+        XCTAssertEqual(inserter.texts, ["first part tail words"])
+        XCTAssertEqual(sessionService.state, .idle, "success resets the session")
+    }
+
+    func test_insert_during_recording_without_drain_inserts_nothing() async {
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start()
+        sessionService.appendTestChunk("partial")
+
+        await coord.insertIntoTarget()
+
+        XCTAssertTrue(inserter.texts.isEmpty)
+        guard case .recording = sessionService.state else {
+            return XCTFail("session must still be recording, got \(sessionService.state)")
+        }
+    }
+
+    func test_concurrent_inserts_during_recording_insert_once() async {
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start()
+        sessionService.appendTestChunk("only once")
+        let box = ContinuationBox()
+        coord.drainRecording = {
+            await withCheckedContinuation { box.continuation = $0 }
+            sessionService.stop()
+        }
+
+        let first = Task { await coord.insertIntoTarget() }
+        let second = Task { await coord.insertIntoTarget() }
+
+        var yields = 0
+        while box.continuation == nil && yields < 10_000 {
+            await Task.yield()
+            yields += 1
+        }
+        guard let continuation = box.continuation else {
+            first.cancel(); second.cancel()
+            return XCTFail("drain never suspended")
+        }
+        // Let the second press reach (and be rejected by) the guard while the
+        // first is still draining.
+        for _ in 0..<20 { await Task.yield() }
+        continuation.resume()
+        await first.value
+        await second.value
+
+        XCTAssertEqual(inserter.texts, ["only once"])
+    }
+
     private func makeCoordinator() -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
         makeCoordinator(backend: StubSmartActionBackend())
     }
