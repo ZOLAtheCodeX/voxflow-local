@@ -45,8 +45,9 @@ final class CockpitCaptureCoordinator {
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCaptureCoordinator")
     private var loopTask: Task<Void, Never>?
     private var isFlushing = false
-    /// Single-flight stop: a second `stopRecording()` awaits this task.
-    private var stopTask: Task<Void, Never>?
+    /// Single-flight stop: a second `stopRecording()` awaits this task and
+    /// gets its result.
+    private var stopTask: Task<Bool, Never>?
     /// The periodic flush in progress, so a stop can await the chunk it
     /// already cut. Cancelling `loopTask` never cancels this.
     private var flushTask: Task<Void, Never>?
@@ -143,16 +144,23 @@ final class CockpitCaptureCoordinator {
     }
 
     /// Single-flight: a second call while a stop is draining awaits the same
-    /// work and returns.
-    func stopRecording() async {
+    /// work and returns its result.
+    ///
+    /// True when the drain moved the recording into `.reviewing` through the
+    /// normal stop sequence. False when nothing was recording, or when the
+    /// session ended through `endSessionAfterInterruption` during the drain:
+    /// the transcript is in review with its marker, but it was not drained
+    /// cleanly, so callers that consume it must not act on it.
+    @discardableResult
+    func stopRecording() async -> Bool {
         if let stopTask {
-            await stopTask.value
-            return
+            return await stopTask.value
         }
         let task = Task { await self.performStop() }
         stopTask = task
-        await task.value
+        let drained = await task.value
         stopTask = nil
+        return drained
     }
 
     /// Stops the engine when it may be running and returns what it buffered.
@@ -168,9 +176,10 @@ final class CockpitCaptureCoordinator {
 
     /// Cutoff at the keypress: the tail is taken first, then the periodic
     /// chunk already cut (if any) is awaited and appended, then the tail.
-    private func performStop() async {
+    /// Returns whether the drain completed cleanly (see `stopRecording()`).
+    private func performStop() async -> Bool {
         guard case .recording = session.state, let id = recordingSessionID,
-              session.currentSession?.id == id else { return }
+              session.currentSession?.id == id else { return false }
         stopRequested = true
         loopTask?.cancel()
         loopTask = nil
@@ -180,15 +189,17 @@ final class CockpitCaptureCoordinator {
         // session. The tail is already out of the engine, so keep it.
         guard case .recording = session.state, session.currentSession?.id == id else {
             if let tail { retainInterruptedAudio(tail.pcm, sampleRate: tail.sampleRate) }
-            return
+            return false
         }
         // Forced: the user already stopped speaking, so the minimum-chunk
         // guard does not apply. This also merges any carried audio.
         await transcribeAndAppend(
             tail ?? CapturedAudio(pcm: Data(), sampleRate: AudioCaptureService.targetSampleRate),
             force: true)
-        guard session.currentSession?.id == id else { return }
+        // The tail's own failure may have ended the session (third in a row).
+        guard case .recording = session.state, session.currentSession?.id == id else { return false }
         session.stop()
+        return true
     }
 
     /// One timer-driven cut, run inside `flushTask` so a stop can await it.

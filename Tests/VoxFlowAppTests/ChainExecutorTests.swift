@@ -393,6 +393,72 @@ final class ChainExecutorTests: XCTestCase {
         XCTAssertTrue(insertion.calls.isEmpty, "stop-on-error: insert must not run")
     }
 
+    // MARK: - Session binding
+
+    /// The user inserts or resets session A and starts session B while an
+    /// action runs on A's text. Inserting then would send A's output into
+    /// B's target, so the chain stops before the insert.
+    func test_session_change_during_action_stops_before_insert() async {
+        let backend = HeldSmartActionBackend(output: "ACTION OUT")
+        let service = SmartActionService(backend: backend)
+        let insert = FakeTextInsertion(returns: true)
+        let session = SessionIDBox(UUID())
+        let executor = ChainExecutor(
+            actionService: service,
+            textInsertion: insert,
+            currentTranscript: { "session A text" },
+            frozenTarget: { nil },
+            currentSessionID: { session.id }
+        )
+        let chain = WorkflowChain(
+            name: "Flow",
+            steps: [.action(actionId: .memo), .insert(targetHint: nil)],
+            createdAt: Date()
+        )
+
+        let run = Task { await executor.run(chain) }
+        guard await yieldUntil({ backend.heldCount >= 1 }, "action never reached the backend") else {
+            backend.releaseAll(); _ = await run.value; return
+        }
+        session.id = UUID()   // session B
+        backend.releaseAll()
+        let result = await run.value
+
+        XCTAssertTrue(insert.calls.isEmpty, "another session's target must never get this text")
+        XCTAssertEqual(result.error, .sessionChanged)
+        XCTAssertEqual(result.failedStepIndex, 1)
+        XCTAssertFalse(result.clipboardFallback)
+    }
+
+    func test_unchanged_session_inserts_after_held_action() async {
+        let backend = HeldSmartActionBackend(output: "ACTION OUT")
+        let service = SmartActionService(backend: backend)
+        let insert = FakeTextInsertion(returns: true)
+        let session = SessionIDBox(UUID())
+        let executor = ChainExecutor(
+            actionService: service,
+            textInsertion: insert,
+            currentTranscript: { "session A text" },
+            frozenTarget: { nil },
+            currentSessionID: { session.id }
+        )
+        let chain = WorkflowChain(
+            name: "Flow",
+            steps: [.action(actionId: .memo), .insert(targetHint: nil)],
+            createdAt: Date()
+        )
+
+        let run = Task { await executor.run(chain) }
+        guard await yieldUntil({ backend.heldCount >= 1 }, "action never reached the backend") else {
+            backend.releaseAll(); _ = await run.value; return
+        }
+        backend.releaseAll()
+        let result = await run.value
+
+        XCTAssertNil(result.error)
+        XCTAssertEqual(insert.calls.map(\.text), ["ACTION OUT"])
+    }
+
     func test_action_then_insert_with_nonempty_output_succeeds() async {
         // The positive companion: an action yields non-empty output, so the
         // following insert lands and the chain completes. Proves the non-empty
@@ -506,6 +572,45 @@ private final class ThrowingSmartActionBackend: SmartActionBackend, @unchecked S
     func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
         throw Boom()
     }
+}
+
+/// Suspends every smart action until released, so a test can change the
+/// session while the action is in flight.
+private final class HeldSmartActionBackend: SmartActionBackend, @unchecked Sendable {
+    private let output: String
+    private let lock = NSLock()
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(output: String) {
+        self.output = output
+    }
+
+    var heldCount: Int { lock.withLock { waiters.count } }
+
+    func releaseAll() {
+        let pending: [CheckedContinuation<Void, Never>] = lock.withLock {
+            defer { waiters = [] }
+            return waiters
+        }
+        pending.forEach { $0.resume() }
+    }
+
+    /// Synchronous so the lock never spans a suspension point.
+    private func park(_ waiter: CheckedContinuation<Void, Never>) {
+        lock.withLock { waiters.append(waiter) }
+    }
+
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        await withCheckedContinuation { park($0) }
+        return SmartActionResult(actionId: action, output: output, guardrailTriggered: false, error: nil)
+    }
+}
+
+/// The current cockpit session id as an `@escaping @MainActor` closure sees it.
+@MainActor
+private final class SessionIDBox {
+    var id: UUID?
+    init(_ id: UUID?) { self.id = id }
 }
 
 /// Reference-type counter so an `@escaping @MainActor` closure can mutate a

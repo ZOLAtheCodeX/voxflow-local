@@ -24,6 +24,9 @@ final class ChainExecutor {
         case actionFailed(String)
         case insertFailed
         case appStepFailed(String)
+        /// The cockpit session changed while the chain ran, so its text
+        /// belongs to a session whose target is no longer the current one.
+        case sessionChanged
     }
 
     struct ChainRunResult: Equatable {
@@ -38,6 +41,7 @@ final class ChainExecutor {
     private let textInsertion: TextInsertionCoordinating
     private let currentTranscript: @MainActor () -> String?
     private let frozenTarget: @MainActor () -> NSRunningApplication?
+    private let currentSessionID: @MainActor () -> UUID?
     private let log = Logger(subsystem: "local.voxflow.app", category: "ChainExecutor")
 
     init(
@@ -45,12 +49,14 @@ final class ChainExecutor {
         textInsertion: TextInsertionCoordinating,
         currentTranscript: @escaping @MainActor () -> String?,
         frozenTarget: @escaping @MainActor () -> NSRunningApplication?,
+        currentSessionID: @escaping @MainActor () -> UUID? = { nil },
         performAppStep: (@MainActor (ChainStep) -> Bool)? = nil
     ) {
         self.actionService = actionService
         self.textInsertion = textInsertion
         self.currentTranscript = currentTranscript
         self.frozenTarget = frozenTarget
+        self.currentSessionID = currentSessionID
         self.performAppStep = performAppStep
     }
 
@@ -59,6 +65,9 @@ final class ChainExecutor {
     private let performAppStep: (@MainActor (ChainStep) -> Bool)?
 
     func run(_ chain: WorkflowChain) async -> ChainRunResult {
+        // The run is bound to the session it started on: its text and its
+        // target both come from that session.
+        let originSession = currentSessionID()
         var workingText = currentTranscript() ?? ""
         log.info("running chain '\(chain.name)' (\(chain.steps.count) steps)")
 
@@ -95,6 +104,11 @@ final class ChainExecutor {
                 }
 
             case .insert:
+                // An action await can outlive the session (inserted or reset,
+                // then a new one started); its target is not this text's.
+                guard currentSessionID() == originSession else {
+                    return failure(.sessionChanged, atIndex: index, workingText: workingText, clipboardFallback: false)
+                }
                 let ok = await textInsertion.insertText(
                     workingText, statusSuffix: "Chain: \(chain.name)", targetApp: frozenTarget())
                 if !ok {

@@ -182,6 +182,7 @@ final class AppCoordinator: ObservableObject {
         frozenTarget: { [weak self] in
             ExternalAppTracker.liveRunningApp(for: self?.cockpitSessionService.currentSession?.targetApp)
         },
+        currentSessionID: { [weak self] in self?.cockpitSessionService.currentSession?.id },
         performAppStep: { [weak self] step in
             self?.performChainAppStep(step) ?? false
         })
@@ -307,7 +308,7 @@ final class AppCoordinator: ObservableObject {
         cockpit.recordingTargetProvider = { [weak self] in
             self?.externalAppTracker.currentVerified(lookup: ExternalAppTracker.liveLookup)?.targetSnapshot
         }
-        cockpit.drainRecording = { [weak self] in await self?.cockpitCapture.stopRecording() }
+        cockpit.drainRecording = { [weak self] in await self?.cockpitCapture.stopRecording() ?? false }
 
         // R5.6: cockpit review can trigger protocols (gated inside the
         // coordinator on state.protocolCommandsEnabled + strict grammar).
@@ -429,7 +430,19 @@ final class AppCoordinator: ObservableObject {
         isRunningChain = true
         defer { isRunningChain = false }
 
-        let result = await chainExecutor.run(chain)
+        // A chain acts on one reviewed session, so a live recording drains
+        // first. A drain that ended in an interruption leaves nothing cleanly
+        // reviewed to act on: the chain stops before its first step and is
+        // reported through the same failure branch.
+        let result: ChainExecutor.ChainRunResult
+        if case .recording = cockpitSessionService.state,
+           await cockpitCapture.stopRecording() == false {
+            result = ChainExecutor.ChainRunResult(
+                completedSteps: 0, finalText: "", failedStepIndex: 0,
+                error: .sessionChanged, clipboardFallback: false)
+        } else {
+            result = await chainExecutor.run(chain)
+        }
         if result.error == nil {
             state.statusLine = "Chain '\(chain.name)' complete"
         } else {

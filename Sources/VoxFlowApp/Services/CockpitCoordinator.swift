@@ -34,9 +34,11 @@ final class CockpitCoordinator: ObservableObject {
     var onCockpitOpened: (() -> Void)?
     /// Stops an active recording and waits for the drain to finish, leaving
     /// the session in `.reviewing`. AppCoordinator wires this to
-    /// ``CockpitCaptureCoordinator/stopRecording()``. Nil means no capture
-    /// pipeline is attached, so a still-recording session is never inserted.
-    var drainRecording: (@MainActor () async -> Void)?
+    /// ``CockpitCaptureCoordinator/stopRecording()``. Returns false when the
+    /// drain ended in an interruption instead, so the transcript is not
+    /// consumed. Nil means no capture pipeline is attached, so a
+    /// still-recording session is never inserted.
+    var drainRecording: (@MainActor () async -> Bool)?
     /// Ruling R7: ⌘↩ is single-flight. A second press while the first is
     /// draining or inserting would otherwise drain and insert twice.
     private var insertInFlight = false
@@ -96,6 +98,21 @@ final class CockpitCoordinator: ObservableObject {
     func close() {
         state.cockpitVisible = false
         log.info("cockpit closed")
+        drainIfRecording()
+    }
+
+    /// The cockpit window went away (its own close button bypasses
+    /// ``close()``). ``CockpitWindowView`` calls this from `.onDisappear`;
+    /// it only drains, and changes nothing about window visibility.
+    func windowDidClose() {
+        drainIfRecording()
+    }
+
+    /// Closing the cockpit never leaves the microphone running: a live
+    /// recording drains into `.reviewing`, where the session stays.
+    private func drainIfRecording() {
+        guard case .recording = sessionService.state else { return }
+        Task { _ = await drainRecording?() }
     }
 
     // MARK: - Smart-action dispatch
@@ -138,7 +155,23 @@ final class CockpitCoordinator: ObservableObject {
             state.smartActionInFlight = nil
             state.smartActionStartedAt = nil
         }
-        let result = try await actionService.apply(action, to: transcript)
+        // A chip during recording drains first and acts on the whole drained
+        // transcript: transforming the partial text and then recording it
+        // would overwrite every chunk appended during the backend await.
+        // Without a clean drain nothing is sent (same soft result as above).
+        var source = transcript
+        if case .recording = sessionService.state {
+            guard let drainRecording, await drainRecording(),
+                  let drained = sessionService.currentSession?.transcript else {
+                return SmartActionResult(actionId: action, output: transcript, guardrailTriggered: false, error: "action_in_flight")
+            }
+            source = drained
+        }
+        // The result belongs to the session it was computed from. If that
+        // session was inserted or reset (and a new one started) during the
+        // await, the output must not overwrite the newer session.
+        let sessionID = sessionService.currentSession?.id
+        let result = try await actionService.apply(action, to: source)
         // A soft error (e.g. provider_unavailable) means no real transform
         // happened. Surface it instead of silently leaving the transcript
         // unchanged — the direct chip/voice path used to discard it, unlike
@@ -156,13 +189,13 @@ final class CockpitCoordinator: ObservableObject {
         // otherwise the JSON history shows entries ⌘Z can't undo.
         let isMeaningful = !result.guardrailTriggered
             && !result.output.isEmpty
-            && result.output != transcript
-        if sessionService.currentSession != nil, isMeaningful {
+            && result.output != source
+        if let sessionID, sessionService.currentSession?.id == sessionID, isMeaningful {
             sessionService.recordAppliedAction(
                 AppliedAction(
                     actionId: action,
                     appliedAt: Date(),
-                    beforeText: transcript,
+                    beforeText: source,
                     afterText: result.output
                 )
             )
@@ -232,9 +265,11 @@ final class CockpitCoordinator: ObservableObject {
 
         // ⌘↩ during recording drains first so the insert carries the whole
         // transcript and capture is not left running behind a reset session.
-        // Without a drain hook a recording session inserts nothing.
+        // Without a drain hook a recording session inserts nothing. A drain
+        // that ended in an interruption leaves the session in review with its
+        // marker visible, and nothing is inserted.
         if case .recording = sessionService.state {
-            await drainRecording?()
+            guard let drainRecording, await drainRecording() else { return }
         }
         guard case .reviewing = sessionService.state,
               let session = sessionService.currentSession else { return }

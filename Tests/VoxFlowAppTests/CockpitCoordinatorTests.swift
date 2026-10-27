@@ -28,6 +28,77 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertFalse(state.cockpitVisible)
     }
 
+    /// Counts drain calls; each one ends the recording into review.
+    @MainActor
+    private final class DrainCounter {
+        var count = 0
+    }
+
+    private func countDrains(on coord: CockpitCoordinator, session: LongFormSessionService) -> DrainCounter {
+        let counter = DrainCounter()
+        coord.drainRecording = {
+            counter.count += 1
+            session.stop()
+            return true
+        }
+        return counter
+    }
+
+    /// Closing the cockpit used to leave the microphone running behind the
+    /// hidden window. It now drains, and the session stays for review.
+    func test_close_during_recording_drains_and_keeps_the_session() async {
+        let (state, coord, sessionService, _) = makeCoordinator()
+        coord.open()
+        sessionService.start()
+        sessionService.appendTestChunk("keep me")
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.close()
+
+        guard await yieldUntil({ drains.count >= 1 }, "close never drained the recording") else { return }
+        XCTAssertEqual(drains.count, 1)
+        XCTAssertFalse(state.cockpitVisible)
+        XCTAssertEqual(sessionService.state, .reviewing)
+        XCTAssertEqual(sessionService.currentSession?.transcript, "keep me")
+    }
+
+    func test_close_while_reviewing_does_not_drain() async {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        sessionService.start()
+        sessionService.appendTestChunk("already reviewed")
+        sessionService.stop()
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.close()
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(drains.count, 0)
+        XCTAssertEqual(sessionService.state, .reviewing)
+    }
+
+    /// The window's own close button bypasses ``close()``; its disappearance
+    /// drains the same way.
+    func test_window_close_during_recording_drains() async {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        sessionService.start()
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.windowDidClose()
+
+        guard await yieldUntil({ drains.count >= 1 }, "window close never drained the recording") else { return }
+        XCTAssertEqual(sessionService.state, .reviewing)
+    }
+
+    func test_window_close_while_idle_does_not_drain() async {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.windowDidClose()
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(drains.count, 0)
+    }
+
     func test_open_fires_onCockpitOpened() {
         let (_, coord, _, _) = makeCoordinator()
         var fired = 0
@@ -335,8 +406,9 @@ final class CockpitCoordinatorTests: XCTestCase {
         }
     }
 
-    private func makeInsertFixture() -> (CockpitCoordinator, LongFormSessionService, RecordingInsertService) {
-        let state = AppState()
+    private func makeInsertFixture(
+        state: AppState = AppState()
+    ) -> (CockpitCoordinator, LongFormSessionService, RecordingInsertService) {
         let sessionDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("voxflow-cockpit-test-\(UUID().uuidString)")
         let sessionService = LongFormSessionService(autoSaveDirectory: sessionDir)
@@ -363,6 +435,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         coord.drainRecording = {
             sessionService.appendTestChunk("tail words")
             sessionService.stop()
+            return true
         }
 
         await coord.insertIntoTarget()
@@ -447,6 +520,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         coord.drainRecording = {
             await gate.hold()
             sessionService.stop()
+            return true
         }
 
         let first = Task { await coord.insertIntoTarget() }
@@ -468,6 +542,31 @@ final class CockpitCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(gate.entries, 1, "a second ⌘↩ while draining must not drain again")
         XCTAssertEqual(inserter.texts, ["only once"])
+    }
+
+    /// The drain ended through the interruption path: the session is in
+    /// review with its marker, but nothing was drained cleanly, so ⌘↩ must
+    /// not insert it and must leave the status line alone.
+    func test_insert_after_interrupted_drain_inserts_nothing_and_keeps_review() async throws {
+        let state = AppState()
+        let (coord, sessionService, inserter) = makeInsertFixture(state: state)
+        sessionService.start()
+        sessionService.appendTestChunk("before the change")
+        let id = try XCTUnwrap(sessionService.currentSession?.id)
+        coord.drainRecording = {
+            sessionService.appendInterruptionMarker("audio device changed or capture stopped", sessionID: id)
+            sessionService.stop()
+            return false
+        }
+        state.statusLine = "status before the insert"
+
+        await coord.insertIntoTarget()
+
+        XCTAssertTrue(inserter.texts.isEmpty, "an interrupted drain must not insert")
+        XCTAssertEqual(sessionService.state, .reviewing)
+        XCTAssertEqual(sessionService.currentSession?.transcript,
+                       "before the change\n\n[recording interrupted — audio device changed or capture stopped]")
+        XCTAssertEqual(state.statusLine, "status before the insert")
     }
 
     private func makeCoordinator() -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
@@ -539,6 +638,87 @@ final class CockpitCoordinatorTests: XCTestCase {
             XCTFail("expected throw")
         } catch {}
         XCTAssertNil(state.smartActionInFlight)
+    }
+
+    // MARK: - Smart actions during recording
+
+    /// A chip tapped while recording used to transform the partial transcript
+    /// and then overwrite every chunk appended during the backend await. It
+    /// now drains first and acts on the whole drained transcript.
+    func test_applyAction_during_recording_drains_then_acts_on_full_transcript() async throws {
+        let backend = TranscriptRecordingSmartActionBackend()
+        let (_, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("first part")
+        coord.drainRecording = {
+            sessionService.appendTestChunk("tail words")
+            sessionService.stop()
+            return true
+        }
+
+        let result = try await coord.applyAction(.memo, to: "first part")
+
+        let received = await backend.received
+        XCTAssertEqual(received, ["first part tail words"])
+        XCTAssertNil(result.error)
+        XCTAssertEqual(sessionService.state, .reviewing)
+        XCTAssertEqual(sessionService.currentSession?.transcript, "# transformed\n\nfirst part tail words")
+        XCTAssertEqual(sessionService.currentSession?.appliedActions.first?.beforeText, "first part tail words")
+    }
+
+    func test_applyAction_after_interrupted_drain_does_not_call_backend() async throws {
+        let backend = TranscriptRecordingSmartActionBackend()
+        let (state, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("before the change")
+        coord.drainRecording = {
+            sessionService.stop()
+            return false
+        }
+
+        let result = try await coord.applyAction(.memo, to: "before the change")
+
+        let received = await backend.received
+        XCTAssertTrue(received.isEmpty, "an interrupted drain leaves nothing to transform")
+        XCTAssertEqual(result.error, "action_in_flight")
+        XCTAssertEqual(sessionService.currentSession?.transcript, "before the change")
+        XCTAssertEqual(state.chipInvocationCounts[.memo, default: 0], 0)
+        XCTAssertNil(state.smartActionInFlight)
+    }
+
+    func test_applyAction_during_recording_without_drain_does_not_call_backend() async throws {
+        let backend = TranscriptRecordingSmartActionBackend()
+        let (_, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("partial")
+
+        let result = try await coord.applyAction(.memo, to: "partial")
+
+        let received = await backend.received
+        XCTAssertTrue(received.isEmpty)
+        XCTAssertNotNil(result.error)
+        XCTAssertEqual(sessionService.currentSession?.transcript, "partial")
+    }
+
+    /// The user inserts (or cancels) session A and starts session B while an
+    /// action on A is in flight. A's output must not land in B.
+    func test_applyAction_does_not_overwrite_a_session_that_changed_during_the_action() async throws {
+        let backend = GatedSmartActionBackend()
+        let (_, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("session A text")
+        sessionService.stop()
+
+        let action = Task { try await coord.applyAction(.memo, to: "session A text") }
+        await backend.waitUntilCalled()
+        sessionService.reset()
+        sessionService.start()
+        sessionService.appendTestChunk("session B words")
+        backend.release()
+        _ = try await action.value
+
+        XCTAssertEqual(sessionService.currentSession?.transcript, "session B words")
+        XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 0)
     }
 
     func test_smartActionErrorMessage_in_flight() {
@@ -672,6 +852,17 @@ private final class GatedSmartActionBackend: SmartActionBackend, @unchecked Send
             }
         }
         return SmartActionResult(actionId: action, output: "# transformed\n\n\(transcript)", guardrailTriggered: false, error: nil)
+    }
+}
+
+/// Records every transcript it is asked to transform.
+private actor TranscriptRecordingSmartActionBackend: SmartActionBackend {
+    private(set) var received: [String] = []
+
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        received.append(transcript)
+        return SmartActionResult(
+            actionId: action, output: "# transformed\n\n\(transcript)", guardrailTriggered: false, error: nil)
     }
 }
 
