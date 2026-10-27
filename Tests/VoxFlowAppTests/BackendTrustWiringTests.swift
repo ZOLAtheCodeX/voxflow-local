@@ -80,3 +80,23 @@ final class BackendTrustWiringTests: XCTestCase {
         XCTAssertFalse(AppCoordinator.isTokenRejection(URLError(.cannotConnectToHost)))
     }
 }
+
+extension BackendTrustWiringTests {
+    func testMayQueryReadinessOnlyBlocksUnverifiedForeignListener() {
+        // Probe failed, not adopting, manager does not own the process: block.
+        XCTAssertFalse(AppCoordinator.mayQueryReadiness(identityStamp: nil, adoptOverride: false, managerOwnsProcess: false))
+        // Probe failed but the manager owns the child (still warming up): allow.
+        XCTAssertTrue(AppCoordinator.mayQueryReadiness(identityStamp: nil, adoptOverride: false, managerOwnsProcess: true))
+        // Probe failed under the adopt override: allow.
+        XCTAssertTrue(AppCoordinator.mayQueryReadiness(identityStamp: nil, adoptOverride: true, managerOwnsProcess: false))
+        XCTAssertTrue(AppCoordinator.mayQueryReadiness(identityStamp: nil, adoptOverride: true, managerOwnsProcess: true))
+        // Any stamp present (including empty): the foreign check already ran.
+        for stamp in ["", "abc"] {
+            for adopt in [false, true] {
+                for owns in [false, true] {
+                    XCTAssertTrue(AppCoordinator.mayQueryReadiness(identityStamp: stamp, adoptOverride: adopt, managerOwnsProcess: owns))
+                }
+            }
+        }
+    }
+}

@@ -498,7 +498,8 @@ final class AppCoordinator: ObservableObject {
         // attaches the token may run until the listener is verified as ours.
         // R4.7: a healthy port answered by a backend we didn't launch is
         // stale/foreign — replace it instead of silently trusting it.
-        if let reportedStamp = try? await BackendAPIClient.identityProbe(),
+        let identityStamp = try? await BackendAPIClient.identityProbe()
+        if let reportedStamp = identityStamp,
            !Self.adoptForeignBackendOverride,
            BackendProcessManager.isForeignBackend(
             reportedStamp: reportedStamp,
@@ -516,6 +517,13 @@ final class AppCoordinator: ObservableObject {
         }
 
         do {
+            // Probe failed and nothing vouches for the listener: do not send it
+            // the token. Handled below exactly like a failed connection.
+            guard Self.mayQueryReadiness(
+                identityStamp: identityStamp,
+                adoptOverride: Self.adoptForeignBackendOverride,
+                managerOwnsProcess: backendRunning
+            ) else { throw UnverifiedListener() }
             let readiness = try await BackendAPIClient.ready()
             state.backendReadiness.readyForDictation = readiness.readyForDictation
             state.backendReadiness.warmupInProgress = false
@@ -1253,6 +1261,22 @@ final class AppCoordinator: ObservableObject {
         BackendAuthToken.set(nil)
         return .missing
     }
+
+    /// Gate for the token-bearing `/v1/ready` call. Blocked only when the
+    /// identity probe failed (nil stamp) and nothing vouches for the listener:
+    /// no adopt override and no child this manager spawned. A stamp, even a
+    /// foreign one, means the foreign check already ran and decided.
+    nonisolated static func mayQueryReadiness(
+        identityStamp: String?,
+        adoptOverride: Bool,
+        managerOwnsProcess: Bool
+    ) -> Bool {
+        identityStamp != nil || adoptOverride || managerOwnsProcess
+    }
+
+    /// Thrown inside the readiness `do` when the identity gate blocks `ready()`,
+    /// so the existing non-401 branches handle it like a failed connection.
+    private struct UnverifiedListener: Error {}
 
     /// The backend answered but refused the app's token.
     nonisolated static func isTokenRejection(_ error: Error) -> Bool {
