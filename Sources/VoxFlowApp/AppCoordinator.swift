@@ -2377,9 +2377,12 @@ final class AppCoordinator: ObservableObject {
             let bundleID = app?.bundleIdentifier
             let name = app?.localizedName
             let launchDate = app?.launchDate
+            let isRegularApp = app?.activationPolicy == .regular
             MainActor.assumeIsolated {
                 guard let pid else { return }
-                self?.recordExternalApp(pid: pid, bundleID: bundleID, name: name, launchDate: launchDate)
+                self?.recordExternalApp(
+                    pid: pid, bundleID: bundleID, name: name, launchDate: launchDate,
+                    isRegularApp: isRegularApp)
             }
         }
     }
@@ -2390,14 +2393,21 @@ final class AppCoordinator: ObservableObject {
             pid: app.processIdentifier,
             bundleID: app.bundleIdentifier,
             name: app.localizedName,
-            launchDate: app.launchDate)
+            launchDate: app.launchDate,
+            isRegularApp: app.activationPolicy == .regular)
     }
 
-    private func recordExternalApp(pid: Int32, bundleID: String?, name: String?, launchDate: Date?) {
+    private func recordExternalApp(
+        pid: Int32, bundleID: String?, name: String?, launchDate: Date?, isRegularApp: Bool
+    ) {
         externalAppTracker.record(
             pid: pid, bundleID: bundleID, name: name, launchDate: launchDate,
-            ownPID: ProcessInfo.processInfo.processIdentifier)
-        state.lastExternalApp = externalAppTracker.current
+            isRegularApp: isRegularApp, ownPID: ProcessInfo.processInfo.processIdentifier)
+        // Every app activation lands here; publish only a real change so the
+        // side panel does not re-render on each one.
+        if state.lastExternalApp != externalAppTracker.current {
+            state.lastExternalApp = externalAppTracker.current
+        }
     }
 
     private func startFocusMonitoring() {

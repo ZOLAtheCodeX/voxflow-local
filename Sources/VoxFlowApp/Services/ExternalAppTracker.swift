@@ -35,8 +35,20 @@ struct ExternalAppTracker: Sendable {
 
     private(set) var current: ExternalAppIdentity?
 
-    mutating func record(pid: Int32, bundleID: String?, name: String?, launchDate: Date?, ownPID: Int32) {
-        guard pid > 0, pid != ownPID, let bundleID, let launchDate else { return }
+    /// `isRegularApp` is `activationPolicy == .regular`. VoxFlow itself, a
+    /// pid-less app and a non-regular app (agents, accessory popups) never
+    /// move the target. The newest regular app is the target; when it cannot
+    /// be identified (no bundle ID or no launch date) there is none, so the
+    /// next ⌘R falls back to the clipboard instead of an app the user left.
+    mutating func record(
+        pid: Int32, bundleID: String?, name: String?, launchDate: Date?,
+        isRegularApp: Bool, ownPID: Int32
+    ) {
+        guard pid > 0, pid != ownPID, isRegularApp else { return }
+        guard let bundleID, let launchDate else {
+            current = nil
+            return
+        }
         current = ExternalAppIdentity(pid: pid, bundleID: bundleID, name: name, launchDate: launchDate)
     }
 
@@ -74,21 +86,31 @@ struct ExternalAppTracker: Sendable {
     }
 
     static func liveLookup(_ pid: Int32) -> RunningAppFacts? {
-        guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
-        return (app.bundleIdentifier, app.launchDate, app.isTerminated)
+        NSRunningApplication(processIdentifier: pid).map(facts(of:))
+    }
+
+    private static func facts(of app: NSRunningApplication) -> RunningAppFacts {
+        (app.bundleIdentifier, app.launchDate, app.isTerminated)
     }
 
     /// Rebuilds the frozen target as an ``NSRunningApplication`` at insert
     /// time without consulting the frontmost app (which is the cockpit
     /// window itself by then). Nil when the pid no longer runs the same app.
+    /// Exactly one object is constructed: its own facts are verified and
+    /// that same object is returned, so the verified process is the one the
+    /// insert gets. `runningApp` is the construction seam for tests.
     @MainActor
-    static func liveRunningApp(for snapshot: FocusTargetSnapshot?) -> NSRunningApplication? {
-        guard let snapshot,
-              let pid = resolveTarget(
-                pid: snapshot.processIdentifier,
-                expectedBundleID: snapshot.bundleID,
-                expectedLaunchDate: snapshot.launchDate,
-                lookup: liveLookup) else { return nil }
-        return NSRunningApplication(processIdentifier: pid)
+    static func liveRunningApp(
+        for snapshot: FocusTargetSnapshot?,
+        runningApp: (Int32) -> NSRunningApplication? = { NSRunningApplication(processIdentifier: $0) }
+    ) -> NSRunningApplication? {
+        guard let snapshot, let pid = snapshot.processIdentifier,
+              let app = runningApp(pid) else { return nil }
+        let verified = resolveTarget(
+            pid: pid,
+            expectedBundleID: snapshot.bundleID,
+            expectedLaunchDate: snapshot.launchDate,
+            lookup: { $0 == pid ? facts(of: app) : nil })
+        return verified == nil ? nil : app
     }
 }

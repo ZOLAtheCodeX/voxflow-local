@@ -1,5 +1,24 @@
+import AppKit
 import XCTest
 @testable import VoxFlowApp
+
+/// A live, identifiable app for read-only target fixtures: Finder when it
+/// runs (always, in a login session, so it cannot quit mid-test), else the
+/// first app with a bundle ID and a launch date. launchd starts Finder, not
+/// LaunchServices, so Finder has no launch date; `requiringLaunchDate` skips
+/// it. Nothing is ever sent to the app. Shared by the cockpit test files.
+func liveAppFixture(requiringLaunchDate: Bool = false) throws -> NSRunningApplication {
+    let running = NSWorkspace.shared.runningApplications.filter {
+        $0.bundleIdentifier != nil && !$0.isTerminated
+    }
+    let finder = running.first {
+        $0.bundleIdentifier == "com.apple.finder" && (!requiringLaunchDate || $0.launchDate != nil)
+    }
+    guard let app = finder ?? running.first(where: { $0.launchDate != nil }) else {
+        throw XCTSkip("no identifiable running app available")
+    }
+    return app
+}
 
 final class ExternalAppTrackerTests: XCTestCase {
     private typealias Facts = ExternalAppTracker.RunningAppFacts
@@ -12,26 +31,52 @@ final class ExternalAppTrackerTests: XCTestCase {
 
     // MARK: - record
 
-    func test_record_ignores_own_pid_nonpositive_pid_nil_bundle_and_nil_launch_date() {
+    private func trackingSlack() -> ExternalAppTracker {
         var tracker = ExternalAppTracker()
-        tracker.record(pid: ownPID, bundleID: "com.voxflow", name: "VoxFlow", launchDate: t0, ownPID: ownPID)
-        XCTAssertNil(tracker.current)
-        tracker.record(pid: 0, bundleID: "com.a", name: "A", launchDate: t0, ownPID: ownPID)
-        XCTAssertNil(tracker.current)
-        tracker.record(pid: -1, bundleID: "com.a", name: "A", launchDate: t0, ownPID: ownPID)
-        XCTAssertNil(tracker.current)
-        tracker.record(pid: 5, bundleID: nil, name: "A", launchDate: t0, ownPID: ownPID)
-        XCTAssertNil(tracker.current)
-        tracker.record(pid: 5, bundleID: "com.a", name: "A", launchDate: nil, ownPID: ownPID)
-        XCTAssertNil(tracker.current)
+        tracker.record(
+            pid: 5, bundleID: "com.tinyspeck.slackmacgap", name: "Slack", launchDate: t0,
+            isRegularApp: true, ownPID: ownPID)
+        return tracker
+    }
+
+    func test_record_ignores_own_pid_and_nonpositive_pid() {
+        var tracker = trackingSlack()
+        tracker.record(pid: ownPID, bundleID: "com.voxflow", name: "VoxFlow", launchDate: t0, isRegularApp: true, ownPID: ownPID)
+        XCTAssertEqual(tracker.current?.bundleID, "com.tinyspeck.slackmacgap")
+        tracker.record(pid: 0, bundleID: "com.a", name: "A", launchDate: t0, isRegularApp: true, ownPID: ownPID)
+        XCTAssertEqual(tracker.current?.bundleID, "com.tinyspeck.slackmacgap")
+        tracker.record(pid: -1, bundleID: "com.a", name: "A", launchDate: t0, isRegularApp: true, ownPID: ownPID)
+        XCTAssertEqual(tracker.current?.bundleID, "com.tinyspeck.slackmacgap")
+    }
+
+    /// Agents and accessory popups (menu-bar extras, Spotlight-style panels)
+    /// activate without being where the user types; they never move the target.
+    func test_record_ignores_non_regular_apps() {
+        var tracker = trackingSlack()
+        tracker.record(pid: 7, bundleID: "com.example.menuextra", name: "Extra", launchDate: t0, isRegularApp: false, ownPID: ownPID)
+        XCTAssertEqual(tracker.current?.bundleID, "com.tinyspeck.slackmacgap")
+        tracker.record(pid: 8, bundleID: nil, name: nil, launchDate: nil, isRegularApp: false, ownPID: ownPID)
+        XCTAssertEqual(tracker.current?.bundleID, "com.tinyspeck.slackmacgap")
+    }
+
+    /// The newest regular app is the target. When it cannot be identified,
+    /// keeping the older app would insert into an app the user left, so the
+    /// next ⌘R gets no target and falls back to the clipboard.
+    func test_record_clears_target_for_unidentifiable_regular_app() {
+        var noBundle = trackingSlack()
+        noBundle.record(pid: 9, bundleID: nil, name: "Odd", launchDate: t0, isRegularApp: true, ownPID: ownPID)
+        XCTAssertNil(noBundle.current)
+
+        var noLaunchDate = trackingSlack()
+        noLaunchDate.record(pid: 9, bundleID: "com.odd", name: "Odd", launchDate: nil, isRegularApp: true, ownPID: ownPID)
+        XCTAssertNil(noLaunchDate.current)
     }
 
     func test_record_keeps_latest_external_app() {
-        var tracker = ExternalAppTracker()
-        tracker.record(pid: 5, bundleID: "com.tinyspeck.slackmacgap", name: "Slack", launchDate: t0, ownPID: ownPID)
-        tracker.record(pid: 6, bundleID: "com.apple.Notes", name: "Notes", launchDate: t0, ownPID: ownPID)
+        var tracker = trackingSlack()
+        tracker.record(pid: 6, bundleID: "com.apple.Notes", name: "Notes", launchDate: t0, isRegularApp: true, ownPID: ownPID)
         XCTAssertEqual(tracker.current?.bundleID, "com.apple.Notes")
-        tracker.record(pid: ownPID, bundleID: "com.voxflow", name: "VoxFlow", launchDate: t0, ownPID: ownPID)
+        tracker.record(pid: ownPID, bundleID: "com.voxflow", name: "VoxFlow", launchDate: t0, isRegularApp: true, ownPID: ownPID)
         XCTAssertEqual(tracker.current?.bundleID, "com.apple.Notes")
     }
 
@@ -118,7 +163,7 @@ final class ExternalAppTrackerTests: XCTestCase {
 
     func test_currentVerified_returns_identity_only_when_running_and_matching() {
         var tracker = ExternalAppTracker()
-        tracker.record(pid: 5, bundleID: "com.apple.Notes", name: "Notes", launchDate: t0, ownPID: ownPID)
+        tracker.record(pid: 5, bundleID: "com.apple.Notes", name: "Notes", launchDate: t0, isRegularApp: true, ownPID: ownPID)
 
         let match: [Int32: Facts] = [5: ("com.apple.Notes", t0, false)]
         XCTAssertEqual(tracker.currentVerified(lookup: lookup(match)), tracker.current)
@@ -128,6 +173,47 @@ final class ExternalAppTrackerTests: XCTestCase {
 
         XCTAssertNil(tracker.currentVerified(lookup: lookup([:])))
         XCTAssertNil(ExternalAppTracker().currentVerified(lookup: lookup(match)))
+    }
+
+    // MARK: - liveRunningApp
+
+    private func snapshot(of app: NSRunningApplication, bundleID: String?) -> FocusTargetSnapshot {
+        FocusTargetSnapshot(
+            hasFocusedTextInput: false, hasInsertionCursor: false,
+            appName: app.localizedName, bundleID: bundleID, role: nil,
+            processIdentifier: app.processIdentifier, launchDate: app.launchDate)
+    }
+
+    /// One object is constructed, its own facts are verified, and that same
+    /// object is returned: a second construction from the pid could describe
+    /// a different process than the one just verified.
+    @MainActor
+    func test_liveRunningApp_verifies_and_returns_the_one_object_it_constructs() throws {
+        let app = try liveAppFixture()
+        var constructed: [NSRunningApplication] = []
+        let resolved = ExternalAppTracker.liveRunningApp(
+            for: snapshot(of: app, bundleID: app.bundleIdentifier),
+            runningApp: { pid in
+                let made = NSRunningApplication(processIdentifier: pid)
+                if let made { constructed.append(made) }
+                return made
+            })
+
+        XCTAssertEqual(constructed.count, 1)
+        XCTAssertTrue(resolved === constructed.first)
+        XCTAssertEqual(resolved?.processIdentifier, app.processIdentifier)
+    }
+
+    @MainActor
+    func test_liveRunningApp_refuses_a_live_pid_with_another_identity() throws {
+        let app = try liveAppFixture(requiringLaunchDate: true)
+        let bundleID = try XCTUnwrap(app.bundleIdentifier)
+        XCTAssertNotNil(ExternalAppTracker.liveRunningApp(for: snapshot(of: app, bundleID: bundleID)))
+        XCTAssertNil(ExternalAppTracker.liveRunningApp(for: snapshot(of: app, bundleID: bundleID + ".not-this")))
+        XCTAssertNil(ExternalAppTracker.liveRunningApp(for: snapshot(of: app, bundleID: nil)))
+        var relaunched = snapshot(of: app, bundleID: bundleID)
+        relaunched.launchDate = app.launchDate?.addingTimeInterval(-60)
+        XCTAssertNil(ExternalAppTracker.liveRunningApp(for: relaunched))
     }
 
     // MARK: - Snapshot

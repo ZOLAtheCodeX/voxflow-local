@@ -446,13 +446,12 @@ final class CockpitCoordinatorTests: XCTestCase {
 
     /// A live, identifiable app to use as a frozen-target fixture. The test
     /// host process itself is not an NSRunningApplication (it is a CLI tool),
-    /// so read-only pick any running app that has a bundle ID. Nothing is
-    /// sent to it: the inserter is a fake.
+    /// so read-only pick a running app (Finder when it runs, see the shared
+    /// ``liveAppFixture(requiringLaunchDate:)``). Nothing is sent to it: the
+    /// inserter is a fake.
     private func liveAppFixture() throws -> (app: NSRunningApplication, bundleID: String) {
-        let found = NSWorkspace.shared.runningApplications.first {
-            $0.bundleIdentifier != nil && !$0.isTerminated && $0.launchDate != nil
-        }
-        guard let app = found, let bundleID = app.bundleIdentifier else {
+        let app = try VoxFlowAppTests.liveAppFixture()
+        guard let bundleID = app.bundleIdentifier else {
             throw XCTSkip("no identifiable running app available")
         }
         return (app, bundleID)
