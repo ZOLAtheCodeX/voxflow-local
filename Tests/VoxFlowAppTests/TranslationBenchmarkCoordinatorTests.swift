@@ -3,6 +3,23 @@ import XCTest
 
 final class TranslationBenchmarkCoordinatorTests: XCTestCase {
 
+    // Every BackendProcessManager publishes its token and expected listener stamp
+    // into the process-global BackendAuthToken; restore them so this suite does
+    // not leak a stamp into suites that stub BackendAPIClient's session.
+    private var savedAuthToken: String?
+    private var savedAuthStamp: String?
+
+    override func setUp() {
+        super.setUp()
+        savedAuthToken = BackendAuthToken.current()
+        savedAuthStamp = BackendAuthToken.expectedStamp()
+    }
+
+    override func tearDown() {
+        BackendAuthToken.set(savedAuthToken, expectedStamp: savedAuthStamp)
+        super.tearDown()
+    }
+
     @MainActor
     private func makeSUT() -> (TranslationBenchmarkCoordinator, AppState) {
         let state = AppState()

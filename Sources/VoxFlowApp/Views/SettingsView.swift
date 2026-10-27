@@ -1012,7 +1012,7 @@ struct SettingsView: View {
                 let result = try await BackendAPIClient.providerTest(providerID: providerID)
                 providerTestResults[providerID] = (result.reachable ? "✓ " : "✕ ") + result.detail
             } catch {
-                providerTestResults[providerID] = "✕ Backend unreachable — start the backend first"
+                providerTestResults[providerID] = "✕ " + error.localizedDescription
             }
         }
     }

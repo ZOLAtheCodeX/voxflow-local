@@ -163,8 +163,6 @@ final class BackendProcessManager: @unchecked Sendable {
         )
     }
 
-    /// Terminate whatever is listening on the backend port (SIGTERM). Only
-    /// called after a foreign verdict; never signals our own process.
     /// True when a process command line identifies a VoxFlow backend — the
     /// managed spawn (`python …/backend/app/server.py`) or a manually-run
     /// `uvicorn server:app` (dev flow). Used to refuse terminating unrelated
@@ -174,6 +172,8 @@ final class BackendProcessManager: @unchecked Sendable {
         return command.contains("backend/app/server.py") || command.contains("server:app")
     }
 
+    /// Terminate whatever is listening on the backend port (SIGTERM). Only
+    /// called after a foreign verdict; never signals our own process.
     func terminateForeignListenerAsync(port: Int = BackendProcessManager.defaultBackendPort) {
         workQueue.async { [runner, log] in
             let ownPid = ProcessInfo.processInfo.processIdentifier
@@ -356,7 +356,7 @@ final class BackendProcessManager: @unchecked Sendable {
         // socket). Either means "talk to a backend I run myself" — run it
         // manually (adopt-foreign) instead.
         guard endpoint.isManagedSpawnEligible else {
-            let issue = "Refusing to spawn a managed backend for \(endpoint.url.absoluteString) — managed spawn supports only a plain-HTTP loopback URL; run the backend yourself for a custom host or TLS"
+            let issue = "Refusing to spawn a managed backend for \(endpoint.url.absoluteString) — managed spawn supports only a plain-HTTP loopback URL. A backend you run yourself must still be addressed as 127.0.0.1, localhost, or [::1]"
             log.error("\(issue)")
             _lastStartupFailureReason = issue
             process = nil
@@ -613,6 +613,11 @@ final class BackendProcessManager: @unchecked Sendable {
         environment["PYTHONUNBUFFERED"] = "1"
         environment["VOXFLOW_INSTANCE_STAMP"] = instanceStamp
         environment["VOXFLOW_API_TOKEN"] = apiToken
+        // The backend publishes its token file under this directory; forward the
+        // override so the app (adopt mode, scripts) and the child agree on it.
+        if let tokenDir = inherited["VOXFLOW_TOKEN_DIR"], !tokenDir.isEmpty {
+            environment["VOXFLOW_TOKEN_DIR"] = tokenDir
+        }
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment["VOXFLOW_OFFLINE"] = "1"
         // Tell the spawned uvicorn exactly where to bind so the client URL, the

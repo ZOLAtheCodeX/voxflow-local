@@ -589,6 +589,35 @@ extension BackendProcessManagerTests {
         }
     }
 
+    func testSpawnEnvironmentForwardsTokenDirOverride() {
+        let previous = ProcessInfo.processInfo.environment["VOXFLOW_TOKEN_DIR"]
+        defer {
+            if let previous { setenv("VOXFLOW_TOKEN_DIR", previous, 1) } else { unsetenv("VOXFLOW_TOKEN_DIR") }
+        }
+        setenv("VOXFLOW_TOKEN_DIR", "/tmp/voxflow-token-dir-test", 1)
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:9000") { runner, manager in
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertEqual(runner.ranProcesses.first?.environment?["VOXFLOW_TOKEN_DIR"],
+                           "/tmp/voxflow-token-dir-test",
+                           "the app and the backend must agree on the token file directory")
+        }
+    }
+
+    func testSpawnEnvironmentOmitsTokenDirWhenUnsetOrEmpty() {
+        let previous = ProcessInfo.processInfo.environment["VOXFLOW_TOKEN_DIR"]
+        defer {
+            if let previous { setenv("VOXFLOW_TOKEN_DIR", previous, 1) } else { unsetenv("VOXFLOW_TOKEN_DIR") }
+        }
+        for value in [nil, ""] as [String?] {
+            if let value { setenv("VOXFLOW_TOKEN_DIR", value, 1) } else { unsetenv("VOXFLOW_TOKEN_DIR") }
+            withSpawnEnvironment(backendURL: "http://127.0.0.1:9000") { runner, manager in
+                manager.startIfNeeded(configuration: Self.portParityTestConfig())
+                XCTAssertEqual(runner.ranProcesses.count, 1)
+                XCTAssertNil(runner.ranProcesses.first?.environment?["VOXFLOW_TOKEN_DIR"])
+            }
+        }
+    }
+
     func testOwnedListenerPIDsRequireVoxFlowCommand() {
         let chrome = { (_: pid_t) in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" }
         let backend = { (_: pid_t) in "/usr/bin/python3 /x/backend/app/server.py" }
