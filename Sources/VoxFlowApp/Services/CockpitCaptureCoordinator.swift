@@ -7,6 +7,11 @@ import os
 /// path, whose start/stop lifecycle is independent). Segments continuous audio
 /// into chunks by periodically stop→transcribe→append→restart, feeding text to
 /// `LongFormSessionService.appendChunk`.
+///
+/// Stop is a drain, not a flush: the tail is cut at the keypress, an in-flight
+/// periodic chunk is awaited and appended first, and every append is bound to
+/// the session id captured when the recording started, so late work can never
+/// touch another session.
 @MainActor
 final class CockpitCaptureCoordinator {
     private let capture: AudioCapturing
@@ -40,6 +45,21 @@ final class CockpitCaptureCoordinator {
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCaptureCoordinator")
     private var loopTask: Task<Void, Never>?
     private var isFlushing = false
+    /// Single-flight stop: a second `stopRecording()` awaits this task.
+    private var stopTask: Task<Void, Never>?
+    /// The periodic flush in progress, so a stop can await the chunk it
+    /// already cut. Cancelling `loopTask` never cancels this.
+    private var flushTask: Task<Void, Never>?
+    /// True from a successful `startCapture` until a `stopCapture` returns
+    /// audio or throws `captureNotRunning`. `stopCapture` is only called while
+    /// it is set, so cleanup never hits `captureNotRunning`. A `deviceChanged`
+    /// throw leaves it set: AudioCaptureService throws before it stops the
+    /// engine.
+    private var captureRunning = false
+    private var stopRequested = false
+    /// Id of the session this recording belongs to. Chunks, markers and the
+    /// stop sequence act only while it matches `session.currentSession?.id`.
+    private var recordingSessionID: UUID?
 
     /// Quiet-boundary flush (session 29): the hard timer cut chunks mid-word
     /// at every 5 s seam. The flush now waits — in `flushDeferralStepNs`
@@ -90,75 +110,144 @@ final class CockpitCaptureCoordinator {
     }
 
     func startRecording(targetApp: FocusTargetSnapshot?) {
-        guard case .idle = session.state else { return }
+        guard stopTask == nil, case .idle = session.state else { return }
+        carryPCM = Data()
+        consecutiveTranscriptionFailures = 0
+        stopRequested = false
+        captureRunning = false
+        loopTask?.cancel()
+        loopTask = nil
         session.start(targetApp: targetApp)
+        recordingSessionID = session.currentSession?.id
         do { try capture.startCapture(onCaptureLive: onCaptureLive) } catch {
             log.error("startCapture failed: \(error.localizedDescription)")
+            recordingSessionID = nil
             session.reset()
             return
         }
+        captureRunning = true
         loopTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: self?.flushIntervalNs ?? 5_000_000_000)
-                guard let self else { return }
-                await self.flushNow()
+                guard !Task.isCancelled, let self else { return }
+                await self.periodicFlush()
             }
         }
     }
 
+    /// Single-flight: a second call while a stop is draining awaits the same
+    /// work and returns.
     func stopRecording() async {
+        if let stopTask {
+            await stopTask.value
+            return
+        }
+        let task = Task { await self.performStop() }
+        stopTask = task
+        await task.value
+        stopTask = nil
+    }
+
+    /// Stops the engine when it may be running and returns what it buffered.
+    /// AudioCaptureService throws `deviceChanged` before it stops the engine,
+    /// so any failure other than `captureNotRunning` gets one retry, which
+    /// stops it.
+    private func stopEngine() -> CapturedAudio? {
+        guard captureRunning else { return nil }
+        defer { captureRunning = false }
+        do { return try capture.stopCapture() }
+        catch AudioCaptureError.captureNotRunning { return nil }
+        catch { return try? capture.stopCapture() }
+    }
+
+    /// Cutoff at the keypress: the tail is taken first, then the periodic
+    /// chunk already cut (if any) is awaited and appended, then the tail.
+    private func performStop() async {
+        guard case .recording = session.state, let id = recordingSessionID,
+              session.currentSession?.id == id else { return }
+        stopRequested = true
         loopTask?.cancel()
         loopTask = nil
-        await flushNow(force: true)
-        _ = try? capture.stopCapture()
+        let tail = stopEngine()
+        await flushTask?.value
+        // A third consecutive failure in the awaited flush may have ended the
+        // session. The tail is already out of the engine, so keep it.
+        guard case .recording = session.state, session.currentSession?.id == id else {
+            if let tail { retainInterruptedAudio(tail.pcm, sampleRate: tail.sampleRate) }
+            return
+        }
+        // Forced: the user already stopped speaking, so the minimum-chunk
+        // guard does not apply. This also merges any carried audio.
+        await transcribeAndAppend(
+            tail ?? CapturedAudio(pcm: Data(), sampleRate: AudioCaptureService.targetSampleRate),
+            force: true)
+        guard session.currentSession?.id == id else { return }
         session.stop()
     }
 
+    /// One timer-driven cut, run inside `flushTask` so a stop can await it.
+    func periodicFlush() async {
+        guard flushTask == nil else { return }
+        let task = Task { await self.flushNow() }
+        flushTask = task
+        await task.value
+        flushTask = nil
+    }
+
     /// Stop→validate→transcribe→append→restart. Serialized: a second call while
-    /// one is in flight is dropped (the timer cadence gates normal flow).
-    /// - Parameter force: When `true`, bypasses the minimum-chunk-bytes guard so
-    ///   the final tail-audio segment is always transcribed at stop time.
-    func flushNow(force: Bool = false) async {
-        guard !isFlushing, case .recording = session.state else { return }
+    /// one is in flight is dropped (the timer cadence gates normal flow). The
+    /// final tail at stop time is handled by `performStop`, not here.
+    func flushNow() async {
+        guard !isFlushing, !stopRequested, captureRunning,
+              case .recording = session.state,
+              let id = recordingSessionID, session.currentSession?.id == id else { return }
         isFlushing = true
         defer { isFlushing = false }
 
-        // Wait (bounded) for a word boundary before cutting — not on the
-        // forced final flush, where the user already stopped speaking.
-        if !force {
-            var deferredNs: UInt64 = 0
-            while deferredNs < maxFlushDeferralNs,
-                  Self.shouldDeferFlush(
-                    tailRMS: capture.tailRMSEnergy(seconds: Self.tailWindowSeconds)) {
-                try? await Task.sleep(nanoseconds: flushDeferralStepNs)
-                deferredNs += flushDeferralStepNs
-                guard case .recording = session.state else { return }
-            }
+        // Wait (bounded) for a word boundary before cutting. A stop that
+        // arrives meanwhile takes this audio as its tail, so abandon the cut.
+        var deferredNs: UInt64 = 0
+        while deferredNs < maxFlushDeferralNs,
+              Self.shouldDeferFlush(
+                tailRMS: capture.tailRMSEnergy(seconds: Self.tailWindowSeconds)) {
+            try? await Task.sleep(nanoseconds: flushDeferralStepNs)
+            deferredNs += flushDeferralStepNs
+            guard !stopRequested, case .recording = session.state,
+                  session.currentSession?.id == id else { return }
         }
 
         let audio: CapturedAudio
-        do { audio = try capture.stopCapture() } catch {
+        do {
+            audio = try capture.stopCapture()
+            captureRunning = false
+        } catch {
             // Device change (or dead engine) mid-session. The old log-and-return
             // left the session visibly .recording on a DEAD engine — everything
             // spoken afterward was silently lost until the user noticed
             // (session 29 review). End the session cleanly: transcript so far
-            // is preserved into review, and the marker says why.
+            // is preserved into review, and the marker says why. Only
+            // captureNotRunning proves the engine is stopped; for any other
+            // error the cleanup retries the stop and keeps the buffered tail.
+            if case AudioCaptureError.captureNotRunning = error { captureRunning = false }
             log.error("stopCapture failed: \(error.localizedDescription)")
             endSessionAfterInterruption(reason: "audio device changed or capture stopped")
             return
         }
         var restartFailed = false
-        do {
-            try capture.startCapture()
-        } catch {
-            log.error("capture restart failed: \(error.localizedDescription)")
-            restartFailed = true
+        if !stopRequested {
+            do {
+                try capture.startCapture()
+                captureRunning = true
+            } catch {
+                log.error("capture restart failed: \(error.localizedDescription)")
+                restartFailed = true
+            }
         }
 
         // Transcribe the chunk in hand BEFORE acting on a restart failure —
         // the old order stopped the session and discarded audio it had just
         // successfully collected.
-        await transcribeAndAppend(audio, force: force)
+        await transcribeAndAppend(audio, force: false)
 
         if restartFailed {
             endSessionAfterInterruption(reason: "microphone restart failed")
@@ -166,6 +255,8 @@ final class CockpitCaptureCoordinator {
     }
 
     private func transcribeAndAppend(_ audio: CapturedAudio, force: Bool) async {
+        // Bind to the recording this chunk belongs to before any await.
+        let id = recordingSessionID
         // Prepend any carried-over sub-minimum audio from the previous flush
         // so the syllable it holds lands in front of this chunk's words.
         var merged = audio
@@ -190,7 +281,7 @@ final class CockpitCaptureCoordinator {
         do {
             let response = try await transcriber.transcribe(audio)
             let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            consecutiveTranscriptionFailures = 0
+            if id == recordingSessionID { consecutiveTranscriptionFailures = 0 }
             // Same ingress gate as quick dictation — this path previously
             // bypassed the confidence rules entirely, so every 5 s flush of
             // ambient noise was a ghost-text opportunity (audit cause #5).
@@ -213,8 +304,8 @@ final class CockpitCaptureCoordinator {
                 return
             }
             let corrected = dictionary?.apply(to: text) ?? text
-            // Interim: Task 3 binds the recording id, Task 4 supplies the pause.
-            if let id = session.currentSession?.id {
+            // Task 4 supplies the measured pause.
+            if let id {
                 session.appendChunk(corrected, pauseBefore: 0, sessionID: id)
             }
         } catch {
@@ -222,7 +313,10 @@ final class CockpitCaptureCoordinator {
             // write a receipt, and after repeated failures end the session
             // instead of silently losing every subsequent chunk.
             log.error("chunk transcription failed: \(error.localizedDescription)")
-            consecutiveTranscriptionFailures += 1
+            // Late work from a finished recording still keeps its audio, but
+            // must not count against, or end, whatever recording is current.
+            let isCurrent = id == recordingSessionID && session.currentSession?.id == id
+            if isCurrent { consecutiveTranscriptionFailures += 1 }
             let retained = rejectedAudio?.store(
                 pcm: audio.pcm, sampleRate: audio.sampleRate, reason: "transcription_error")
             audit?.recordRejection(
@@ -233,23 +327,49 @@ final class CockpitCaptureCoordinator {
                 source: "cockpit_chunk",
                 audioFile: retained?.path
             )
-            if consecutiveTranscriptionFailures >= Self.maxConsecutiveTranscriptionFailures {
+            if isCurrent,
+               consecutiveTranscriptionFailures >= Self.maxConsecutiveTranscriptionFailures {
                 endSessionAfterInterruption(reason: "transcription failing repeatedly — audio clips kept")
             }
         }
     }
 
     /// End a .recording session that can no longer make progress: cancel the
-    /// loop, best-effort engine cleanup (a redundant stop throws harmlessly —
-    /// audit S12), append a visible marker saying WHY, and move to review so
-    /// the transcript so far is preserved and auto-saved.
+    /// loop, keep every buffered second (carried audio plus whatever the engine
+    /// still holds) as an `interrupted_tail` clip, append a visible marker
+    /// saying WHY, and move to review so the transcript so far is preserved
+    /// and auto-saved.
     private func endSessionAfterInterruption(reason: String) {
+        guard case .recording = session.state, let id = recordingSessionID,
+              session.currentSession?.id == id else { return }
         loopTask?.cancel()
         loopTask = nil
-        _ = try? capture.stopCapture()
-        if let id = session.currentSession?.id {
-            session.appendInterruptionMarker(reason, sessionID: id)
+        var pcm = carryPCM
+        carryPCM = Data()
+        var sampleRate = AudioCaptureService.targetSampleRate
+        if let stopped = stopEngine() {
+            pcm += stopped.pcm
+            sampleRate = stopped.sampleRate
         }
+        retainInterruptedAudio(pcm, sampleRate: sampleRate)
+        session.appendInterruptionMarker(reason, sessionID: id)
         session.stop()
+    }
+
+    /// Keeps audio that never reached the transcript (buffered tail, carry) so
+    /// an interruption loses nothing. Empty and silent audio is dropped.
+    private func retainInterruptedAudio(_ pcm: Data, sampleRate: Double) {
+        guard !pcm.isEmpty else { return }
+        let audio = CapturedAudio(pcm: pcm, sampleRate: sampleRate)
+        guard !audio.isSilent else { return }
+        let retained = rejectedAudio?.store(pcm: pcm, sampleRate: sampleRate, reason: "interrupted_tail")
+        audit?.recordRejection(
+            text: "",
+            reason: "interrupted_tail",
+            confidence: 0,
+            durationSeconds: audio.durationSeconds,
+            source: "cockpit_chunk",
+            audioFile: retained?.path
+        )
     }
 }
