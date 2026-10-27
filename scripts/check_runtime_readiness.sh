@@ -21,7 +21,13 @@ else
   echo "[warn] no backend token found; start the app or scripts/run_backend.sh first (looked in $(voxflow_token_dir)/backend.token)"
 fi
 TMP_BODY="$(mktemp)"
-HTTP_CODE="$(printf '%s\n' "${AUTH_HEADER}" | curl -sS -H @- -o "${TMP_BODY}" -w "%{http_code}" "${READINESS_URL}" || true)"
+# The header goes in over stdin (-H @-) so the token never appears in argv,
+# and only when a token was found.
+if [[ -n "${AUTH_HEADER}" ]]; then
+  HTTP_CODE="$(printf '%s\n' "${AUTH_HEADER}" | curl -sS -H @- -o "${TMP_BODY}" -w "%{http_code}" "${READINESS_URL}" || true)"
+else
+  HTTP_CODE="$(curl -sS -o "${TMP_BODY}" -w "%{http_code}" "${READINESS_URL}" || true)"
+fi
 READINESS_JSON="$(cat "${TMP_BODY}" 2>/dev/null || true)"
 rm -f "${TMP_BODY}"
 

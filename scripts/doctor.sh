@@ -48,9 +48,24 @@ if command -v curl >/dev/null 2>&1; then
   else
     echo "[warn] no backend token found; start the app or scripts/run_backend.sh first (looked in $(voxflow_token_dir)/backend.token)"
   fi
-  if HEALTH_PAYLOAD="$(printf '%s\n' "${AUTH_HEADER}" | curl -fsS -H @- "${HEALTH_URL}" 2>/dev/null)"; then
+  TMP_BODY="$(mktemp)"
+  # The header goes in over stdin (-H @-) so the token never appears in argv,
+  # and only when a token was found.
+  if [[ -n "${AUTH_HEADER}" ]]; then
+    HTTP_CODE="$(printf '%s\n' "${AUTH_HEADER}" | curl -sS -H @- -o "${TMP_BODY}" -w "%{http_code}" "${HEALTH_URL}" 2>/dev/null || true)"
+  else
+    HTTP_CODE="$(curl -sS -o "${TMP_BODY}" -w "%{http_code}" "${HEALTH_URL}" 2>/dev/null || true)"
+  fi
+  HEALTH_PAYLOAD="$(cat "${TMP_BODY}" 2>/dev/null || true)"
+  rm -f "${TMP_BODY}"
+  if [[ "${HTTP_CODE}" == "200" ]]; then
     echo "[ok] backend readiness reachable: ${HEALTH_URL}"
     echo "[info] ${HEALTH_PAYLOAD}"
+  elif [[ "${HTTP_CODE}" == "401" ]]; then
+    echo "[warn] backend rejected the token (HTTP 401): ${HEALTH_URL}"
+    echo "       the token file may belong to a previous backend run; restart the app or backend"
+  elif [[ -n "${HTTP_CODE}" && "${HTTP_CODE}" != "000" ]]; then
+    echo "[warn] backend returned HTTP ${HTTP_CODE}: ${HEALTH_URL}"
   else
     echo "[warn] backend not reachable: ${HEALTH_URL}"
     echo "       start backend by launching app or running:"
