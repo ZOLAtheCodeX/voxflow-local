@@ -107,7 +107,8 @@ from routing import (  # noqa: F401
 )
 
 from smart_actions import SmartActionEngine  # noqa: F401
-from trust import TrustBoundaryMiddleware
+from token_file import remove_token_file, token_file_path, write_token_file
+from trust import TrustBoundaryMiddleware, active_token
 
 from schemas import (  # noqa: F401
     NotionAppendRequest,
@@ -163,8 +164,17 @@ from api.endpoints import (  # noqa: E402, F401
 
 @asynccontextmanager
 async def app_lifespan(_: FastAPI):
-    initialize_runtime_state()
-    yield
+    # Resolving the token here makes a malformed VOXFLOW_API_TOKEN stop the
+    # backend at startup (SystemExit propagates) instead of failing each request.
+    token = active_token()
+    token_path = token_file_path()
+    token_identity = write_token_file(token, token_path)
+    try:
+        initialize_runtime_state()
+        yield
+    finally:
+        if token_identity is not None:
+            remove_token_file(token_path, token_identity)
 
 
 app = FastAPI(
