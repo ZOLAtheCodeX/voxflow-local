@@ -83,6 +83,10 @@ extension CapturedAudio {
 /// Per-chunk pause detection for cockpit long-form capture. Each chunk is
 /// judged against its own loudness, so a quiet speaker's pauses and a loud
 /// speaker's pauses are both found.
+///
+/// Known limitation: the threshold is relative (0.3 × p95), so for a speaker
+/// with a wide dynamic range, very soft speech at a chunk's edges (a word
+/// trailing off) can measure as quiet and add to the pause.
 enum CockpitPauseDetector {
     /// The RMS below which a frame of `audio` counts as quiet, or nil when the
     /// whole chunk is quiet (its 95th-percentile frame is within 3x the silence

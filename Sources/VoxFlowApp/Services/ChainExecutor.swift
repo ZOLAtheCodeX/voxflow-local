@@ -14,9 +14,12 @@ import os
 /// `currentTranscript`), so a chain without a `.capture` step (the shipped
 /// "Memo" and "Action items" chains) acts on the current transcript. A
 /// `.capture` step re-seeds it; there is no live mid-chain recording.
-/// `frozenTarget` resolves the app the user was dictating into (sourced from
-/// the cockpit session, reconstructed from the frozen pid), so an insert lands
-/// in that app, not the cockpit window.
+/// `frozenTarget` resolves the app the user was dictating into: the cockpit
+/// session's target, verified at insert time by pid, bundle ID and launch
+/// date, so an insert lands in that app (never the cockpit window, and never
+/// a process that reused the pid). A run is bound to the session it started
+/// on (`currentSessionID`): if the session changes while a step awaits, the
+/// chain stops before its insert with `.sessionChanged`.
 @MainActor
 final class ChainExecutor {
     enum ChainError: Error, Equatable {

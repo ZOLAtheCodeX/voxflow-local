@@ -4,8 +4,10 @@ import Foundation
 /// seam. Pure and punctuation-aware: no separator after an opening mark or
 /// before closing punctuation, exactly one space otherwise.
 ///
-/// Known limitation: "3" + "14" joins as "3 14" (a number split across a
-/// chunk boundary is indistinguishable from two numbers).
+/// Known limitations: "3" + "14" joins as "3 14" (a number split across a
+/// chunk boundary is indistinguishable from two numbers). CJK text and
+/// ideographic punctuation (。、「」 and the like) are not handled: a space
+/// is inserted at those boundaries too.
 enum ChunkJoiner {
     private static let openers: Set<Character> = ["(", "[", "{", "“", "‘", "«", "¿", "¡"]
     private static let closers: Set<Character> = [
