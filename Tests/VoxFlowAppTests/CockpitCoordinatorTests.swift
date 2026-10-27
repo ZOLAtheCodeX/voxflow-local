@@ -56,7 +56,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_applyAction_records_history_on_session() async throws {
         let (_, coord, sessionService, _) = makeCoordinator()
         sessionService.start()
-        sessionService.appendChunk("raw transcript")
+        sessionService.appendTestChunk("raw transcript")
         sessionService.stop()
         _ = try await coord.applyAction(.memo, to: "raw transcript")
         XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 1)
@@ -65,7 +65,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_applyAction_skips_history_when_guardrail_triggered() async throws {
         let (_, coord, sessionService, _) = makeCoordinatorWithGuardrailBackend()
         sessionService.start()
-        sessionService.appendChunk("raw transcript")
+        sessionService.appendTestChunk("raw transcript")
         sessionService.stop()
         _ = try await coord.applyAction(.memo, to: "raw transcript")
         // Guardrail trips must not record an AppliedAction — the session JSON
@@ -77,7 +77,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_applyAction_skips_history_when_output_unchanged() async throws {
         let (_, coord, sessionService, _) = makeCoordinatorWithEchoBackend()
         sessionService.start()
-        sessionService.appendChunk("identical transcript")
+        sessionService.appendTestChunk("identical transcript")
         sessionService.stop()
         _ = try await coord.applyAction(.memo, to: "identical transcript")
         XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 0)
@@ -145,7 +145,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_handleVoiceUtterance_triggers_action_during_review() async throws {
         let (state, coord, sessionService, _) = makeCoordinator()
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
         try await coord.handleVoiceUtterance("memo")
         XCTAssertEqual(state.chipInvocationCounts[.memo], 1)
@@ -160,7 +160,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
 
         try await coord.handleVoiceUtterance("signoff")
@@ -181,7 +181,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
 
         try await coord.handleVoiceUtterance("cancel")
@@ -200,7 +200,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
 
         try await coord.handleVoiceUtterance("agenda")
@@ -219,7 +219,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
         let before = try XCTUnwrap(sessionService.currentSession?.transcript)
 
@@ -272,7 +272,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         )
         coord.open()
         sessionService.start()
-        sessionService.appendChunk("the transcript that must survive")
+        sessionService.appendTestChunk("the transcript that must survive")
         sessionService.stop()
 
         await coord.insertIntoTarget()

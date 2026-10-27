@@ -213,7 +213,10 @@ final class CockpitCaptureCoordinator {
                 return
             }
             let corrected = dictionary?.apply(to: text) ?? text
-            session.appendChunk(corrected)
+            // Interim: Task 3 binds the recording id, Task 4 supplies the pause.
+            if let id = session.currentSession?.id {
+                session.appendChunk(corrected, pauseBefore: 0, sessionID: id)
+            }
         } catch {
             // A failed chunk is a real dictation loss: retain the audio,
             // write a receipt, and after repeated failures end the session
@@ -244,7 +247,9 @@ final class CockpitCaptureCoordinator {
         loopTask?.cancel()
         loopTask = nil
         _ = try? capture.stopCapture()
-        session.appendChunk("\n\n[recording interrupted — \(reason)]")
+        if let id = session.currentSession?.id {
+            session.appendInterruptionMarker(reason, sessionID: id)
+        }
         session.stop()
     }
 }

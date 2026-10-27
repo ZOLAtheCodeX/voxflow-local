@@ -21,7 +21,7 @@ final class LongFormSessionServiceTests: XCTestCase {
     func test_stop_after_recording_transitions_to_reviewing() {
         let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()
-        service.appendChunk("hello world")
+        service.appendTestChunk("hello world")
         service.stop()
         XCTAssertEqual(service.state, .reviewing)
         XCTAssertEqual(service.currentSession?.transcript, "hello world")
@@ -62,7 +62,7 @@ final class LongFormSessionServiceTests: XCTestCase {
     func test_reset_returns_to_idle() {
         let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()
-        service.appendChunk("x")
+        service.appendTestChunk("x")
         service.stop()
         service.reset()
         XCTAssertEqual(service.state, .idle)
@@ -71,43 +71,85 @@ final class LongFormSessionServiceTests: XCTestCase {
 
     func test_appendChunk_ignored_when_idle() {
         let service = LongFormSessionService(autoSaveDirectory: tempDir())
-        service.appendChunk("noise")
+        service.appendChunk("noise", pauseBefore: 0, sessionID: UUID())
         XCTAssertEqual(service.state, .idle)
         XCTAssertNil(service.currentSession)
     }
 
-    // MARK: - Pause tolerance (Task 7)
+    // MARK: - Measured pauses and joining
 
-    func test_silence_longer_than_4s_inserts_paragraph_break() {
-        let clock = TestClock()
-        let service = LongFormSessionService(autoSaveDirectory: tempDir(), clock: clock)
+    func test_first_chunk_becomes_transcript() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()
-        service.appendChunk("first sentence.")
-        clock.advance(by: 5.0)
-        service.appendChunk("second sentence.")
-        XCTAssertEqual(service.currentSession?.transcript, "first sentence.\n\nsecond sentence.")
+        service.appendTestChunk("hello", pauseBefore: 5.0)
+        XCTAssertEqual(service.currentSession?.transcript, "hello")
     }
 
-    func test_silence_under_4s_no_paragraph_break() {
-        let clock = TestClock()
-        let service = LongFormSessionService(autoSaveDirectory: tempDir(), clock: clock)
+    func test_pause_just_under_threshold_joins() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()
-        service.appendChunk("first.")
-        clock.advance(by: 2.0)
-        service.appendChunk(" second.")
+        service.appendTestChunk("first.")
+        service.appendTestChunk("second.", pauseBefore: 1.9)
         XCTAssertEqual(service.currentSession?.transcript, "first. second.")
     }
 
-    func test_paragraph_break_not_duplicated() {
-        let clock = TestClock()
-        let service = LongFormSessionService(autoSaveDirectory: tempDir(), clock: clock)
+    func test_pause_at_threshold_breaks() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()
-        service.appendChunk("first.")
-        clock.advance(by: 6.0)
-        service.appendChunk("second.")
-        clock.advance(by: 7.0)
-        service.appendChunk("third.")
-        XCTAssertEqual(service.currentSession?.transcript, "first.\n\nsecond.\n\nthird.")
+        service.appendTestChunk("first.")
+        service.appendTestChunk("second.", pauseBefore: 2.0)
+        XCTAssertEqual(service.currentSession?.transcript, "first.\n\nsecond.")
+    }
+
+    func test_break_never_adds_more_than_one_blank_line() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.setTranscript("a\n\n")
+        service.appendTestChunk("b", pauseBefore: 3.0)
+        XCTAssertEqual(service.currentSession?.transcript, "a\n\nb")
+    }
+
+    func test_mismatched_session_id_is_ignored() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.appendChunk("x", pauseBefore: 0, sessionID: UUID())
+        XCTAssertEqual(service.currentSession?.transcript, "")
+    }
+
+    // MARK: - Interruption marker
+
+    func test_marker_on_empty_transcript() throws {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        let id = try XCTUnwrap(service.currentSession?.id)
+        service.appendInterruptionMarker("device", sessionID: id)
+        XCTAssertEqual(service.currentSession?.transcript, "[recording interrupted — device]")
+    }
+
+    func test_marker_after_text() throws {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.appendTestChunk("a")
+        let id = try XCTUnwrap(service.currentSession?.id)
+        service.appendInterruptionMarker("device", sessionID: id)
+        XCTAssertEqual(service.currentSession?.transcript, "a\n\n[recording interrupted — device]")
+    }
+
+    func test_marker_after_existing_blank_line_yields_one_blank_line() throws {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.setTranscript("a\n\n")
+        let id = try XCTUnwrap(service.currentSession?.id)
+        service.appendInterruptionMarker("device", sessionID: id)
+        XCTAssertEqual(service.currentSession?.transcript, "a\n\n[recording interrupted — device]")
+    }
+
+    func test_marker_with_mismatched_session_id_is_ignored() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.setTranscript("a")
+        service.appendInterruptionMarker("device", sessionID: UUID())
+        XCTAssertEqual(service.currentSession?.transcript, "a")
     }
 
     // MARK: - Persistence (Task 8)
@@ -116,7 +158,7 @@ final class LongFormSessionServiceTests: XCTestCase {
         let dir = tempDir()
         let service = LongFormSessionService(autoSaveDirectory: dir)
         service.start()
-        service.appendChunk("important content")
+        service.appendTestChunk("important content")
         service.stop()
         let id = try XCTUnwrap(service.currentSession?.id)
 
@@ -133,7 +175,7 @@ final class LongFormSessionServiceTests: XCTestCase {
     func test_recordAppliedAction_overwrites_transcript_and_appends_history() throws {
         let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()
-        service.appendChunk("raw text")
+        service.appendTestChunk("raw text")
         service.stop()
         let applied = AppliedAction(
             actionId: .memo,
