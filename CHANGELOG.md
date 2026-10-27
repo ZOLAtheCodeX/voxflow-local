@@ -6,6 +6,12 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- The local backend now accepts only the VoxFlow app (via a per-launch
+  token) and refuses browser-originated, wrong-host, and non-JSON requests,
+  closing a blind cross-site request path and DNS rebinding. Scripts read the
+  token from `~/Library/Application Support/VoxFlow/backend.token`.
+
 ### Fixed
 - Gemma polish and smart actions no longer spend seconds on hidden
   "thinking": Ollama chat requests now send `think: false`. Measured on
