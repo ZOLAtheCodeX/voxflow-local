@@ -40,6 +40,13 @@ final class CockpitCoordinator: ObservableObject {
     /// Ruling R7: ⌘↩ is single-flight. A second press while the first is
     /// draining or inserting would otherwise drain and insert twice.
     private var insertInFlight = false
+    /// The verified last external app, frozen as the session target at ⌘R.
+    /// AppCoordinator wires this to ``ExternalAppTracker``.
+    var recordingTargetProvider: (@MainActor () -> FocusTargetSnapshot?)?
+
+    func recordingTarget() -> FocusTargetSnapshot? {
+        recordingTargetProvider?() ?? nil
+    }
 
     func requestAssistantHandoff() { onHandoffRequested?() }
     private let log = Logger(subsystem: "local.voxflow.app", category: "CockpitCoordinator")
@@ -254,13 +261,12 @@ final class CockpitCoordinator: ObservableObject {
 
         // Existing AX-insert path — preserved verbatim.
         guard let insertionCoordinator = textInsertionCoordinator else { return }
-        // Reconstruct NSRunningApplication from the pid frozen at
-        // session-start. Required because at insert time the frontmost
-        // app *is* the cockpit window itself — resolving via
-        // NSWorkspace.shared.frontmostApplication would target the
-        // cockpit, not the app the user was dictating into.
-        let targetApp: NSRunningApplication? = session.targetApp?.processIdentifier
-            .flatMap { NSRunningApplication(processIdentifier: $0) }
+        // Rebuild the target frozen at ⌘R. At insert time the frontmost app
+        // *is* the cockpit window, so NSWorkspace.frontmostApplication would
+        // target the cockpit. A pid alone is not identity (the OS recycles
+        // them), so bundle ID and launch date must also still match; if not,
+        // targetApp is nil and the insert falls back to the clipboard.
+        let targetApp = ExternalAppTracker.liveRunningApp(for: session.targetApp)
         let inserted = await insertionCoordinator.insertText(
             text, statusSuffix: "cockpit", targetApp: targetApp)
         // Close + reset ONLY on success — mirroring the Notion branch above.

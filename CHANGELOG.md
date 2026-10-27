@@ -13,6 +13,13 @@ All notable changes to VoxFlow Local are documented here. The format follows
   token from `~/Library/Application Support/VoxFlow/backend.token`.
 
 ### Fixed
+- Cockpit dictation no longer loses its last words when you stop: stopping
+  drains the tail, a double stop is safe, and Cmd+Return while still recording
+  inserts everything that was said.
+- Cockpit paragraph breaks now appear only at real pauses in your speech, and
+  chunks no longer glue words together.
+- The cockpit inserts into the app you came from, and never into a different
+  app that happened to reuse its process id.
 - Gemma polish and smart actions no longer spend seconds on hidden
   "thinking": Ollama chat requests now send `think: false`. Measured on
   gemma4:e2b-mlx (M1 Pro 16 GB): a warm 30-word polish took 6.0 s with

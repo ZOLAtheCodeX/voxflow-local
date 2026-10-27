@@ -42,6 +42,14 @@ struct CockpitSidePanelView: View {
                             .font(VF.captionFont)
                             .foregroundStyle(.secondary)
                     }
+                } else if sessionService.currentSession == nil,
+                          let name = state.lastExternalApp?.name {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name).font(VF.labelFont)
+                        Text("append at cursor")
+                            .font(VF.captionFont)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Text("focused app")
                         .font(VF.captionFont)

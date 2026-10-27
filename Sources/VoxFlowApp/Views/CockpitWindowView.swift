@@ -203,7 +203,7 @@ struct CockpitWindowView: View {
             isTextEditingActive: isTextEditingActive()
         ) {
         case .record:
-            cockpitCapture.startRecording(targetApp: state.focusTarget)
+            cockpitCapture.startRecording(targetApp: coordinator.recordingTarget())
             return nil
         case .stop:
             Task { await cockpitCapture.stopRecording() }

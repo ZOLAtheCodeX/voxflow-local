@@ -45,6 +45,22 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertEqual(fired, 0)
     }
 
+    // MARK: - Recording target
+
+    func test_recordingTarget_uses_provider() {
+        let (_, coord, _, _) = makeCoordinator()
+        let snapshot = ExternalAppIdentity(
+            pid: 5, bundleID: "com.apple.Notes", name: "Notes",
+            launchDate: Date(timeIntervalSince1970: 1_800_000_000)).targetSnapshot
+        coord.recordingTargetProvider = { snapshot }
+        XCTAssertEqual(coord.recordingTarget(), snapshot)
+    }
+
+    func test_recordingTarget_without_provider_is_nil() {
+        let (_, coord, _, _) = makeCoordinator()
+        XCTAssertNil(coord.recordingTarget())
+    }
+
     // MARK: - applyAction
 
     func test_applyAction_increments_invocation_count() async throws {
