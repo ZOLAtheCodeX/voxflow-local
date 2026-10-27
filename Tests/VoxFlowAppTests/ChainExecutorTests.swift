@@ -227,12 +227,9 @@ final class ChainExecutorTests: XCTestCase {
 
     // MARK: - Insert-only ordering
 
-    func test_insert_only_chain_with_empty_text_fails_without_clipboard() async {
-        // workingText starts "" — an insert-only chain does not implicitly
-        // capture first. Production's insertText returns false on empty text
-        // BEFORE its clipboard-fallback branch, so the chain STOPS with
-        // .insertFailed and NOTHING is copied to the clipboard (clipboardFallback
-        // is false — an empty insert is not a recoverable clipboard situation).
+    func test_insert_only_chain_inserts_transcript() async {
+        // An insert-only chain has no .capture step, so it acts on the current
+        // transcript: the working text is seeded from it.
         let backend = RecordingSmartActionBackend(output: "OUT")
         let service = SmartActionService(backend: backend)
         let insert = FakeTextInsertion(returns: true)
@@ -251,11 +248,149 @@ final class ChainExecutorTests: XCTestCase {
         let result = await executor.run(chain)
 
         XCTAssertEqual(insert.calls.count, 1)
+        XCTAssertEqual(insert.calls.first?.text, "ignored transcript")
+        XCTAssertNil(result.error)
+        XCTAssertNil(result.failedStepIndex)
+        XCTAssertEqual(result.completedSteps, 1)
+        XCTAssertEqual(result.finalText, "ignored transcript")
+    }
+
+    func test_insert_only_chain_with_empty_transcript_fails_without_clipboard() async {
+        // Production's insertText returns false on empty text BEFORE its
+        // clipboard-fallback branch, so the chain STOPS with .insertFailed and
+        // NOTHING is copied to the clipboard (clipboardFallback is false: an
+        // empty insert is not a recoverable clipboard situation).
+        let backend = RecordingSmartActionBackend(output: "OUT")
+        let service = SmartActionService(backend: backend)
+        let insert = FakeTextInsertion(returns: true)
+        let executor = ChainExecutor(
+            actionService: service,
+            textInsertion: insert,
+            currentTranscript: { "" },
+            frozenTarget: { nil }
+        )
+        let chain = WorkflowChain(
+            name: "Flow",
+            steps: [.insert(targetHint: nil)],
+            createdAt: Date()
+        )
+
+        let result = await executor.run(chain)
+
+        XCTAssertEqual(insert.calls.count, 1)
         XCTAssertEqual(insert.calls.first?.text, "")
         XCTAssertEqual(result.error, .insertFailed)
         XCTAssertEqual(result.failedStepIndex, 0)
         XCTAssertFalse(result.clipboardFallback, "Nothing is copied for an empty insert")
         XCTAssertEqual(result.completedSteps, 0)
+    }
+
+    // MARK: - Seeded chains act on the transcript
+
+    func test_seeded_memo_chain_acts_on_transcript() async {
+        await assertSeededChainActsOnTranscript(index: 0)
+    }
+
+    func test_seeded_action_items_chain_acts_on_transcript() async {
+        await assertSeededChainActsOnTranscript(index: 1)
+    }
+
+    private func assertSeededChainActsOnTranscript(index: Int) async {
+        let backend = RecordingSmartActionBackend(output: "ACTION OUT")
+        let service = SmartActionService(backend: backend)
+        let insert = FakeTextInsertion(returns: true)
+        let executor = ChainExecutor(
+            actionService: service,
+            textInsertion: insert,
+            currentTranscript: { "raw transcript" },
+            frozenTarget: { nil }
+        )
+        let seed = ChainStore.seedChains[index]
+        let chain = WorkflowChain(name: seed.name, steps: seed.steps, createdAt: Date())
+
+        let result = await executor.run(chain)
+
+        XCTAssertNil(result.error)
+        XCTAssertEqual(result.completedSteps, 2)
+        let received = await backend.receivedTranscripts
+        XCTAssertEqual(received, ["raw transcript"])
+        XCTAssertEqual(insert.calls.count, 1)
+        XCTAssertEqual(insert.calls.first?.text, "ACTION OUT")
+    }
+
+    func test_action_on_empty_transcript_fails_noTranscript_without_backend_call() async {
+        let backend = RecordingSmartActionBackend(output: "SHOULD-NOT-RUN")
+        let service = SmartActionService(backend: backend)
+        let insert = FakeTextInsertion(returns: true)
+        let executor = ChainExecutor(
+            actionService: service,
+            textInsertion: insert,
+            currentTranscript: { "" },
+            frozenTarget: { nil }
+        )
+        let chain = WorkflowChain(
+            name: "Flow",
+            steps: [.action(actionId: .memo)],
+            createdAt: Date()
+        )
+
+        let result = await executor.run(chain)
+
+        XCTAssertEqual(result.error, .noTranscript)
+        XCTAssertEqual(result.failedStepIndex, 0)
+        XCTAssertFalse(result.clipboardFallback)
+        let received = await backend.receivedTranscripts
+        XCTAssertTrue(received.isEmpty, "An action on an empty transcript must send no request")
+    }
+
+    // MARK: - App steps
+
+    /// R5.6: app-level steps dispatch through the injected handler and do
+    /// not disturb workingText.
+    func testAppStepsDispatchAndPreserveWorkingText() async {
+        let actionService = SmartActionService(backend: ConfigurableSmartActionBackend(
+            result: SmartActionResult(actionId: .memo, output: "transformed", guardrailTriggered: false, error: nil)))
+        let insertion = FakeTextInsertion(returns: true)
+        let recorder = StepRecorder()
+        let executor = ChainExecutor(
+            actionService: actionService,
+            textInsertion: insertion,
+            currentTranscript: { "captured transcript" },
+            frozenTarget: { nil },
+            performAppStep: { step in recorder.steps.append(step); return true }
+        )
+        let chain = WorkflowChain(name: "Focus", steps: [
+            .capture(mode: .longForm),
+            .setMode(mode: "meeting"),
+            .openWindow(window: "cockpit"),
+            .insert(targetHint: nil),
+        ], createdAt: Date())
+        let result = await executor.run(chain)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(recorder.steps.count, 2)
+        XCTAssertEqual(insertion.calls.last?.text, "captured transcript")
+    }
+
+    func testFailedAppStepStopsChain() async {
+        let actionService = SmartActionService(backend: ConfigurableSmartActionBackend(
+            result: SmartActionResult(actionId: .memo, output: "x", guardrailTriggered: false, error: nil)))
+        let insertion = FakeTextInsertion(returns: true)
+        let executor = ChainExecutor(
+            actionService: actionService,
+            textInsertion: insertion,
+            currentTranscript: { "text" },
+            frozenTarget: { nil },
+            performAppStep: { _ in false }
+        )
+        let chain = WorkflowChain(name: "F", steps: [
+            .capture(mode: .longForm),
+            .setMode(mode: "nonsense"),
+            .insert(targetHint: nil),
+        ], createdAt: Date())
+        let result = await executor.run(chain)
+        XCTAssertNotNil(result.error)
+        XCTAssertEqual(result.failedStepIndex, 1)
+        XCTAssertTrue(insertion.calls.isEmpty, "stop-on-error: insert must not run")
     }
 
     func test_action_then_insert_with_nonempty_output_succeeds() async {
@@ -378,55 +513,11 @@ private final class ThrowingSmartActionBackend: SmartActionBackend, @unchecked S
 @MainActor
 private final class CallCounter {
     var count = 0
-
-    /// R5.6: app-level steps dispatch through the injected handler and do
-    /// not disturb workingText.
-    @MainActor
-    func testAppStepsDispatchAndPreserveWorkingText() async {
-        let actionService = SmartActionService(backend: ConfigurableSmartActionBackend(
-            result: SmartActionResult(actionId: .memo, output: "transformed", guardrailTriggered: false, error: nil)))
-        let insertion = FakeTextInsertion(returns: true)
-        var performed: [ChainStep] = []
-        let executor = ChainExecutor(
-            actionService: actionService,
-            textInsertion: insertion,
-            currentTranscript: { "captured transcript" },
-            frozenTarget: { nil },
-            performAppStep: { step in performed.append(step); return true }
-        )
-        let chain = WorkflowChain(name: "Focus", steps: [
-            .capture(mode: .longForm),
-            .setMode(mode: "meeting"),
-            .openWindow(window: "cockpit"),
-            .insert(targetHint: nil),
-        ], createdAt: Date())
-        let result = await executor.run(chain)
-        XCTAssertNil(result.error)
-        XCTAssertEqual(performed.count, 2)
-        XCTAssertEqual(insertion.calls.last?.text, "captured transcript")
-    }
-
-    @MainActor
-    func testFailedAppStepStopsChain() async {
-        let actionService = SmartActionService(backend: ConfigurableSmartActionBackend(
-            result: SmartActionResult(actionId: .memo, output: "x", guardrailTriggered: false, error: nil)))
-        let insertion = FakeTextInsertion(returns: true)
-        let executor = ChainExecutor(
-            actionService: actionService,
-            textInsertion: insertion,
-            currentTranscript: { "text" },
-            frozenTarget: { nil },
-            performAppStep: { _ in false }
-        )
-        let chain = WorkflowChain(name: "F", steps: [
-            .capture(mode: .longForm),
-            .setMode(mode: "nonsense"),
-            .insert(targetHint: nil),
-        ], createdAt: Date())
-        let result = await executor.run(chain)
-        XCTAssertNotNil(result.error)
-        XCTAssertEqual(result.failedStepIndex, 1)
-        XCTAssertTrue(insertion.calls.isEmpty, "stop-on-error: insert must not run")
-    }
 }
 
+/// Reference-type recorder for the app steps an `@escaping @MainActor` closure
+/// is asked to perform.
+@MainActor
+private final class StepRecorder {
+    var steps: [ChainStep] = []
+}

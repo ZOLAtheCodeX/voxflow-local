@@ -10,10 +10,13 @@ import os
 /// outcome (including failures) is reported via ``ChainRunResult`` so the UI
 /// can surface partial progress. Stops on the first failing step.
 ///
-/// Capture seeds from the *already-captured* transcript (via `currentTranscript`)
-/// — there is no live mid-chain recording. `frozenTarget` resolves the app the
-/// user was dictating into (sourced from the cockpit session, reconstructed from
-/// the frozen pid), so an insert lands in that app, not the cockpit window.
+/// The working text starts as the *already-captured* transcript (via
+/// `currentTranscript`), so a chain without a `.capture` step (the shipped
+/// "Memo" and "Action items" chains) acts on the current transcript. A
+/// `.capture` step re-seeds it; there is no live mid-chain recording.
+/// `frozenTarget` resolves the app the user was dictating into (sourced from
+/// the cockpit session, reconstructed from the frozen pid), so an insert lands
+/// in that app, not the cockpit window.
 @MainActor
 final class ChainExecutor {
     enum ChainError: Error, Equatable {
@@ -56,7 +59,7 @@ final class ChainExecutor {
     private let performAppStep: (@MainActor (ChainStep) -> Bool)?
 
     func run(_ chain: WorkflowChain) async -> ChainRunResult {
-        var workingText = ""
+        var workingText = currentTranscript() ?? ""
         log.info("running chain '\(chain.name)' (\(chain.steps.count) steps)")
 
         for (index, step) in chain.steps.enumerated() {
@@ -69,6 +72,10 @@ final class ChainExecutor {
                 workingText = transcript
 
             case .action(let actionId):
+                // Never send a request for nothing to act on.
+                guard !workingText.isEmpty else {
+                    return failure(.noTranscript, atIndex: index, workingText: workingText, clipboardFallback: false)
+                }
                 do {
                     let result = try await actionService.apply(actionId, to: workingText)
                     if let error = result.error {
