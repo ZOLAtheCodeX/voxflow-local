@@ -60,6 +60,12 @@ final class CockpitCaptureCoordinator {
     /// Id of the session this recording belongs to. Chunks, markers and the
     /// stop sequence act only while it matches `session.currentSession?.id`.
     private var recordingSessionID: UUID?
+    /// Quiet audio, in seconds, that has accumulated since the last appended
+    /// text: the trailing quiet of the last chunk that produced text plus
+    /// every chunk that added none. The next appended chunk's leading quiet
+    /// is added to it to get the pause before that chunk. Never includes the
+    /// ~150 ms restart gap, which is not audio.
+    private var pendingPause: TimeInterval = 0
 
     /// Quiet-boundary flush (session 29): the hard timer cut chunks mid-word
     /// at every 5 s seam. The flush now waits — in `flushDeferralStepNs`
@@ -113,6 +119,7 @@ final class CockpitCaptureCoordinator {
         guard stopTask == nil, case .idle = session.state else { return }
         carryPCM = Data()
         consecutiveTranscriptionFailures = 0
+        pendingPause = 0
         stopRequested = false
         captureRunning = false
         loopTask?.cancel()
@@ -282,7 +289,28 @@ final class CockpitCaptureCoordinator {
             if !merged.isSilent { carryPCM = merged.pcm }
             return
         }
-        guard !merged.isSilent else { return }
+        // Pause measurements for this merged chunk, taken once before the
+        // await. A chunk with no measurable speech (`threshold == nil`) that
+        // still yields text is measured at the near-silence fallback instead.
+        let threshold = CockpitPauseDetector.quietThreshold(for: merged)
+        let wholeQuiet = threshold.map { limit in
+            merged.frameRMSValues().allSatisfy { $0 < limit }
+        } ?? true
+        let measuringThreshold = threshold ?? CapturedAudio.silenceFloor * 3
+        let leadingQuiet = merged.leadingQuietSeconds(threshold: measuringThreshold)
+        let trailingQuiet = merged.trailingQuietSeconds(threshold: measuringThreshold)
+        let mergedSeconds = merged.durationSeconds
+        /// A chunk that adds no text: an all-quiet one extends the pending
+        /// pause; one with speech restarts it from its own trailing quiet.
+        /// Stale work belongs to a newer recording, which owns the counter.
+        func settleWithoutText() {
+            guard isCurrentRecording(id) else { return }
+            pendingPause = wholeQuiet ? pendingPause + mergedSeconds : trailingQuiet
+        }
+        guard !merged.isSilent else {
+            settleWithoutText()
+            return
+        }
         let audio = merged
         do {
             let response = try await transcriber.transcribe(audio)
@@ -307,12 +335,18 @@ final class CockpitCaptureCoordinator {
                         source: "cockpit_chunk"
                     )
                 }
+                settleWithoutText()
                 return
             }
             let corrected = dictionary?.apply(to: text) ?? text
-            // Task 4 supplies the measured pause.
             if let id {
-                session.appendChunk(corrected, pauseBefore: 0, sessionID: id)
+                // Stale work is rejected by the session's id guard, and must
+                // leave the newer recording's counter alone.
+                let current = isCurrentRecording(id)
+                session.appendChunk(
+                    corrected, pauseBefore: current ? pendingPause + leadingQuiet : 0,
+                    sessionID: id)
+                if current { pendingPause = trailingQuiet }
             }
         } catch {
             // A failed chunk is a real dictation loss: retain the audio,
@@ -323,6 +357,7 @@ final class CockpitCaptureCoordinator {
             // must not count against, or end, whatever recording is current.
             let isCurrent = isCurrentRecording(id)
             if isCurrent { consecutiveTranscriptionFailures += 1 }
+            settleWithoutText()
             let retained = rejectedAudio?.store(
                 pcm: audio.pcm, sampleRate: audio.sampleRate, reason: "transcription_error")
             audit?.recordRejection(

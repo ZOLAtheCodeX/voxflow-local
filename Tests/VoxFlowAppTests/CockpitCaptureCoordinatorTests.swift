@@ -775,4 +775,91 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         XCTAssertTrue(transcript.contains("[recording interrupted — microphone restart failed]"))
         XCTAssertEqual(capture.stopCount, 1)
     }
+
+    // MARK: - Pause accounting across chunk boundaries
+
+    /// Runs one `periodicFlush()` per queued chunk, then stops, and returns the
+    /// final transcript. The stop's tail is a short silent buffer unless the
+    /// caller queued one more chunk.
+    private func transcriptAfterFlushes(
+        _ chunks: [CapturedAudio], texts: [String], confidences: [Double] = [],
+        extraTail: CapturedAudio? = nil
+    ) async -> String {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: true, samples: 1600))
+        capture.queue = chunks + (extraTail.map { [$0] } ?? [])
+        let transcriber = FakeTranscriber()
+        transcriber.texts = texts
+        transcriber.confidences = confidences
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        for _ in chunks { await coord.periodicFlush() }
+        await coord.stopRecording()
+        return session.currentSession?.transcript ?? ""
+    }
+
+    func test_continuous_speech_across_three_flushes_is_one_paragraph() async {
+        let chunk = makeTone([(5.0, 0.08)])
+        let transcript = await transcriptAfterFlushes(
+            [chunk, chunk, chunk], texts: ["one", "two", "three"])
+        XCTAssertEqual(transcript, "one two three")
+    }
+
+    func test_quiet_span_across_boundary_breaks_once() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (1.2, 0)]), makeTone([(1.0, 0), (3.0, 0.08)])],
+            texts: ["one", "two"])
+        XCTAssertEqual(transcript, "one\n\ntwo")
+    }
+
+    func test_short_quiet_span_across_boundary_joins() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (0.9, 0)]), makeTone([(0.9, 0), (3.0, 0.08)])],
+            texts: ["one", "two"])
+        XCTAssertEqual(transcript, "one two")
+    }
+
+    func test_all_quiet_window_between_speech_breaks() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(5.0, 0.08)]), makeTone([(5.0, 0.004)]), makeTone([(5.0, 0.08)])],
+            texts: ["one", "", "three"])
+        XCTAssertEqual(transcript, "one\n\nthree")
+    }
+
+    func test_gate_rejected_speech_chunk_does_not_create_break() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (1.5, 0)]),
+             makeTone([(5.0, 0.08)]),
+             makeTone([(1.0, 0), (4.0, 0.08)])],
+            texts: ["one", "um", "three"], confidences: [0.9, 0.05, 0.9])
+        XCTAssertEqual(transcript, "one three")
+    }
+
+    func test_carried_subminimum_merge_counts_once() async {
+        // 8000 bytes (below the 9600-byte minimum) is carried, then merged into
+        // the next flush. Counting the carry's quiet lead twice would reach 2.0.
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (1.8, 0)]),
+             makeTone([(0.15, 0), (0.1, 0.08)]),
+             makeTone([(0.7, 0), (4.0, 0.08)])],
+            texts: ["one", "three"])
+        XCTAssertEqual(transcript, "one three")
+    }
+
+    func test_short_word_after_long_quiet_does_not_break_next_chunk() async {
+        // The first chunk's p95 is room noise (quietThreshold is nil) yet it
+        // produced text, so its trailing quiet is measured at the fallback
+        // threshold: the short word ends it and nothing carries forward.
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.8, 0.004), (0.2, 0.08)]), makeTone([(5.0, 0.08)])],
+            texts: ["hello", "world"])
+        XCTAssertEqual(transcript, "hello world")
+    }
+
+    func test_pause_carries_into_the_stop_tail() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (2.5, 0)])], texts: ["one", "two"],
+            extraTail: makeTone([(3.0, 0.08)]))
+        XCTAssertEqual(transcript, "one\n\ntwo")
+    }
 }
