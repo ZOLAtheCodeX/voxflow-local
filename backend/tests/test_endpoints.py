@@ -228,6 +228,24 @@ class TestRateLimiting:
         resp = await client.get("/v1/health")
         assert resp.status_code == 429
 
+    @pytest.mark.anyio
+    async def test_health_traffic_cannot_starve_authenticated_budget(
+        self, client: httpx.AsyncClient
+    ):
+        for _ in range(120):
+            await client.get("/v1/health")
+        assert (await client.get("/v1/health")).status_code == 429
+        assert (await client.get("/v1/ready")).status_code != 429
+
+    @pytest.mark.anyio
+    async def test_rejected_requests_never_count(self, client: httpx.AsyncClient):
+        for _ in range(130):
+            r = await client.get(
+                "/v1/ready", headers={"X-VoxFlow-Token": "cd" * 32}
+            )
+            assert r.status_code == 401
+        assert sum(len(v) for v in _rate_limit_timestamps.values()) == 0
+
 
 # ── Browser requests ─────────────────────────────────────────────────
 

@@ -185,6 +185,9 @@ async def rate_limit_middleware(
 ):  # type: ignore[no-untyped-def]
     global _LAST_CLEANUP_TIME
     client = request.client.host if request.client else "unknown"
+    # Every local caller shares 127.0.0.1, so health polling gets its own
+    # bucket and cannot exhaust the budget for authenticated endpoints.
+    bucket = f"health:{client}" if request.url.path == "/v1/health" else client
     now = time.time()
 
     with _RATE_LIMIT_LOCK:
@@ -200,11 +203,11 @@ async def rate_limit_middleware(
                 _rate_limit_timestamps.pop(ip, None)
             _LAST_CLEANUP_TIME = now
 
-        timestamps = _rate_limit_timestamps[client]
+        timestamps = _rate_limit_timestamps[bucket]
         valid_timestamps = [
             ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW
         ]
-        _rate_limit_timestamps[client] = valid_timestamps
+        _rate_limit_timestamps[bucket] = valid_timestamps
 
         if len(valid_timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
             return JSONResponse(
