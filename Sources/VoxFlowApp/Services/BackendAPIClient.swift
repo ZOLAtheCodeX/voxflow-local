@@ -260,11 +260,13 @@ enum BackendAPIClient {
 
     /// The single place a backend request is built: base URL, method, and the
     /// launch token header when one is held. Callers add their own
-    /// `Content-Type`, body, and timeout.
-    private static func makeRequest(path: String, method: String) -> URLRequest {
+    /// `Content-Type`, body, and timeout. Pass `attachToken: false` for calls
+    /// aimed at a listener that has not been verified as ours yet (the
+    /// `/v1/health` identity probe), so the token is never handed to it.
+    private static func makeRequest(path: String, method: String, attachToken: Bool = true) -> URLRequest {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = method
-        if let token = BackendAuthToken.current(), !token.isEmpty {
+        if attachToken, let token = BackendAuthToken.current(), !token.isEmpty {
             request.setValue(token, forHTTPHeaderField: BackendAuthToken.headerName)
         }
         return request
@@ -289,9 +291,10 @@ enum BackendAPIClient {
 
     private static func performGetRequest<Response: Decodable>(
         path: String,
-        timeoutInterval: TimeInterval? = nil
+        timeoutInterval: TimeInterval? = nil,
+        attachToken: Bool = true
     ) async throws -> Response {
-        var request = makeRequest(path: path, method: "GET")
+        var request = makeRequest(path: path, method: "GET", attachToken: attachToken)
         if let timeoutInterval {
             request.timeoutInterval = timeoutInterval
         }
@@ -302,7 +305,7 @@ enum BackendAPIClient {
     }
 
     static func health() async throws -> [String: String] {
-        return try await performGetRequest(path: "v1/health")
+        return try await performGetRequest(path: "v1/health", attachToken: false)
     }
 
     static func ready() async throws -> BackendReadinessResponse {
@@ -316,13 +319,15 @@ enum BackendAPIClient {
         return try await performGetRequest(path: "v1/ready", timeoutInterval: timeoutInterval)
     }
 
-    /// Identity probe: reads `instance_stamp` from the token-free `/v1/health`
-    /// route (empty string when the backend does not report one). Uses a short
+    /// Identity probe: reads `instance_stamp` from `/v1/health` (empty string
+    /// when the backend does not report one). Never sends the launch token: the
+    /// route does not need it and the listener is not yet verified as ours. Uses a short
     /// timeout because the shared session allows 120 s for model warmup, and a
     /// wedged process squatting on the port must fail fast instead.
     static func identityProbe(timeoutInterval: TimeInterval = 3) async throws -> String {
         struct Health: Decodable { let instanceStamp: String? }
-        let health: Health = try await performGetRequest(path: "v1/health", timeoutInterval: timeoutInterval)
+        let health: Health = try await performGetRequest(
+            path: "v1/health", timeoutInterval: timeoutInterval, attachToken: false)
         return health.instanceStamp ?? ""
     }
 

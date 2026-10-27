@@ -274,9 +274,6 @@ final class BackendAPIClientTests: XCTestCase {
         BackendAuthToken.set(token)
         let sink = TokenSink()
 
-        stubRecordingToken("/v1/health", body: #"{"instance_stamp":"s"}"#, into: sink)
-        _ = try await BackendAPIClient.identityProbe()
-
         stubRecordingToken(
             "/v1/cleanup",
             body: #"{"output_text":"x","mode_applied":"light","guardrail_triggered":false}"#, into: sink)
@@ -305,7 +302,7 @@ final class BackendAPIClientTests: XCTestCase {
         try await BackendAPIClient.ollamaPull(model: "m", onProgress: { _ in })
 
         let seen = sink.snapshot
-        XCTAssertEqual(seen.count, 8, "expected one recorded request per builder, got \(seen.keys.sorted())")
+        XCTAssertEqual(seen.count, 7, "expected one recorded request per builder, got \(seen.keys.sorted())")
         for (path, value) in seen {
             XCTAssertEqual(value, token, "\(path) did not carry the token")
         }
@@ -354,6 +351,27 @@ final class BackendAPIClientTests: XCTestCase {
         }
         let stamp = try await BackendAPIClient.identityProbe()
         XCTAssertEqual(stamp, "previous-launch")
+    }
+
+    /// The probe exists to identify an UNVERIFIED listener on the port, so it must
+    /// never hand that listener the launch token, even when one is held.
+    func testIdentityProbeNeverSendsTokenEvenWhenHeld() async throws {
+        BackendAuthToken.set(String(repeating: "ab", count: 32))
+        let sink = TokenSink()
+        stubRecordingToken("/v1/health", body: #"{"instance_stamp":"squatter-or-not"}"#, into: sink, method: "GET")
+        let stamp = try await BackendAPIClient.identityProbe()
+        XCTAssertEqual(stamp, "squatter-or-not")
+        XCTAssertEqual(sink.snapshot.count, 1)
+        XCTAssertNil(sink.snapshot["/v1/health"] ?? nil, "identityProbe leaked the token")
+    }
+
+    func testHealthNeverSendsTokenEvenWhenHeld() async throws {
+        BackendAuthToken.set(String(repeating: "ab", count: 32))
+        let sink = TokenSink()
+        stubRecordingToken("/v1/health", body: #"{"status":"ok"}"#, into: sink)
+        _ = try await BackendAPIClient.health()
+        XCTAssertEqual(sink.snapshot.count, 1)
+        XCTAssertNil(sink.snapshot["/v1/health"] ?? nil, "health() leaked the token")
     }
 
     func testIdentityProbeReturnsEmptyStringWhenStampAbsent() async throws {
