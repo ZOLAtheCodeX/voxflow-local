@@ -245,10 +245,18 @@ final class CockpitCaptureCoordinator {
             // spoken afterward was silently lost until the user noticed
             // (session 29 review). End the session cleanly: transcript so far
             // is preserved into review, and the marker says why. The engine is
-            // already stopped; the cleanup salvages the audio buffered before
-            // the change.
+            // already stopped. The audio it buffered before the change is
+            // transcribed first, through the normal success, rejection and
+            // failure paths (a failure keeps the clip), so its words land in
+            // front of the marker and the cleanup finds nothing left.
             log.error("stopCapture failed: \(error.localizedDescription)")
-            endSessionAfterInterruption(reason: "audio device changed or capture stopped")
+            if let salvaged = capture.takeInvalidatedAudio() {
+                await transcribeAndAppend(salvaged, force: true)
+            }
+            // A newer recording may have started during that await.
+            if id == recordingSessionID {
+                endSessionAfterInterruption(reason: "audio device changed or capture stopped")
+            }
             return
         }
         var restartFailed = false
@@ -273,9 +281,11 @@ final class CockpitCaptureCoordinator {
     }
 
     /// True while `id` is still the recording this coordinator owns and the
-    /// session service still holds that session.
+    /// session service still holds that session. A nil id is never current,
+    /// matching the append path, which only appends with an id.
     private func isCurrentRecording(_ id: UUID?) -> Bool {
-        id == recordingSessionID && session.currentSession?.id == id
+        guard let id else { return false }
+        return id == recordingSessionID && session.currentSession?.id == id
     }
 
     private func transcribeAndAppend(_ audio: CapturedAudio, force: Bool) async {
@@ -301,15 +311,19 @@ final class CockpitCaptureCoordinator {
             return
         }
         // Pause measurements for this merged chunk, taken once before the
-        // await. A chunk with no measurable speech (`threshold == nil`) that
-        // still yields text is measured at the near-silence fallback instead.
-        let threshold = CockpitPauseDetector.quietThreshold(for: merged)
-        let wholeQuiet = threshold.map { limit in
-            merged.frameRMSValues().allSatisfy { $0 < limit }
-        } ?? true
-        let measuringThreshold = threshold ?? CapturedAudio.silenceFloor * 3
-        let leadingQuiet = merged.leadingQuietSeconds(threshold: measuringThreshold)
-        let trailingQuiet = merged.trailingQuietSeconds(threshold: measuringThreshold)
+        // await from one framing pass. A chunk with no measurable speech
+        // (`threshold == nil`) that still yields text is measured at the
+        // detector's own floor (ruling R3a), so sustained weak speech is not
+        // read as quiet while room noise under the floor still is.
+        let frames = merged.frameRMSValues()
+        let threshold = CockpitPauseDetector.quietThreshold(frames: frames)
+        // With a threshold, the p95 frame is at or above it by construction,
+        // so a chunk is wholly quiet exactly when it has none. By spec, that
+        // includes a near-silent chunk whose one word the gate rejected.
+        let wholeQuiet = threshold == nil
+        let measuringThreshold = threshold ?? CapturedAudio.silenceFloor * 1.5
+        let leadingQuiet = merged.leadingQuietSeconds(frames: frames, threshold: measuringThreshold)
+        let trailingQuiet = merged.trailingQuietSeconds(frames: frames, threshold: measuringThreshold)
         let mergedSeconds = merged.durationSeconds
         /// A chunk that adds no text: an all-quiet one extends the pending
         /// pause; one with speech restarts it from its own trailing quiet.

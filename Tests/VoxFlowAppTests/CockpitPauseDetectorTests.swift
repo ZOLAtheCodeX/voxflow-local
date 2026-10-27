@@ -50,6 +50,21 @@ final class CockpitPauseDetectorTests: XCTestCase {
         XCTAssertNil(CockpitPauseDetector.quietThreshold(for: makeTone([(seconds: 2.0, rms: 0.005)])))
     }
 
+    /// The coordinator computes the frames once per chunk and derives the
+    /// threshold and both quiet spans from them; that must agree with the
+    /// audio-based helpers.
+    func test_frame_based_helpers_match_the_audio_based_ones() throws {
+        let audio = makeTone([(seconds: 1.0, rms: 0.0), (seconds: 2.0, rms: 0.08), (seconds: 0.51, rms: 0.0)])
+        let frames = audio.frameRMSValues()
+        let threshold = try XCTUnwrap(CockpitPauseDetector.quietThreshold(frames: frames))
+        XCTAssertEqual(threshold, CockpitPauseDetector.quietThreshold(for: audio))
+        XCTAssertEqual(audio.leadingQuietSeconds(frames: frames, threshold: threshold),
+                       audio.leadingQuietSeconds(threshold: threshold))
+        XCTAssertEqual(audio.trailingQuietSeconds(frames: frames, threshold: threshold),
+                       audio.trailingQuietSeconds(threshold: threshold))
+        XCTAssertNil(CockpitPauseDetector.quietThreshold(frames: []))
+    }
+
     func test_each_chunk_is_judged_against_its_own_level() throws {
         let loud = makeTone([(seconds: 2.0, rms: 0.2)])
         let weak = makeTone([(seconds: 2.0, rms: 0.01)])

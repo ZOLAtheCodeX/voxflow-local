@@ -41,16 +41,26 @@ extension CapturedAudio {
     /// the start of the clip. Exactly `durationSeconds` when every frame is
     /// quiet; 0 when the clip is empty.
     func leadingQuietSeconds(threshold: Double) -> Double {
-        quietSeconds(threshold: threshold, fromEnd: false)
+        leadingQuietSeconds(frames: frameRMSValues(), threshold: threshold)
     }
 
     /// Same as `leadingQuietSeconds`, counted back from the end of the clip.
     func trailingQuietSeconds(threshold: Double) -> Double {
-        quietSeconds(threshold: threshold, fromEnd: true)
+        trailingQuietSeconds(frames: frameRMSValues(), threshold: threshold)
     }
 
-    private func quietSeconds(threshold: Double, fromEnd: Bool) -> Double {
-        let frames = frameRMSValues()
+    /// `leadingQuietSeconds(threshold:)` over this clip's `frameRMSValues()`,
+    /// already computed, so a caller measuring several things frames once.
+    func leadingQuietSeconds(frames: [Double], threshold: Double) -> Double {
+        quietSeconds(frames: frames, threshold: threshold, fromEnd: false)
+    }
+
+    /// `trailingQuietSeconds(threshold:)` over precomputed frames.
+    func trailingQuietSeconds(frames: [Double], threshold: Double) -> Double {
+        quietSeconds(frames: frames, threshold: threshold, fromEnd: true)
+    }
+
+    private func quietSeconds(frames: [Double], threshold: Double, fromEnd: Bool) -> Double {
         guard !frames.isEmpty, let frameLength = quietFrameLength else { return 0 }
         let sampleCount = pcm.count / MemoryLayout<Int16>.size
         let ordered = fromEnd ? Array(frames.reversed()) : frames
@@ -78,7 +88,11 @@ enum CockpitPauseDetector {
     /// whole chunk is quiet (its 95th-percentile frame is within 3x the silence
     /// floor, so there is no speech to measure a pause against).
     static func quietThreshold(for audio: CapturedAudio) -> Double? {
-        let frames = audio.frameRMSValues()
+        quietThreshold(frames: audio.frameRMSValues())
+    }
+
+    /// `quietThreshold(for:)` over a clip's precomputed `frameRMSValues()`.
+    static func quietThreshold(frames: [Double]) -> Double? {
         guard !frames.isEmpty else { return nil }
         let sorted = frames.sorted()
         let n = sorted.count
