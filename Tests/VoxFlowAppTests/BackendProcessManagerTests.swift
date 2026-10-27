@@ -11,6 +11,9 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
     var listeners: [pid_t] = []
     var queriedPorts: [Int] = []
     var commandLines: [pid_t: String] = [:]
+    /// Optional per-PID command lines consumed in order, one per query; once a
+    /// PID's sequence is empty the static `commandLines` entry applies again.
+    var commandLineSequences: [pid_t: [String?]] = [:]
     var queriedCommandLinePIDs: [pid_t] = []
     var pidFile: pid_t?
     var pidFileStamp: String?
@@ -18,7 +21,15 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
     func run(_ process: Process) throws { ranProcesses.append(process) }
     func listeningPIDs(onPort port: Int) -> [pid_t] { queriedPorts.append(port); return listeners }
     func terminate(_ pids: [pid_t], signal: Int32) { terminations.append((pids, signal)) }
-    func commandLine(forPID pid: pid_t) -> String? { queriedCommandLinePIDs.append(pid); return commandLines[pid] }
+    func commandLine(forPID pid: pid_t) -> String? {
+        queriedCommandLinePIDs.append(pid)
+        if var sequence = commandLineSequences[pid], !sequence.isEmpty {
+            let next = sequence.removeFirst()
+            commandLineSequences[pid] = sequence
+            return next
+        }
+        return commandLines[pid]
+    }
     func writePIDFile(_ pid: pid_t, stamp: String) { pidFile = pid; pidFileStamp = stamp }
     func readPIDFile() -> pid_t? { pidFile }
     func removePIDFile() { pidFile = nil; pidFileStamp = nil }
@@ -586,6 +597,32 @@ extension BackendProcessManagerTests {
             runner.commandLines[5555] = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
             manager.startIfNeeded(configuration: Self.portParityTestConfig())
             XCTAssertTrue(runner.terminations.isEmpty, "a reused PID-file PID must never be signalled")
+        }
+    }
+
+    func testSigkillReGateRefusesPIDThatStopsLookingLikeBackend() {
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:8765") { runner, manager in
+            runner.listeners = [5555]
+            runner.pidFile = 5555
+            // Confirmed as a backend at the SIGTERM gate, then the PID is reused
+            // by something else before the SIGKILL re-check.
+            runner.commandLineSequences[5555] = [
+                "/usr/bin/python3 /x/backend/app/server.py",
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            ]
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertEqual(runner.terminations.map(\.signal), [SIGTERM], "SIGKILL must be re-gated on identity")
+        }
+    }
+
+    func testSigkillFollowsSigtermForConfirmedBackend() {
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:8765") { runner, manager in
+            runner.listeners = [5555]
+            runner.pidFile = 5555
+            runner.commandLines[5555] = "/usr/bin/python3 /x/backend/app/server.py"
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertEqual(runner.terminations.map(\.signal), [SIGTERM, SIGKILL])
+            XCTAssertEqual(runner.terminations.map(\.pids), [[5555], [5555]])
         }
     }
 }
