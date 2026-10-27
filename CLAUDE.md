@@ -62,7 +62,7 @@ swift build && swift run VoxFlowLocal      # frontend (requires backend running)
 
 - Swift 6.2 strict concurrency, macOS 14+ deployment target
 - Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.10.0, transformers 5.5.0
-- Health: `curl http://127.0.0.1:8765/v1/health` · Readiness: `curl http://127.0.0.1:8765/v1/ready`
+- Health: `curl http://127.0.0.1:8765/v1/health` · Readiness: `curl -H "X-VoxFlow-Token: $(cat ~/Library/Application\ Support/VoxFlow/backend.token)" http://127.0.0.1:8765/v1/ready`
 
 ### Ollama (text polish)
 
@@ -81,7 +81,9 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | Variable | Purpose | Default |
 |---|---|---|
 | `VOXFLOW_MODELS_DIR` | Pre-downloaded model cache | `./models` |
-| `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself). | `http://127.0.0.1:8765` |
+| `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself), and a non-loopback manual backend is unsupported: it now rejects requests (loopback `Host` only). | `http://127.0.0.1:8765` |
+| `VOXFLOW_API_TOKEN` | Per-launch backend token (`X-VoxFlow-Token`). The app generates one and passes it to the managed backend; a manually run backend generates its own when unset. Scripts fall back to it when no token file exists | generated per launch |
+| `VOXFLOW_TOKEN_DIR` | Directory of the `backend.token` mirror file (mode 0600) that `doctor.sh` and `check_runtime_readiness.sh` read | `~/Library/Application Support/VoxFlow` |
 | `VOXFLOW_STT_BACKEND` | `whisper` / `whisperKit` / `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model id | `openai/whisper-small` |
 | `VOXFLOW_STT_ALLOW_FALLBACK` | Opt-in: let a dead local Whisper fall back to cloud OpenAI STT (sends raw, un-redactable audio). Fail-closed when unset | unset (off) |
