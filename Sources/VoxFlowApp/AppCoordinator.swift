@@ -1097,8 +1097,7 @@ final class AppCoordinator: ObservableObject {
             // Keep its receipt, but never reset a newer capture's UI to idle.
             guard !Task.isCancelled else { return }
             state.statusLine = status
-            state.recordingDuration = 0
-            state.sessionState = .idle
+            Self.finishShortCircuitCapture(state, taskCancelled: false)
             return
         }
         if let skill = resolvedSkill {
@@ -1110,8 +1109,7 @@ final class AppCoordinator: ObservableObject {
                                             sttMs: transcription.processingTimeMs, cleanupMs: 0),
                 policy: .verbatim.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: true))
                     .withCapturedFocus(capturedInsertionFocus).withVoiceActionPermission(capturedVoiceActions))
-            state.recordingDuration = 0
-            state.sessionState = .idle
+            Self.finishShortCircuitCapture(state, taskCancelled: Task.isCancelled)
             return
         }
 
@@ -1141,8 +1139,7 @@ final class AppCoordinator: ObservableObject {
                 policy: .prose.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: false))
                     .withCapturedFocus(capturedInsertionFocus)
             )
-            state.recordingDuration = 0
-            state.sessionState = .idle
+            Self.finishShortCircuitCapture(state, taskCancelled: Task.isCancelled)
             return
         }
 
@@ -1210,6 +1207,15 @@ final class AppCoordinator: ObservableObject {
     /// network failures are NOT cancellation and still surface.
     nonisolated static func isUserCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    /// Action, skill, and snippet captures return straight to idle. A cancelled
+    /// one can finish its insertion wait after a newer capture started, and the
+    /// `.idle` sink would then clear THAT capture's frozen target and permissions.
+    static func finishShortCircuitCapture(_ state: AppState, taskCancelled: Bool) {
+        guard !taskCancelled else { return }
+        state.recordingDuration = 0
+        state.sessionState = .idle
     }
 
     /// Audit reason for a capture-pipeline error that silently DISCARDS a
