@@ -537,7 +537,7 @@ final class BackendAPIClientTests: XCTestCase {
         XCTAssertEqual(log.snapshot, [RequestLog.Entry(path: "/v1/cleanup", token: token)])
     }
 
-    func testNotionAppendNeverSentToUnverifiedListener() async {
+    func testNotionAppendNeverSentWhenListenerStampDiffers() async {
         BackendAuthToken.set(String(repeating: "ab", count: 32), expectedStamp: "S")
         let log = RequestLog()
         stubListener(health: #"{"instance_stamp":"OTHER"}"#, target: "/v1/notion/append",
