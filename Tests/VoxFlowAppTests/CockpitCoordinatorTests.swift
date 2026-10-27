@@ -314,9 +314,25 @@ final class CockpitCoordinatorTests: XCTestCase {
         }
     }
 
-    /// Holds the continuation a suspended drain waits on.
-    private final class ContinuationBox {
-        var continuation: CheckedContinuation<Void, Never>?
+    /// Holds every drain that enters, so a test can count the entries and
+    /// release all of them, including on a failure path, instead of
+    /// orphaning a waiter and hanging the suite.
+    @MainActor
+    private final class DrainGate {
+        private(set) var entries = 0
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        var heldCount: Int { waiters.count }
+
+        func hold() async {
+            entries += 1
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func releaseAll() {
+            let pending = waiters
+            waiters = []
+            pending.forEach { $0.resume() }
+        }
     }
 
     private func makeInsertFixture() -> (CockpitCoordinator, LongFormSessionService, RecordingInsertService) {
@@ -427,31 +443,30 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (coord, sessionService, inserter) = makeInsertFixture()
         sessionService.start()
         sessionService.appendTestChunk("only once")
-        let box = ContinuationBox()
+        let gate = DrainGate()
         coord.drainRecording = {
-            await withCheckedContinuation { box.continuation = $0 }
+            await gate.hold()
             sessionService.stop()
         }
 
         let first = Task { await coord.insertIntoTarget() }
-        let second = Task { await coord.insertIntoTarget() }
-
-        var yields = 0
-        while box.continuation == nil && yields < 10_000 {
-            await Task.yield()
-            yields += 1
+        guard await yieldUntil({ gate.heldCount >= 1 }, "drain never suspended") else {
+            gate.releaseAll(); await first.value; return
         }
-        guard let continuation = box.continuation else {
-            first.cancel(); second.cancel()
-            return XCTFail("drain never suspended")
+        // The second press either returns at the guard or, without it, enters
+        // a second drain. Wait for whichever happens; both are bounded.
+        let secondDone = DoneFlag()
+        let second = Task {
+            await coord.insertIntoTarget()
+            secondDone.isDone = true
         }
-        // Let the second press reach (and be rejected by) the guard while the
-        // first is still draining.
-        for _ in 0..<20 { await Task.yield() }
-        continuation.resume()
+        _ = await yieldUntil(
+            { secondDone.isDone || gate.entries >= 2 }, "second press neither returned nor drained")
+        gate.releaseAll()
         await first.value
         await second.value
 
+        XCTAssertEqual(gate.entries, 1, "a second ⌘↩ while draining must not drain again")
         XCTAssertEqual(inserter.texts, ["only once"])
     }
 

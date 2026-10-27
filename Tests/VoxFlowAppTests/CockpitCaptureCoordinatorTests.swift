@@ -63,9 +63,10 @@ private final class FakeCapture: AudioCapturing {
 }
 
 /// Yields until `condition` holds, a bounded number of times. On exhaustion it
-/// fails the test instead of hanging the suite, and returns false.
+/// fails the test instead of hanging the suite, and returns false. Shared by
+/// the cockpit test files.
 @MainActor
-private func yieldUntil(
+func yieldUntil(
     _ condition: () -> Bool, limit: Int = 10_000, _ message: String,
     file: StaticString = #filePath, line: UInt = #line
 ) async -> Bool {
@@ -76,6 +77,13 @@ private func yieldUntil(
     if condition() { return true }
     XCTFail(message, file: file, line: line)
     return false
+}
+
+/// A completion flag a test task sets after its awaited call returns, so a
+/// test can tell a call that is still waiting from one that returned.
+@MainActor
+final class DoneFlag {
+    var isDone = false
 }
 
 @MainActor
@@ -742,10 +750,17 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
 
         let stop1 = Task { await coord.stopRecording() }
         guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
-        let stop2 = Task { await coord.stopRecording() }
-        for _ in 0..<10 { await Task.yield() }   // let the second stop reach the fence
+        let stop2Done = DoneFlag()
+        let stop2 = Task {
+            await coord.stopRecording()
+            stop2Done.isDone = true
+        }
+        // Give a second stop that wrongly returns early every chance to do so.
+        for _ in 0..<100 where !stop2Done.isDone { await Task.yield() }
+        XCTAssertFalse(stop2Done.isDone, "the second stop must wait for the drain it joined")
         transcriber.releaseNext()
         await stop1.value; await stop2.value
+        XCTAssertTrue(stop2Done.isDone)
 
         let transcript = session.currentSession?.transcript ?? ""
         XCTAssertEqual(occurrences(of: "the tail words", in: transcript), 1)
