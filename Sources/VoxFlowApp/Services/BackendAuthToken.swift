@@ -11,14 +11,48 @@ enum BackendAuthToken {
     /// Request header the backend's trust-boundary middleware checks.
     static let headerName = "X-VoxFlow-Token"
 
-    private static let storage = OSAllocatedUnfairLock<String?>(initialState: nil)
-
-    static func current() -> String? {
-        storage.withLock { $0 }
+    /// The token and, in managed mode, the `instance_stamp` the listener that
+    /// holds it must report. Both live in one lock-guarded value so a reader can
+    /// never see a token paired with a stale stamp.
+    private struct State: Sendable {
+        var token: String?
+        var expectedStamp: String?
+        var rejectionHandler: (@Sendable () -> Void)?
     }
 
-    static func set(_ token: String?) {
-        storage.withLock { $0 = token }
+    private static let storage = OSAllocatedUnfairLock<State>(initialState: State())
+
+    static func current() -> String? {
+        storage.withLock { $0.token }
+    }
+
+    /// The stamp the listener must report before any token-bearing request is
+    /// sent (nil in adopt mode and when no token is held: nothing to verify).
+    static func expectedStamp() -> String? {
+        storage.withLock { $0.expectedStamp }
+    }
+
+    /// Publishes the token. Passing no stamp clears any previous one, so a
+    /// bare `set(token)` (adopt mode, tests) never inherits a stale stamp.
+    /// The rejection handler is independent of the token and is left alone.
+    static func set(_ token: String?, expectedStamp: String? = nil) {
+        storage.withLock {
+            $0.token = token
+            $0.expectedStamp = expectedStamp
+        }
+    }
+
+    /// Registers the reload hook run when a token-bearing request is answered
+    /// 401 (adopt mode re-reads the token file). Pass nil to unregister.
+    static func setRejectionHandler(_ handler: (@Sendable () -> Void)?) {
+        storage.withLock { $0.rejectionHandler = handler }
+    }
+
+    /// Called by `BackendAPIClient` on any 401 to a token-bearing request.
+    /// The handler runs outside the lock so it may call `set` itself.
+    static func tokenRejected() {
+        let handler = storage.withLock { $0.rejectionHandler }
+        handler?()
     }
 
     /// 32 random bytes from the system CSPRNG as 64 lowercase hex characters.

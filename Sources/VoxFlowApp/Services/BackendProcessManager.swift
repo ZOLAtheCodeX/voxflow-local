@@ -261,7 +261,9 @@ final class BackendProcessManager: @unchecked Sendable {
 
     init(runner: BackendProcessRunning = BackendProcessManager.defaultRunner()) {
         self.runner = runner
-        BackendAuthToken.set(apiToken)
+        // The stamp rides with the token so the API client verifies the listener's
+        // /v1/health stamp before any token-bearing request leaves the process.
+        BackendAuthToken.set(apiToken, expectedStamp: instanceStamp)
         workQueue.setSpecific(key: workQueueSpecificKey, value: workQueueSpecificValue)
     }
 

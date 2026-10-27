@@ -41,6 +41,8 @@ class DictationMockURLProtocol: URLProtocol {
 final class DictationWorkflowCoordinatorTests: XCTestCase {
     private var originalSession: URLSession!
     private var originalBaseURL: URL!
+    private var originalAuthToken: String?
+    private var originalAuthStamp: String?
 
     private final class FakeTextInsertionCoordinator: TextInsertionCoordinating {
         var shouldSucceed = true
@@ -85,6 +87,11 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         super.setUp()
         originalSession = BackendAPIClient.session
         originalBaseURL = BackendAPIClient.baseURL
+        // Same hazard as BackendAPIClientTests: a stamp left by an earlier
+        // BackendProcessManager would turn every call into a /v1/health probe.
+        originalAuthToken = BackendAuthToken.current()
+        originalAuthStamp = BackendAuthToken.expectedStamp()
+        BackendAuthToken.set(nil)
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DictationMockURLProtocol.self]
@@ -96,6 +103,7 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         DictationMockURLProtocol.requestHandler = nil
         BackendAPIClient.session = originalSession
         BackendAPIClient.baseURL = originalBaseURL
+        BackendAuthToken.set(originalAuthToken, expectedStamp: originalAuthStamp)
         super.tearDown()
     }
 

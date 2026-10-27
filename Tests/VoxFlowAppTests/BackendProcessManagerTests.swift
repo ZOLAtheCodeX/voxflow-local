@@ -40,14 +40,16 @@ final class BackendProcessManagerTests: XCTestCase {
     // BackendAuthToken is process-global and every BackendProcessManager publishes
     // into it; keep these tests from leaking a token into other test classes.
     private var savedAuthToken: String?
+    private var savedAuthStamp: String?
 
     override func setUp() {
         super.setUp()
         savedAuthToken = BackendAuthToken.current()
+        savedAuthStamp = BackendAuthToken.expectedStamp()
     }
 
     override func tearDown() {
-        BackendAuthToken.set(savedAuthToken)
+        BackendAuthToken.set(savedAuthToken, expectedStamp: savedAuthStamp)
         super.tearDown()
     }
 
@@ -565,6 +567,11 @@ extension BackendProcessManagerTests {
         let manager = BackendProcessManager(runner: BackendProcessRunnerFake())
         XCTAssertTrue(BackendAuthToken.isWellFormed(manager.apiToken))
         XCTAssertEqual(BackendAuthToken.current(), manager.apiToken)
+    }
+
+    func testManagerPublishesItsInstanceStampAsTheExpectedListenerStamp() {
+        let manager = BackendProcessManager(runner: BackendProcessRunnerFake())
+        XCTAssertEqual(BackendAuthToken.expectedStamp(), manager.instanceStamp)
     }
 
     func testEachManagerGetsDistinctToken() {

@@ -3,15 +3,41 @@ import XCTest
 
 final class BackendAuthTokenTests: XCTestCase {
     private var originalToken: String?
+    private var originalStamp: String?
 
     override func setUp() {
         super.setUp()
         originalToken = BackendAuthToken.current()
+        originalStamp = BackendAuthToken.expectedStamp()
     }
 
     override func tearDown() {
-        BackendAuthToken.set(originalToken)
+        BackendAuthToken.set(originalToken, expectedStamp: originalStamp)
+        BackendAuthToken.setRejectionHandler(nil)
         super.tearDown()
+    }
+
+    func testSetStoresStampWithTokenAndBareSetClearsIt() {
+        BackendAuthToken.set("tok", expectedStamp: "stamp-1")
+        XCTAssertEqual(BackendAuthToken.current(), "tok")
+        XCTAssertEqual(BackendAuthToken.expectedStamp(), "stamp-1")
+        BackendAuthToken.set("tok2")
+        XCTAssertEqual(BackendAuthToken.current(), "tok2")
+        XCTAssertNil(BackendAuthToken.expectedStamp(), "a bare set must not inherit a stale stamp")
+        BackendAuthToken.set("tok3", expectedStamp: "stamp-2")
+        BackendAuthToken.set(nil)
+        XCTAssertNil(BackendAuthToken.expectedStamp())
+    }
+
+    func testTokenRejectedInvokesRegisteredHandlerOnly() {
+        BackendAuthToken.tokenRejected()  // no handler: must not crash
+        nonisolated(unsafe) var calls = 0
+        BackendAuthToken.setRejectionHandler { calls += 1 }
+        BackendAuthToken.tokenRejected()
+        XCTAssertEqual(calls, 1)
+        BackendAuthToken.setRejectionHandler(nil)
+        BackendAuthToken.tokenRejected()
+        XCTAssertEqual(calls, 1)
     }
 
     func testGenerateYieldsWellFormedDistinctTokens() {

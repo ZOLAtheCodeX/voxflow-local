@@ -259,7 +259,16 @@ final class AppCoordinator: ObservableObject {
         // generated launch token, so this load, running afterwards, wins.
         if Self.explicitAdoptRequested(ProcessInfo.processInfo.environment),
            Self.loadAdoptedBackendToken(explicitAdopt: true, reader: BackendTokenFile()) == .missing {
-            state.backendReadiness.statusSummary = "Backend token file not found"
+            state.backendReadiness.statusSummary = Self.tokenRejectionStatus(outcome: .missing)
+        }
+        // Adopt mode: the manual backend may restart with a new token at any time,
+        // so any 401 to a token-bearing request re-reads the token file (spec
+        // Decision 8, "again after any 401"). Managed mode registers nothing: its
+        // token is this launch's own and never changes.
+        if Self.explicitAdoptRequested(ProcessInfo.processInfo.environment) {
+            BackendAuthToken.setRejectionHandler {
+                _ = Self.loadAdoptedBackendToken(explicitAdopt: true, reader: BackendTokenFile())
+            }
         }
         beginWarmupMonitoring()
         state.$sessionState
@@ -517,13 +526,9 @@ final class AppCoordinator: ObservableObject {
         }
 
         do {
-            // Probe failed and nothing vouches for the listener: do not send it
-            // the token. Handled below exactly like a failed connection.
-            guard Self.mayQueryReadiness(
-                identityStamp: identityStamp,
-                adoptOverride: Self.adoptForeignBackendOverride,
-                managerOwnsProcess: backendRunning
-            ) else { throw UnverifiedListener() }
+            // ready() verifies the listener's stamp itself before sending the
+            // token; an unverified listener lands in the non-401 branches below
+            // as BackendError.listenerUnverified.
             let readiness = try await BackendAPIClient.ready()
             state.backendReadiness.readyForDictation = readiness.readyForDictation
             state.backendReadiness.warmupInProgress = false
@@ -547,11 +552,15 @@ final class AppCoordinator: ObservableObject {
                 // Verified-ours-or-adopted listener refused the token: surface
                 // it, and in adopt mode re-read the file for the next poll.
                 state.backendReadiness.warmupInProgress = false
-                state.backendReadiness.readinessIssue = "Backend rejected the app's token"
-                state.backendReadiness.statusSummary = "Backend rejected the app's token"
-                _ = Self.loadAdoptedBackendToken(
+                let outcome = Self.loadAdoptedBackendToken(
                     explicitAdopt: Self.explicitAdoptRequested(ProcessInfo.processInfo.environment),
                     reader: BackendTokenFile())
+                let message = Self.tokenRejectionStatus(outcome: outcome)
+                state.backendReadiness.readinessIssue = message
+                state.backendReadiness.statusSummary = message
+                if shouldSurfaceBackendStatusInStatusLine() {
+                    state.statusLine = message
+                }
                 return
             }
             if let startupIssue {
@@ -1262,21 +1271,12 @@ final class AppCoordinator: ObservableObject {
         return .missing
     }
 
-    /// Gate for the token-bearing `/v1/ready` call. Blocked only when the
-    /// identity probe failed (nil stamp) and nothing vouches for the listener:
-    /// no adopt override and no child this manager spawned. A stamp, even a
-    /// foreign one, means the foreign check already ran and decided.
-    nonisolated static func mayQueryReadiness(
-        identityStamp: String?,
-        adoptOverride: Bool,
-        managerOwnsProcess: Bool
-    ) -> Bool {
-        identityStamp != nil || adoptOverride || managerOwnsProcess
+    /// Status text for a token rejection. In adopt mode a missing/malformed token
+    /// file is the likelier cause and says so; otherwise the backend refused a
+    /// token we do hold.
+    nonisolated static func tokenRejectionStatus(outcome: AdoptedTokenOutcome) -> String {
+        outcome == .missing ? "Backend token file not found" : "Backend rejected the app's token"
     }
-
-    /// Thrown inside the readiness `do` when the identity gate blocks `ready()`,
-    /// so the existing non-401 branches handle it like a failed connection.
-    private struct UnverifiedListener: Error {}
 
     /// The backend answered but refused the app's token.
     nonisolated static func isTokenRejection(_ error: Error) -> Bool {

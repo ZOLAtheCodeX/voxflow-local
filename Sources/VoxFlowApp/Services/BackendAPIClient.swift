@@ -195,11 +195,17 @@ struct OllamaModelsResponse: Codable {
 
 enum BackendError: LocalizedError {
     case httpError(statusCode: Int, detail: String)
+    /// The listener on the backend port did not prove it is the backend this
+    /// launch started, so the request was not sent (no token, no body left the
+    /// process).
+    case listenerUnverified
 
     var errorDescription: String? {
         switch self {
         case .httpError(let statusCode, let detail):
             return "Backend error \(statusCode): \(detail)"
+        case .listenerUnverified:
+            return "Backend not verified yet: waiting for the VoxFlow backend"
         }
     }
 }
@@ -243,9 +249,19 @@ enum BackendAPIClient {
         return encoder
     }()
 
-    private static func checkHTTPStatus(_ response: URLResponse, data: Data) throws {
+    /// `tokenBearing` is false for the token-less identity calls: a 401 to one of
+    /// those is not a token rejection and must not trigger the reload hook.
+    private static func checkHTTPStatus(
+        _ response: URLResponse, data: Data, tokenBearing: Bool = true
+    ) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard !(200..<300).contains(http.statusCode) else { return }
+
+        // Adopt mode re-reads the backend's token file after any 401 (the manual
+        // backend may have restarted with a new token).
+        if http.statusCode == 401 && tokenBearing {
+            BackendAuthToken.tokenRejected()
+        }
 
         // Try to extract FastAPI's {"detail": "..."} error body
         let detail: String
@@ -261,9 +277,18 @@ enum BackendAPIClient {
     /// The single place a backend request is built: base URL, method, and the
     /// launch token header when one is held. Callers add their own
     /// `Content-Type`, body, and timeout. Pass `attachToken: false` for calls
-    /// aimed at a listener that has not been verified as ours yet (the
-    /// `/v1/health` identity probe), so the token is never handed to it.
-    private static func makeRequest(path: String, method: String, attachToken: Bool = true) -> URLRequest {
+    /// that must not carry the token (the `/v1/health` identity probe).
+    ///
+    /// Every token-bearing request first proves the listener on the port is the
+    /// backend this launch started (`verifyListener`), so no caller can hand the
+    /// token or a body (Notion tokens, audio) to whatever bound the port. Throws
+    /// `BackendError.listenerUnverified` before anything is sent.
+    private static func makeRequest(
+        path: String, method: String, attachToken: Bool = true
+    ) async throws -> URLRequest {
+        if attachToken {
+            try await verifyListener()
+        }
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = method
         if attachToken, let token = BackendAuthToken.current(), !token.isEmpty {
@@ -272,12 +297,30 @@ enum BackendAPIClient {
         return request
     }
 
+    /// Managed mode publishes the stamp its backend child was launched with;
+    /// require the listener to echo it over `/v1/health` (never with the token).
+    /// Deliberately uncached: the listener can change between any two requests.
+    /// Skipped when no stamp is expected (adopt mode, or no managed backend).
+    /// Cancellation propagates as itself so callers that treat a cancelled call
+    /// as a user cancellation keep doing so.
+    private static func verifyListener() async throws {
+        guard let expected = BackendAuthToken.expectedStamp() else { return }
+        let reported: String
+        do {
+            reported = try await identityProbe()
+        } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            throw BackendError.listenerUnverified
+        }
+        guard reported == expected else { throw BackendError.listenerUnverified }
+    }
+
     private static func performRequest<Response: Decodable, Payload: Encodable>(
         path: String,
         payload: Payload,
         timeoutInterval: TimeInterval? = nil
     ) async throws -> Response {
-        var request = makeRequest(path: path, method: "POST")
+        var request = try await makeRequest(path: path, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(payload)
         if let timeoutInterval {
@@ -294,13 +337,13 @@ enum BackendAPIClient {
         timeoutInterval: TimeInterval? = nil,
         attachToken: Bool = true
     ) async throws -> Response {
-        var request = makeRequest(path: path, method: "GET", attachToken: attachToken)
+        var request = try await makeRequest(path: path, method: "GET", attachToken: attachToken)
         if let timeoutInterval {
             request.timeoutInterval = timeoutInterval
         }
 
         let (data, response) = try await session.data(for: request)
-        try checkHTTPStatus(response, data: data)
+        try checkHTTPStatus(response, data: data, tokenBearing: attachToken)
         return try decoder.decode(Response.self, from: data)
     }
 
@@ -358,7 +401,7 @@ enum BackendAPIClient {
             }
         }
 
-        var request = makeRequest(path: "v1/smart_action", method: "POST")
+        var request = try await makeRequest(path: "v1/smart_action", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(actionId: action.rawValue, transcript: transcript))
 
@@ -383,7 +426,7 @@ enum BackendAPIClient {
         struct Payload: Codable {
             let model: String
         }
-        var request = makeRequest(path: "v1/ollama/pull", method: "POST")
+        var request = try await makeRequest(path: "v1/ollama/pull", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Payload(model: model))
 
@@ -620,7 +663,7 @@ enum BackendAPIClient {
 
     static func providerTest(providerID: String) async throws -> ProviderTestResult {
         struct Request: Encodable { let providerId: String }
-        var request = makeRequest(path: "v1/providers/test", method: "POST")
+        var request = try await makeRequest(path: "v1/providers/test", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(providerId: providerID))
         let (data, response) = try await session.data(for: request)
@@ -631,7 +674,7 @@ enum BackendAPIClient {
     static func notionSearch(query: String, token: String) async throws -> [NotionTarget] {
         struct Request: Encodable { let notionToken: String; let query: String }
         struct Response: Decodable { let results: [NotionTarget] }
-        var request = makeRequest(path: "v1/notion/search", method: "POST")
+        var request = try await makeRequest(path: "v1/notion/search", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(notionToken: token, query: query))
         let (data, response) = try await session.data(for: request)
@@ -642,7 +685,7 @@ enum BackendAPIClient {
     static func notionAppend(pageId: String, text: String, token: String) async throws -> Int {
         struct Request: Encodable { let notionToken: String; let pageId: String; let text: String }
         struct Response: Decodable { let appendedBlocks: Int }
-        var request = makeRequest(path: "v1/notion/append", method: "POST")
+        var request = try await makeRequest(path: "v1/notion/append", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(notionToken: token, pageId: pageId, text: text))
         let (data, response) = try await session.data(for: request)

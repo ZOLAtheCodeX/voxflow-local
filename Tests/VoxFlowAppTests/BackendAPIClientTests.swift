@@ -8,6 +8,10 @@ class MockURLProtocol: URLProtocol {
     /// poller keeps calling /v1/ready through the global session) and is failed
     /// quietly instead of tripping this test's handler assertions.
     nonisolated(unsafe) static var expectedPath: String?
+    /// Multi-path variant for tests that legitimately issue several requests
+    /// (a listener-verification probe plus the call it guards). When set it
+    /// takes precedence over `expectedPath`.
+    nonisolated(unsafe) static var expectedPaths: Set<String>?
 
     override class func canInit(with request: URLRequest) -> Bool {
         return true
@@ -18,7 +22,12 @@ class MockURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        if let expected = MockURLProtocol.expectedPath, request.url?.path != expected {
+        if let allowed = MockURLProtocol.expectedPaths {
+            if !allowed.contains(request.url?.path ?? "") {
+                client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
+                return
+            }
+        } else if let expected = MockURLProtocol.expectedPath, request.url?.path != expected {
             client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
             return
         }
@@ -52,12 +61,18 @@ final class BackendAPIClientTests: XCTestCase {
     private var originalSession: URLSession!
     private var originalBaseURL: URL!
     private var originalToken: String?
+    private var originalStamp: String?
 
     override func setUp() {
         super.setUp()
         originalSession = BackendAPIClient.session
         originalBaseURL = BackendAPIClient.baseURL
         originalToken = BackendAuthToken.current()
+        originalStamp = BackendAuthToken.expectedStamp()
+        // A BackendProcessManager built earlier in the run (AppCoordinator.shared,
+        // other suites) leaves a token AND stamp in the process-global holder; a
+        // stamp would make every token-bearing call here probe /v1/health first.
+        BackendAuthToken.set(nil)
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
@@ -68,9 +83,11 @@ final class BackendAPIClientTests: XCTestCase {
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
         MockURLProtocol.expectedPath = nil
+        MockURLProtocol.expectedPaths = nil
         BackendAPIClient.session = originalSession
         BackendAPIClient.baseURL = originalBaseURL
-        BackendAuthToken.set(originalToken)
+        BackendAuthToken.setRejectionHandler(nil)
+        BackendAuthToken.set(originalToken, expectedStamp: originalStamp)
         super.tearDown()
     }
 
@@ -409,5 +426,227 @@ final class BackendAPIClientTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error thrown: \(error)")
         }
+    }
+
+    // MARK: - Central listener verification
+
+    final class RequestLog: @unchecked Sendable {
+        struct Entry: Equatable { let path: String; let token: String? }
+        private let lock = NSLock()
+        private var entries: [Entry] = []
+        func record(_ request: URLRequest) {
+            lock.lock(); defer { lock.unlock() }
+            entries.append(Entry(path: request.url?.path ?? "",
+                                 token: request.value(forHTTPHeaderField: BackendAuthToken.headerName)))
+        }
+        var snapshot: [Entry] {
+            lock.lock(); defer { lock.unlock() }
+            return entries
+        }
+        func paths() -> [String] { snapshot.map(\.path) }
+    }
+
+    private static let cleanupBody = #"{"output_text":"x","mode_applied":"light","guardrail_triggered":false}"#
+
+    /// Stubs `/v1/health` with `healthStatus`/`healthBody` and `target` with a 200,
+    /// recording every request in order.
+    private func stubListener(
+        health healthBody: String, healthStatus: Int = 200, target: String, targetBody: String,
+        log: RequestLog
+    ) {
+        MockURLProtocol.expectedPaths = ["/v1/health", target]
+        MockURLProtocol.requestHandler = { request in
+            log.record(request)
+            if request.url?.path == "/v1/health" {
+                return (HTTPURLResponse(url: request.url!, statusCode: healthStatus, httpVersion: nil, headerFields: nil)!,
+                        Data(healthBody.utf8))
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(targetBody.utf8))
+        }
+    }
+
+    func testTokenRequestVerifiesListenerStampFirst() async throws {
+        let token = String(repeating: "ab", count: 32)
+        BackendAuthToken.set(token, expectedStamp: "S")
+        let log = RequestLog()
+        stubListener(health: #"{"instance_stamp":"S"}"#, target: "/v1/cleanup", targetBody: Self.cleanupBody, log: log)
+
+        _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+
+        XCTAssertEqual(log.snapshot, [
+            RequestLog.Entry(path: "/v1/health", token: nil),
+            RequestLog.Entry(path: "/v1/cleanup", token: token),
+        ])
+    }
+
+    func testMismatchedStampBlocksRequestWithoutSendingIt() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32), expectedStamp: "S")
+        let log = RequestLog()
+        stubListener(health: #"{"instance_stamp":"OTHER"}"#, target: "/v1/cleanup", targetBody: Self.cleanupBody, log: log)
+
+        do {
+            _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+            XCTFail("Expected listenerUnverified")
+        } catch BackendError.listenerUnverified {
+            // expected
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(log.paths(), ["/v1/health"], "the guarded request must never be sent")
+        XCTAssertNil(log.snapshot.first?.token, "the probe must not carry the token")
+    }
+
+    func testMissingStampInHealthBlocksRequest() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32), expectedStamp: "S")
+        let log = RequestLog()
+        stubListener(health: #"{"status":"ok"}"#, target: "/v1/cleanup", targetBody: Self.cleanupBody, log: log)
+        do {
+            _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+            XCTFail("Expected listenerUnverified")
+        } catch BackendError.listenerUnverified {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(log.paths(), ["/v1/health"])
+    }
+
+    func testFailedProbeBlocksRequestWithoutSendingIt() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32), expectedStamp: "S")
+        let log = RequestLog()
+        stubListener(health: #"{"detail":"boom"}"#, healthStatus: 500, target: "/v1/cleanup",
+                     targetBody: Self.cleanupBody, log: log)
+        do {
+            _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+            XCTFail("Expected listenerUnverified")
+        } catch BackendError.listenerUnverified {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(log.paths(), ["/v1/health"])
+    }
+
+    func testNoExpectedStampSkipsVerification() async throws {
+        let token = String(repeating: "ab", count: 32)
+        BackendAuthToken.set(token)
+        let log = RequestLog()
+        stubListener(health: #"{"instance_stamp":"S"}"#, target: "/v1/cleanup", targetBody: Self.cleanupBody, log: log)
+
+        _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+
+        XCTAssertEqual(log.snapshot, [RequestLog.Entry(path: "/v1/cleanup", token: token)])
+    }
+
+    func testNotionAppendNeverSentToUnverifiedListener() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32), expectedStamp: "S")
+        let log = RequestLog()
+        stubListener(health: #"{"instance_stamp":"OTHER"}"#, target: "/v1/notion/append",
+                     targetBody: #"{"appended_blocks":1}"#, log: log)
+        do {
+            _ = try await BackendAPIClient.notionAppend(pageId: "pg", text: "t", token: "notion-secret")
+            XCTFail("Expected listenerUnverified")
+        } catch BackendError.listenerUnverified {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(log.paths(), ["/v1/health"], "the Notion token must not reach an unverified listener")
+    }
+
+    func testOllamaPullAndReadyAreAlsoVerified() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32), expectedStamp: "S")
+        for target in ["/v1/ollama/pull", "/v1/ready"] {
+            let log = RequestLog()
+            stubListener(health: #"{"instance_stamp":"OTHER"}"#, target: target, targetBody: Self.readyBody, log: log)
+            do {
+                if target == "/v1/ready" {
+                    _ = try await BackendAPIClient.ready()
+                } else {
+                    try await BackendAPIClient.ollamaPull(model: "m", onProgress: { _ in })
+                }
+                XCTFail("Expected listenerUnverified for \(target)")
+            } catch BackendError.listenerUnverified {
+            } catch {
+                XCTFail("Unexpected error for \(target): \(error)")
+            }
+            XCTAssertEqual(log.paths(), ["/v1/health"], "\(target) must not be sent")
+        }
+    }
+
+    func testListenerUnverifiedHasDescription() {
+        XCTAssertEqual(BackendError.listenerUnverified.errorDescription,
+                       "Backend not verified yet: waiting for the VoxFlow backend")
+    }
+
+    // MARK: - 401 reload hook
+
+    final class CallCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func bump() { lock.lock(); count += 1; lock.unlock() }
+        var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    }
+
+    func testRejectionHandlerRunsOnceOnA401() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32))
+        let counter = CallCounter()
+        BackendAuthToken.setRejectionHandler { counter.bump() }
+        MockURLProtocol.expectedPath = "/v1/providers/test"
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"detail":"Missing or invalid token"}"#.utf8))
+        }
+        do {
+            _ = try await BackendAPIClient.providerTest(providerID: "p")
+            XCTFail("Expected 401")
+        } catch BackendError.httpError(let statusCode, _) {
+            XCTAssertEqual(statusCode, 401)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func testRejectionHandlerRunsOnOllamaPull401() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32))
+        let counter = CallCounter()
+        BackendAuthToken.setRejectionHandler { counter.bump() }
+        MockURLProtocol.expectedPath = "/v1/ollama/pull"
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"detail":"Missing or invalid token"}"#.utf8))
+        }
+        _ = try? await BackendAPIClient.ollamaPull(model: "m", onProgress: { _ in })
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func testRejectionHandlerNotRunOnSuccessOrNon401() async throws {
+        BackendAuthToken.set(String(repeating: "ab", count: 32))
+        let counter = CallCounter()
+        BackendAuthToken.setRejectionHandler { counter.bump() }
+        MockURLProtocol.expectedPath = "/v1/providers/test"
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"provider_id":"p","reachable":true,"detail":"ok"}"#.utf8))
+        }
+        _ = try await BackendAPIClient.providerTest(providerID: "p")
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"detail":"Forbidden"}"#.utf8))
+        }
+        _ = try? await BackendAPIClient.providerTest(providerID: "p")
+        XCTAssertEqual(counter.value, 0)
+    }
+
+    func testRejectionHandlerNotRunForTokenlessHealth401() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32))
+        let counter = CallCounter()
+        BackendAuthToken.setRejectionHandler { counter.bump() }
+        MockURLProtocol.expectedPath = "/v1/health"
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
+             Data(#"{"detail":"x"}"#.utf8))
+        }
+        _ = try? await BackendAPIClient.health()
+        XCTAssertEqual(counter.value, 0, "a token-less call cannot be a token rejection")
     }
 }
