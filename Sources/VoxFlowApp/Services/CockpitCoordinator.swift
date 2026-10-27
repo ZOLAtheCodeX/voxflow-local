@@ -45,7 +45,7 @@ final class CockpitCoordinator: ObservableObject {
     var recordingTargetProvider: (@MainActor () -> FocusTargetSnapshot?)?
 
     func recordingTarget() -> FocusTargetSnapshot? {
-        recordingTargetProvider?() ?? nil
+        recordingTargetProvider?()
     }
 
     func requestAssistantHandoff() { onHandoffRequested?() }

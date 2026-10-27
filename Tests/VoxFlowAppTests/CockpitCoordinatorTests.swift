@@ -306,8 +306,10 @@ final class CockpitCoordinatorTests: XCTestCase {
     /// only method for which `TextInsertionCoordinator` skips the pasteboard.
     private final class RecordingInsertService: TextInserting {
         private(set) var texts: [String] = []
+        private(set) var targets: [NSRunningApplication?] = []
         func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
             texts.append(text)
+            targets.append(targetApp)
             return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: false, errorCode: nil)
         }
     }
@@ -351,6 +353,61 @@ final class CockpitCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(inserter.texts, ["first part tail words"])
         XCTAssertEqual(sessionService.state, .idle, "success resets the session")
+    }
+
+    /// A live, identifiable app to use as a frozen-target fixture. The test
+    /// host process itself is not an NSRunningApplication (it is a CLI tool),
+    /// so read-only pick any running app that has a bundle ID. Nothing is
+    /// sent to it: the inserter is a fake.
+    private func liveAppFixture() throws -> (app: NSRunningApplication, bundleID: String) {
+        let found = NSWorkspace.shared.runningApplications.first {
+            $0.bundleIdentifier != nil && !$0.isTerminated && $0.launchDate != nil
+        }
+        guard let app = found, let bundleID = app.bundleIdentifier else {
+            throw XCTSkip("no identifiable running app available")
+        }
+        return (app, bundleID)
+    }
+
+    private func snapshot(of app: NSRunningApplication, bundleID: String) -> FocusTargetSnapshot {
+        FocusTargetSnapshot(
+            hasFocusedTextInput: false,
+            hasInsertionCursor: false,
+            appName: app.localizedName,
+            bundleID: bundleID,
+            role: nil,
+            processIdentifier: app.processIdentifier,
+            launchDate: app.launchDate)
+    }
+
+    /// The pid is live but the frozen bundle ID is not the app's, as with a
+    /// recycled pid. A PID-only reconstruction would hand the live process to
+    /// the inserter; the verified resolver must refuse it.
+    func test_insert_with_mismatched_target_identity_passes_no_target() async throws {
+        let (app, bundleID) = try liveAppFixture()
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start(targetApp: snapshot(of: app, bundleID: bundleID + ".not-this-app"))
+        sessionService.appendTestChunk("verify me")
+        sessionService.stop()
+
+        await coord.insertIntoTarget()
+
+        XCTAssertEqual(inserter.texts, ["verify me"])
+        XCTAssertEqual(inserter.targets.count, 1)
+        XCTAssertNil(inserter.targets[0], "a pid whose bundle does not match must not be targeted")
+    }
+
+    func test_insert_with_matching_target_identity_passes_the_app() async throws {
+        let (app, bundleID) = try liveAppFixture()
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start(targetApp: snapshot(of: app, bundleID: bundleID))
+        sessionService.appendTestChunk("verified")
+        sessionService.stop()
+
+        await coord.insertIntoTarget()
+
+        XCTAssertEqual(inserter.targets.count, 1)
+        XCTAssertEqual(inserter.targets[0]?.processIdentifier, app.processIdentifier)
     }
 
     func test_insert_during_recording_without_drain_inserts_nothing() async {

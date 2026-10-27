@@ -95,6 +95,25 @@ final class ExternalAppTrackerTests: XCTestCase {
             5)
     }
 
+    func test_resolveTarget_nil_actual_launch_date_with_expected_date_is_nil() {
+        let table: [Int32: Facts] = [5: ("com.apple.Notes", nil, false)]
+        XCTAssertNil(ExternalAppTracker.resolveTarget(
+            pid: 5, expectedBundleID: "com.apple.Notes", expectedLaunchDate: t0, lookup: lookup(table)))
+    }
+
+    /// Pins the 1.0 s tolerance from both sides, in both directions.
+    func test_resolveTarget_launch_date_tolerance_is_one_second() {
+        func resolve(offset: TimeInterval) -> Int32? {
+            let table: [Int32: Facts] = [5: ("com.apple.Notes", t0.addingTimeInterval(offset), false)]
+            return ExternalAppTracker.resolveTarget(
+                pid: 5, expectedBundleID: "com.apple.Notes", expectedLaunchDate: t0, lookup: lookup(table))
+        }
+        XCTAssertEqual(resolve(offset: 0.9), 5)
+        XCTAssertEqual(resolve(offset: -0.9), 5)
+        XCTAssertNil(resolve(offset: 1.5))
+        XCTAssertNil(resolve(offset: -1.5))
+    }
+
     // MARK: - currentVerified
 
     func test_currentVerified_returns_identity_only_when_running_and_matching() {
