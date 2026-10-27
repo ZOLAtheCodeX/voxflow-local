@@ -526,6 +526,27 @@ final class BackendAPIClientTests: XCTestCase {
         XCTAssertEqual(log.paths(), ["/v1/health"])
     }
 
+    func testProbeConnectionFailurePropagatesURLErrorWithoutSendingRequest() async {
+        BackendAuthToken.set(String(repeating: "ab", count: 32), expectedStamp: "S")
+        let log = RequestLog()
+        MockURLProtocol.expectedPaths = ["/v1/health", "/v1/cleanup"]
+        MockURLProtocol.requestHandler = { request in
+            log.record(request)
+            if request.url?.path == "/v1/health" { throw URLError(.cannotConnectToHost) }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(Self.cleanupBody.utf8))
+        }
+        do {
+            _ = try await BackendAPIClient.cleanup(sessionID: "s", mode: .light, inputText: "x", toneStyle: .neutral)
+            XCTFail("Expected URLError(.cannotConnectToHost)")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cannotConnectToHost)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(log.paths(), ["/v1/health"], "the guarded request must never be sent")
+    }
+
     func testNoExpectedStampSkipsVerification() async throws {
         let token = String(repeating: "ab", count: 32)
         BackendAuthToken.set(token)

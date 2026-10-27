@@ -221,10 +221,12 @@ async def rate_limit_middleware(
     call_next,
 ):  # type: ignore[no-untyped-def]
     global _LAST_CLEANUP_TIME
-    client = request.client.host if request.client else "unknown"
-    # Every local caller shares 127.0.0.1, so health polling gets its own
-    # bucket and cannot exhaust the budget for authenticated endpoints.
-    bucket = f"health:{client}" if request.url.path == "/v1/health" else client
+    # /v1/health is exempt: the app's per-request identity probe depends on it
+    # and every local caller shares 127.0.0.1, so counting it would let any
+    # other local process starve the probe. Exactly this path, nothing else.
+    if request.url.path == "/v1/health":
+        return await call_next(request)
+    bucket = request.client.host if request.client else "unknown"
     now = time.time()
 
     with _RATE_LIMIT_LOCK:

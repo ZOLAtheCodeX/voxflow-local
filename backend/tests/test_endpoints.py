@@ -219,14 +219,12 @@ class TestTranscribe:
 
 class TestRateLimiting:
     @pytest.mark.anyio
-    async def test_exceeding_limit_returns_429(self, client: httpx.AsyncClient):
-        # Fill up 120 requests
-        for _ in range(120):
-            await client.get("/v1/health")
-
-        # 121st should be rate limited
-        resp = await client.get("/v1/health")
-        assert resp.status_code == 429
+    async def test_health_is_never_rate_limited(self, client: httpx.AsyncClient):
+        # The app's per-request identity probe depends on /v1/health always
+        # answering, so no volume of local callers may starve it.
+        for _ in range(130):
+            assert (await client.get("/v1/health")).status_code == 200
+        assert len(_rate_limit_timestamps) == 0
 
     @pytest.mark.anyio
     async def test_health_traffic_cannot_starve_authenticated_budget(
@@ -234,7 +232,7 @@ class TestRateLimiting:
     ):
         for _ in range(120):
             await client.get("/v1/health")
-        assert (await client.get("/v1/health")).status_code == 429
+        assert (await client.get("/v1/health")).status_code == 200
         assert (await client.get("/v1/ready")).status_code == 200
 
     @pytest.mark.anyio

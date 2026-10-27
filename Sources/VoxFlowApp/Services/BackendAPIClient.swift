@@ -301,15 +301,20 @@ enum BackendAPIClient {
     /// require the listener to echo it over `/v1/health` (never with the token).
     /// Deliberately uncached: the listener can change between any two requests.
     /// Skipped when no stamp is expected (adopt mode, or no managed backend).
-    /// Cancellation propagates as itself so callers that treat a cancelled call
-    /// as a user cancellation keep doing so.
+    /// `URLError`s (including cancellation) propagate as themselves so callers
+    /// keep their cancellation and connection-failure handling.
     private static func verifyListener() async throws {
         guard let expected = BackendAuthToken.expectedStamp() else { return }
         let reported: String
         do {
             reported = try await identityProbe()
         } catch {
-            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            // Transport failures (a dead backend: .cannotConnectToHost, .timedOut,
+            // .networkConnectionLost, cancellation) propagate unchanged so the
+            // capture error handler's stale-readiness recovery still sees them.
+            // Only a listener that answered wrongly (HTTP error, undecodable
+            // body) is "unverified". Either way the guarded request is not sent.
+            if error is CancellationError || error is URLError { throw error }
             throw BackendError.listenerUnverified
         }
         guard reported == expected else { throw BackendError.listenerUnverified }

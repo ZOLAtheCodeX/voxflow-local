@@ -123,9 +123,11 @@ claims were re-checked against the code before inclusion.
    client sees as an HTTP 403 handshake failure (Starlette's TestClient raises
    `WebSocketDisconnect(1008)`).
 3. Rate limiting: requests rejected by the middleware never reach the limiter.
-   Requests to `/v1/health` are counted in their own bucket
+   ~~Requests to `/v1/health` are counted in their own bucket
    (`"health:" + client host`) so even a valid-host, non-browser caller polling
-   it cannot starve the app's authenticated budget.
+   it cannot starve the app's authenticated budget.~~ SUPERSEDED (final
+   re-review N1): `/v1/health` is exempt from the limiter instead.
+   /v1/health is exempt from the limiter: the app's per-request identity probe depends on it (final re-review N1).
 4. Token resolution, in `trust.py`, lazily on first use and cached:
    - `VOXFLOW_API_TOKEN`, if set, must be exactly 64 lowercase hex characters;
      anything else logs an error and raises `SystemExit` at startup.
