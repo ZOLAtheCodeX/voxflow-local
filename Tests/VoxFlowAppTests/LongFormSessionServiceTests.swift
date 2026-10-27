@@ -109,6 +109,20 @@ final class LongFormSessionServiceTests: XCTestCase {
         XCTAssertEqual(service.currentSession?.transcript, "a\n\nb")
     }
 
+    /// A transcript the user cleared to whitespace is empty: the next chunk
+    /// replaces it instead of following a leading blank paragraph.
+    func test_whitespace_only_transcript_is_treated_as_empty() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.setTranscript(" \n\n")
+        service.appendTestChunk("hello", pauseBefore: 3.0)
+        XCTAssertEqual(service.currentSession?.transcript, "hello")
+
+        service.setTranscript("  ")
+        service.appendTestChunk("again")
+        XCTAssertEqual(service.currentSession?.transcript, "again")
+    }
+
     func test_mismatched_session_id_is_ignored() {
         let service = LongFormSessionService(autoSaveDirectory: tempDir())
         service.start()
@@ -226,10 +240,4 @@ final class LongFormSessionServiceTests: XCTestCase {
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(copy).write(to: url, options: .atomic)
     }
-}
-
-private final class TestClock: SessionClock, @unchecked Sendable {
-    private(set) var now: Date = Date(timeIntervalSince1970: 1_000_000)
-    func currentTime() -> Date { now }
-    func advance(by seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
 }

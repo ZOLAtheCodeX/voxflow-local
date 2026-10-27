@@ -10,6 +10,15 @@ final class CockpitPauseDetectorTests: XCTestCase {
         for value in frames { XCTAssertEqual(value, 0.08, accuracy: 0.001) }
     }
 
+    /// Only the final frame can be partial: a 0.05 s quiet tail after loud
+    /// audio is 320 + 320 + 160 samples, and must not count as three full
+    /// frames (0.06 s).
+    func test_trailing_quiet_corrects_for_a_partial_last_frame() {
+        let audio = makeTone([(seconds: 0.5, rms: 0.08), (seconds: 0.05, rms: 0.0)])
+        XCTAssertEqual(audio.frameRMSValues().count, 28)
+        XCTAssertEqual(audio.trailingQuietSeconds(threshold: 0.01), 0.05, accuracy: 0.0001)
+    }
+
     func test_empty_pcm() {
         let audio = CapturedAudio(pcm: Data(), sampleRate: 16_000)
         XCTAssertEqual(audio.frameRMSValues(), [])

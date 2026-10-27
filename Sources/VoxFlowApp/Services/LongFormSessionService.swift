@@ -84,7 +84,9 @@ final class LongFormSessionService: ObservableObject {
         guard case .recording = state,
               let session = currentSession,
               session.id == sessionID else { return }
-        if session.transcript.isEmpty {
+        // A transcript cleared to whitespace counts as empty, so the chunk
+        // does not follow a leading blank paragraph.
+        if session.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentSession?.transcript = chunk
         } else if pauseBefore >= Self.paragraphBreakPause {
             currentSession?.transcript = Self.trimmingTrailingWhitespace(session.transcript) + "\n\n" + chunk
