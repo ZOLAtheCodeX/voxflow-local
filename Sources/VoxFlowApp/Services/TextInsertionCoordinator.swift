@@ -176,7 +176,9 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             audit.recordInsertion(
                 text: text,
                 targetApp: targetApp?.localizedName ?? appName,
-                source: state.statusLine,
+                // Enter's outcome is the receipt's `submission` field; keeping it
+                // out of `source` keeps SourceLabel's "Inserted (…)" parse intact.
+                source: statusSuffix,
                 confidence: state.transcriptCandidate?.confidence,
                 audioSeconds: state.transcriptCandidate?.audioSeconds,
                 rmsEnergy: state.transcriptCandidate?.rmsEnergy,

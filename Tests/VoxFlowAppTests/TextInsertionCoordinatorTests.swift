@@ -47,6 +47,32 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         }
     }
 
+    /// The Enter outcome lives in the receipt's `submission` field. Folding it
+    /// into `source` too ("… — Terminal) · Enter sent") broke SourceLabel's
+    /// "Inserted (…)" parse, so the palette and Dashboard lost the app chip.
+    @MainActor
+    func testSubmissionOutcomeStaysOutOfReceiptSourceLabel() async throws {
+        let state = AppState()
+        let service = ScriptedInsertService()
+        service.result = InsertResult(method: .simulatedPaste, success: true,
+            fallbackUsed: true, errorCode: nil, submission: .enterPosted)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("source-\(UUID()).jsonl")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let coordinator = TextInsertionCoordinator(state: state, insertService: service,
+            audit: InsertionAuditLog(fileURL: file))
+
+        _ = await coordinator.insertText("ls", statusSuffix: "Inserted (raw — Terminal)",
+            targetApp: nil, timing: nil, policy: TextInsertionPolicy.prose.withSubmission(true))
+
+        let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        let source = try XCTUnwrap(row["source"] as? String)
+        XCTAssertEqual(source, "Inserted (raw — Terminal)")
+        XCTAssertEqual(SourceLabel.parse(source).appLabel, "Terminal")
+        XCTAssertEqual(row["submission"] as? String, "enterPosted")
+        XCTAssertEqual(state.statusLine, "Inserted (raw — Terminal) · Enter sent",
+                       "the live status line still tells the user Enter was sent")
+    }
+
     @MainActor
     func testSkillCommandReachesInsertionVerbatimWithTimingReceipt() async throws {
         let state = AppState()
