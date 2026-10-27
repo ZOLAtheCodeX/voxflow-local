@@ -158,12 +158,14 @@ final class CockpitCoordinator: ObservableObject {
         // A chip during recording drains first and acts on the whole drained
         // transcript: transforming the partial text and then recording it
         // would overwrite every chunk appended during the backend await.
-        // Without a clean drain nothing is sent (same soft result as above).
+        // Without a clean drain nothing is sent, and the result carries no
+        // error: the transcript already shows the interruption marker, and
+        // "another action is running" would misstate why nothing happened.
         var source = transcript
         if case .recording = sessionService.state {
             guard let drainRecording, await drainRecording(),
                   let drained = sessionService.currentSession?.transcript else {
-                return SmartActionResult(actionId: action, output: transcript, guardrailTriggered: false, error: "action_in_flight")
+                return SmartActionResult(actionId: action, output: transcript, guardrailTriggered: false, error: nil)
             }
             source = drained
         }

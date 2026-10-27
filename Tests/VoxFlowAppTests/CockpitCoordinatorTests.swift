@@ -679,7 +679,7 @@ final class CockpitCoordinatorTests: XCTestCase {
 
         let received = await backend.received
         XCTAssertTrue(received.isEmpty, "an interrupted drain leaves nothing to transform")
-        XCTAssertEqual(result.error, "action_in_flight")
+        XCTAssertNil(result.error, "no banner: the transcript already shows the interruption marker")
         XCTAssertEqual(sessionService.currentSession?.transcript, "before the change")
         XCTAssertEqual(state.chipInvocationCounts[.memo, default: 0], 0)
         XCTAssertNil(state.smartActionInFlight)
@@ -695,7 +695,7 @@ final class CockpitCoordinatorTests: XCTestCase {
 
         let received = await backend.received
         XCTAssertTrue(received.isEmpty)
-        XCTAssertNotNil(result.error)
+        XCTAssertNil(result.error, "a refused drain is a quiet no-op, not \"another action is running\"")
         XCTAssertEqual(sessionService.currentSession?.transcript, "partial")
     }
 
