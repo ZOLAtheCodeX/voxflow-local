@@ -50,11 +50,11 @@ final class CockpitCaptureCoordinator {
     /// The periodic flush in progress, so a stop can await the chunk it
     /// already cut. Cancelling `loopTask` never cancels this.
     private var flushTask: Task<Void, Never>?
-    /// True from a successful `startCapture` until a `stopCapture` returns
-    /// audio or throws `captureNotRunning`. `stopCapture` is only called while
-    /// it is set, so cleanup never hits `captureNotRunning`. A `deviceChanged`
-    /// throw leaves it set: AudioCaptureService throws before it stops the
-    /// engine.
+    /// True from a successful `startCapture` until ANY `stopCapture` attempt.
+    /// `stopCapture` is only called while it is set, so cleanup never hits
+    /// `captureNotRunning`. A `deviceChanged` throw also clears it: the
+    /// service has already torn the engine down by then, and the audio it
+    /// buffered is salvaged with `takeInvalidatedAudio()`.
     private var captureRunning = false
     private var stopRequested = false
     /// Id of the session this recording belongs to. Chunks, markers and the
@@ -149,15 +149,14 @@ final class CockpitCaptureCoordinator {
     }
 
     /// Stops the engine when it may be running and returns what it buffered.
-    /// AudioCaptureService throws `deviceChanged` before it stops the engine,
-    /// so any failure other than `captureNotRunning` gets one retry, which
-    /// stops it.
+    /// A device change has already stopped the engine and makes `stopCapture`
+    /// throw `deviceChanged` without returning the PCM, so on any failure the
+    /// audio buffered before the change is salvaged instead.
     private func stopEngine() -> CapturedAudio? {
         guard captureRunning else { return nil }
-        defer { captureRunning = false }
+        captureRunning = false
         do { return try capture.stopCapture() }
-        catch AudioCaptureError.captureNotRunning { return nil }
-        catch { return try? capture.stopCapture() }
+        catch { return capture.takeInvalidatedAudio() }
     }
 
     /// Cutoff at the keypress: the tail is taken first, then the periodic
@@ -197,6 +196,8 @@ final class CockpitCaptureCoordinator {
     /// Stop→validate→transcribe→append→restart. Serialized: a second call while
     /// one is in flight is dropped (the timer cadence gates normal flow). The
     /// final tail at stop time is handled by `performStop`, not here.
+    /// Production goes through `periodicFlush()` so a stop can await the chunk
+    /// this cut; direct calls exist for tests with no concurrent stop.
     func flushNow() async {
         guard !isFlushing, !stopRequested, captureRunning,
               case .recording = session.state,
@@ -218,17 +219,16 @@ final class CockpitCaptureCoordinator {
 
         let audio: CapturedAudio
         do {
-            audio = try capture.stopCapture()
             captureRunning = false
+            audio = try capture.stopCapture()
         } catch {
             // Device change (or dead engine) mid-session. The old log-and-return
             // left the session visibly .recording on a DEAD engine — everything
             // spoken afterward was silently lost until the user noticed
             // (session 29 review). End the session cleanly: transcript so far
-            // is preserved into review, and the marker says why. Only
-            // captureNotRunning proves the engine is stopped; for any other
-            // error the cleanup retries the stop and keeps the buffered tail.
-            if case AudioCaptureError.captureNotRunning = error { captureRunning = false }
+            // is preserved into review, and the marker says why. The engine is
+            // already stopped; the cleanup salvages the audio buffered before
+            // the change.
             log.error("stopCapture failed: \(error.localizedDescription)")
             endSessionAfterInterruption(reason: "audio device changed or capture stopped")
             return
@@ -249,9 +249,15 @@ final class CockpitCaptureCoordinator {
         // successfully collected.
         await transcribeAndAppend(audio, force: false)
 
-        if restartFailed {
+        if restartFailed, id == recordingSessionID {
             endSessionAfterInterruption(reason: "microphone restart failed")
         }
+    }
+
+    /// True while `id` is still the recording this coordinator owns and the
+    /// session service still holds that session.
+    private func isCurrentRecording(_ id: UUID?) -> Bool {
+        id == recordingSessionID && session.currentSession?.id == id
     }
 
     private func transcribeAndAppend(_ audio: CapturedAudio, force: Bool) async {
@@ -281,7 +287,7 @@ final class CockpitCaptureCoordinator {
         do {
             let response = try await transcriber.transcribe(audio)
             let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if id == recordingSessionID { consecutiveTranscriptionFailures = 0 }
+            if isCurrentRecording(id) { consecutiveTranscriptionFailures = 0 }
             // Same ingress gate as quick dictation — this path previously
             // bypassed the confidence rules entirely, so every 5 s flush of
             // ambient noise was a ghost-text opportunity (audit cause #5).
@@ -315,7 +321,7 @@ final class CockpitCaptureCoordinator {
             log.error("chunk transcription failed: \(error.localizedDescription)")
             // Late work from a finished recording still keeps its audio, but
             // must not count against, or end, whatever recording is current.
-            let isCurrent = id == recordingSessionID && session.currentSession?.id == id
+            let isCurrent = isCurrentRecording(id)
             if isCurrent { consecutiveTranscriptionFailures += 1 }
             let retained = rejectedAudio?.store(
                 pcm: audio.pcm, sampleRate: audio.sampleRate, reason: "transcription_error")
@@ -347,7 +353,7 @@ final class CockpitCaptureCoordinator {
         var pcm = carryPCM
         carryPCM = Data()
         var sampleRate = AudioCaptureService.targetSampleRate
-        if let stopped = stopEngine() {
+        if let stopped = stopEngine() ?? capture.takeInvalidatedAudio() {
             pcm += stopped.pcm
             sampleRate = stopped.sampleRate
         }

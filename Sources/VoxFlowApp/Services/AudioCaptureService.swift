@@ -135,6 +135,11 @@ final class AudioCaptureService: AudioCapturing {
         // run after startCapture resets this state — the tap closure carries the
         // generation it was installed under and `ingest` drops mismatches.
         var generation: UInt64 = 0
+        // Audio buffered when a device change invalidated the capture. The
+        // buffer itself is wiped by the next startCapture, and stopCapture
+        // throws instead of returning it, so it is parked here for
+        // `takeInvalidatedAudio()` (cockpit salvage). Cleared by startCapture.
+        var invalidatedAudio: CapturedAudio?
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -244,8 +249,21 @@ final class AudioCaptureService: AudioCapturing {
         state.withLock {
             $0.generation &+= 1
             $0.onCaptureLive = nil
+            $0.invalidatedAudio = $0.pcmBuffer.isEmpty ? nil : CapturedAudio(
+                pcm: $0.pcmBuffer,
+                sampleRate: Self.targetSampleRate,
+                bufferLimitReached: $0.bufferLimitReached)
         }
         logger.warning("Audio device configuration changed mid-capture — capture invalidated")
+    }
+
+    /// Returns, once, the audio buffered before a device change invalidated
+    /// the capture (see `handleConfigurationChange`).
+    func takeInvalidatedAudio() -> CapturedAudio? {
+        state.withLock { state in
+            defer { state.invalidatedAudio = nil }
+            return state.invalidatedAudio
+        }
     }
 
     var bufferLimitReached: Bool {
@@ -292,6 +310,7 @@ final class AudioCaptureService: AudioCapturing {
             $0.firstBufferLatencyMs = nil
             $0.lastBufferAt = nil
             $0.onCaptureLive = onCaptureLive
+            $0.invalidatedAudio = nil
             $0.generation &+= 1
             return $0.generation
         }
