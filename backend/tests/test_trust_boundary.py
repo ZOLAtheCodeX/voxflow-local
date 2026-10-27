@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI, WebSocket
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+from api_clients import TEST_API_TOKEN, TEST_BASE_URL, api_client
 from trust import TrustBoundaryMiddleware, resolve_active_token
 
 TOKEN = "ab" * 32
@@ -311,3 +312,49 @@ def test_malformed_token_is_never_logged(caplog):
             resolve_active_token({"VOXFLOW_API_TOKEN": secret})
     assert secret not in caplog.text
     assert caplog.text  # an error was logged
+
+
+# ── Real app wiring ──────────────────────────────────────────────────
+
+
+def test_real_app_rejects_typeless_post_that_used_to_succeed():
+    import server
+
+    c = TestClient(server.app, base_url=TEST_BASE_URL)
+    r = c.post(
+        "/v1/cleanup",
+        content=b'{"session_id":"s","mode":"light","input_text":"x"}',
+        headers={"X-VoxFlow-Token": TEST_API_TOKEN},
+    )
+    assert r.status_code == 415
+
+
+def test_real_app_requires_token_and_keeps_health_open():
+    import server
+
+    c = TestClient(server.app, base_url=TEST_BASE_URL)
+    assert c.get("/v1/ready").status_code == 401
+    assert c.get("/v1/health").status_code == 200
+    assert api_client(server.app).get("/v1/ready").status_code == 200
+
+
+def test_real_app_sends_no_cors_headers():
+    import server
+
+    r = api_client(server.app).get("/v1/health")
+    assert "access-control-allow-origin" not in r.headers
+
+
+def test_ollama_pull_streams_through_middleware(monkeypatch):
+    import server
+    from api import endpoints
+
+    monkeypatch.setattr(endpoints, "probe_ollama_available", lambda force=False: True)
+    monkeypatch.setattr(
+        endpoints,
+        "pull_ollama_model_stream",
+        lambda model: iter([b'{"status":"a"}\n', b'{"status":"b"}\n']),
+    )
+    with api_client(server.app).stream("POST", "/v1/ollama/pull", json={"model": "m"}) as r:
+        assert r.status_code == 200
+        assert [line for line in r.iter_lines() if line] == ['{"status":"a"}', '{"status":"b"}']

@@ -1,6 +1,8 @@
 """Shared pytest configuration for backend tests."""
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # And the app directory, so fixtures can import engines regardless of which
 # test module runs first.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+
+# Trust-boundary test environment. This must run at import time, before any
+# test module imports ``server``: ``trust.active_token`` caches the token on
+# first use. The assignments are unconditional (not ``setdefault``) so a
+# developer's shell token never leaks into tests, and the token directory is a
+# temp dir so tests never touch the real ~/Library/Application Support/VoxFlow.
+os.environ["VOXFLOW_API_TOKEN"] = "ab" * 32
+os.environ["VOXFLOW_TOKEN_DIR"] = tempfile.mkdtemp(prefix="voxflow-token-")
 
 
 @pytest.fixture(params=["asyncio"])

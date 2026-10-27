@@ -10,7 +10,7 @@ os.environ.setdefault("VOXFLOW_MODELS_DIR", "/nonexistent")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 import pytest
-from fastapi.testclient import TestClient
+from api_clients import api_client
 
 import server
 from integrations.notion_rest import NotionError
@@ -18,7 +18,7 @@ from integrations.notion_rest import NotionError
 
 @pytest.fixture
 def client():
-    return TestClient(server.app)
+    return api_client(server.app)
 
 
 def test_search_ok(client, monkeypatch):

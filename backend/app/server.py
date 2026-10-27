@@ -1,7 +1,7 @@
 """VoxFlow Local Backend — composition root.
 
 This module is the FastAPI application entry point. It constructs the
-``app`` object, registers CORS + rate-limit middleware, mounts the API
+``app`` object, registers the trust-boundary + rate-limit middleware, mounts the API
 router from :mod:`api.endpoints`, and re-exports every singleton, helper,
 and type that was historically imported as ``from server import X`` so
 that the 360+ existing tests continue to work without modification.
@@ -16,7 +16,6 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 # ── Re-exports ────────────────────────────────────────────────────────
@@ -108,6 +107,7 @@ from routing import (  # noqa: F401
 )
 
 from smart_actions import SmartActionEngine  # noqa: F401
+from trust import TrustBoundaryMiddleware
 
 from schemas import (  # noqa: F401
     NotionAppendRequest,
@@ -173,14 +173,6 @@ app = FastAPI(
     lifespan=app_lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1", "http://localhost"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
-)
-
 # ── Rate-limit middleware ─────────────────────────────────────────────
 
 _LAST_CLEANUP_TIME = 0.0
@@ -223,6 +215,10 @@ async def rate_limit_middleware(
         valid_timestamps.append(now)
     return await call_next(request)
 
+
+# Added last so it is the outermost middleware: every http and websocket
+# request passes the trust boundary before rate limiting or routing.
+app.add_middleware(TrustBoundaryMiddleware)
 
 app.include_router(api_router)
 

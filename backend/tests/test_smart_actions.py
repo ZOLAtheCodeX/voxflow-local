@@ -144,7 +144,7 @@ def test_pyramid_action_uses_pyramid_prompt():
 
 def test_smart_action_endpoint_memo(monkeypatch):
     """HTTP integration: POST /v1/smart_action with a memo action."""
-    from fastapi.testclient import TestClient
+    from api_clients import api_client
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
     import server
@@ -158,7 +158,7 @@ def test_smart_action_endpoint_memo(monkeypatch):
     # the stub instead of the FLAN-T5/Ollama path during the test.
     monkeypatch.setattr(server.smart_action_engine, "_polish_backend", _StubBackend())
 
-    client = TestClient(server.app)
+    client = api_client(server.app)
     resp = client.post("/v1/smart_action", json={
         "action_id": "memo",
         "transcript": "the data controller has rights under article 15",
@@ -172,12 +172,12 @@ def test_smart_action_endpoint_memo(monkeypatch):
 
 def test_smart_action_endpoint_unknown_returns_passthrough(monkeypatch):
     """Unknown action_id returns the original text with an error tag, not 5xx."""
-    from fastapi.testclient import TestClient
+    from api_clients import api_client
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
     import server
 
-    client = TestClient(server.app)
+    client = api_client(server.app)
     resp = client.post("/v1/smart_action", json={
         "action_id": "bogus-action",
         "transcript": "hello",
@@ -270,12 +270,12 @@ def test_apply_calls_polish_when_backend_does_not_expose_availability():
 def test_smart_action_endpoint_rejects_whitespace_only_transcript():
     """Whitespace-only transcript fails Pydantic validation with 422, not
     a misleading 200 with empty output."""
-    from fastapi.testclient import TestClient
+    from api_clients import api_client
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
     import server
 
-    client = TestClient(server.app)
+    client = api_client(server.app)
     resp = client.post("/v1/smart_action", json={
         "action_id": "memo",
         "transcript": "   \n   ",
@@ -289,7 +289,7 @@ def test_smart_action_endpoint_returns_unavailable_when_chain_floors(monkeypatch
     """HTTP integration: when the chain serves only the regex floor
     (served_by='regex'), the route returns 200 with error='provider_unavailable'
     and output=transcript verbatim — smart actions never insert regex output."""
-    from fastapi.testclient import TestClient
+    from api_clients import api_client
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
     import server
@@ -305,7 +305,7 @@ def test_smart_action_endpoint_returns_unavailable_when_chain_floors(monkeypatch
 
     monkeypatch.setattr(server.smart_action_polish_engine, "run", _floor_run)
 
-    client = TestClient(server.app)
+    client = api_client(server.app)
     resp = client.post("/v1/smart_action", json={
         "action_id": "memo",
         "transcript": "draft memo content",
@@ -322,7 +322,7 @@ def test_smart_action_route_passes_raw_text_to_engine(monkeypatch):
     PolishEngine.run() (cloud yes, local no). Pre-redacting at the route fed
     local Ollama smart actions ``[EMAIL]``/``[PHONE]`` placeholders and degraded
     their output. The engine — and thus a local provider — must see raw text."""
-    from fastapi.testclient import TestClient
+    from api_clients import api_client
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
     import server
@@ -340,7 +340,7 @@ def test_smart_action_route_passes_raw_text_to_engine(monkeypatch):
 
     monkeypatch.setattr(server.smart_action_engine, "_polish_backend", _RecordingLocalChain())
 
-    client = TestClient(server.app)
+    client = api_client(server.app)
     resp = client.post("/v1/smart_action", json={
         "action_id": "memo",
         "transcript": "call me at 555-867-5309 about the GDPR request",
