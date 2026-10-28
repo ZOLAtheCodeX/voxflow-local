@@ -17,7 +17,8 @@ All notable changes to VoxFlow Local are documented here. The format follows
   a decode that went wrong is retried once without the glossary, which had
   made Whisper skip speech at the end of a pause.
 - Whisper's sound labels (`[BLANK_AUDIO]`, `[Silence]`, `(water rushing)`) no
-  longer end up in your text, and room noise alone is never inserted.
+  longer end up in your text, and a chunk of room noise that Whisper only
+  labels is no longer inserted.
 - Cockpit chunks that were rejected but contained speech now keep their
   audio in the rejected-audio folder, so nothing is lost without a trace.
 - Cockpit dictation no longer loses its last words when you stop: stopping

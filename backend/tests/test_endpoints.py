@@ -468,6 +468,7 @@ class TestOpenAISTTFilterParity:
         assert resp.status_code == 200
         assert resp.json()["text"] == expected_text
 
+
 class TestMLSemaphoreAtomicity:
     """Audit S3 verdict: FALSE POSITIVE, pinned here. The endpoints' pattern
     `if sem.locked(): 503` followed by `async with sem:` cannot oversubscribe:

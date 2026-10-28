@@ -80,9 +80,26 @@ _SPACE_RUN_RE = re.compile(r"\s+")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
 
 
+# Sound words that are an annotation even alone ("(laughter)", "*typing*").
+# Everyday words like "static", "running" or "water" count only beside another
+# sound word, so "the (static) variable" and "the *running* total" survive.
+# Mirrors singleSoundAnnotationWords in HallucinationFilter.swift.
+_SINGLE_SOUND_ANNOTATION_WORDS = frozenset({
+    "applause", "barking", "beeping", "blank_audio", "breathing", "buzzing", "chirping",
+    "chuckles", "chuckling", "clacking", "clapping", "clicking", "coughing", "coughs",
+    "footsteps", "gasps", "humming", "inaudible", "laughing", "laughs", "laughter",
+    "mumbling", "music", "noise", "noises", "ringing", "sighs", "silence", "sniffs",
+    "typing", "whispering",
+})
+
+
 def _is_sound_annotation(inner: str) -> bool:
     words = [w for w in re.split(r"[ -]", inner.lower()) if w]
-    return 1 <= len(words) <= 4 and all(w in _SOUND_ANNOTATION_WORDS for w in words)
+    if not 1 <= len(words) <= 4:
+        return False
+    if len(words) == 1:
+        return words[0] in _SINGLE_SOUND_ANNOTATION_WORDS
+    return all(w in _SOUND_ANNOTATION_WORDS for w in words)
 
 
 def strip_non_speech_annotations(text: str) -> str:

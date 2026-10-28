@@ -138,13 +138,32 @@ final class WhisperKitSTTServiceTests: XCTestCase {
         XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: unprompted))
     }
 
-    func testHigherLogProbabilityWinsWhenBothHaveSpeech() {
+    func testFullDecodeBeatsTheTruncatedOneEitherWay() {
         // Probe n6_s3_speech4_noise3: prompted "The vendor is" at lp -0.81.
         let truncated = WhisperKitSTTService.decodeQuality(text: "The vendor is", avgLogprobs: [-0.81])
         let full = WhisperKitSTTService.decodeQuality(
             text: "with an owner and a review date for each one. Second, the vendor", avgLogprobs: [-0.40, -0.65])
         XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: truncated, unprompted: full))
         XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: full, unprompted: truncated))
+    }
+
+    /// Coverage before confidence: an unprompted decode that stopped early (the
+    /// session-29 tail-loss class) must not beat a prompted decode that kept
+    /// every word, however much better its log-probability.
+    func testMoreWordsBeatsABetterLogProbability() {
+        let fullPrompted = WhisperKitSTTService.decodeQuality(
+            text: "with an owner and a review date for each one. Second, the vendor", avgLogprobs: [-1.2, -0.9])
+        let truncatedUnprompted = WhisperKitSTTService.decodeQuality(
+            text: "with an owner", avgLogprobs: [-0.2])
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: fullPrompted, unprompted: truncatedUnprompted))
+    }
+
+    func testEqualWordCountFallsToLogProbabilityAndATieKeepsThePrompt() {
+        let prompted = WhisperKitSTTService.decodeQuality(text: "Draft the HIPAA notice.", avgLogprobs: [-0.9])
+        let better = WhisperKitSTTService.decodeQuality(text: "Draft the hipper notice.", avgLogprobs: [-0.4])
+        let tied = WhisperKitSTTService.decodeQuality(text: "Draft the hipper notice.", avgLogprobs: [-0.9])
+        XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: better))
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: tied))
     }
 
     func testPromptedDecodeIsKeptWhenTheUnpromptedOneHasNoSpeech() {

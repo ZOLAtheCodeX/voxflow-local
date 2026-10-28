@@ -238,6 +238,25 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         await coord.stopRecording()
     }
 
+    /// The ring is shared with quick dictation's forensic clips: noisy rooms
+    /// or breaths can push a quiet chunk past the speech threshold, so one
+    /// recording keeps at most three rejected-chunk clips.
+    func test_rejected_speech_clips_are_capped_per_recording() async {
+        let capture = FakeCapture(nextAudio: makeTone([(seconds: 5.0, rms: 0.08)]))
+        let transcriber = FakeTranscriber()
+        transcriber.texts = Array(repeating: "um", count: 5)
+        transcriber.confidences = Array(repeating: 0.05, count: 5)
+        let wavDir = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-wav-\(UUID().uuidString)")
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        coord.startRecording(targetApp: nil)
+        for _ in 0..<5 { await coord.periodicFlush() }
+        XCTAssertEqual(clips(in: wavDir).count, 3)
+        await coord.stopRecording()
+    }
+
     func test_gate_rejected_noise_chunk_is_not_kept() async {
         let (coord, _, wavDir, _) = makeRetainingCoordinator(
             audio: makeTone([(seconds: 5.0, rms: 0.005)]), text: "(water rushing)", confidence: 0.45)

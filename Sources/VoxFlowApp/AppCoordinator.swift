@@ -953,6 +953,21 @@ final class AppCoordinator: ObservableObject {
 
     /// Audit-log source label for the quick-capture lanes. Single source of
     /// truth so the silence and gate-rejection receipts can't drift apart.
+    /// Quick dictation's admission, in the cockpit's order: the gate judges the
+    /// raw decode (stripping Whisper's non-speech annotations), then the user's
+    /// dictionary applies to the cleaned text. Gating after the dictionary
+    /// deleted dictionary terms written with brackets ("[sic]"). Skills and
+    /// computer actions skip the dictionary.
+    static func admitQuickDictation(
+        recognizedText: String, confidence: Double, audioDurationSeconds: Double,
+        appliesDictionary: Bool, dictionary: (String) -> String
+    ) -> TranscriptGate.Admission {
+        let admission = TranscriptGate.admit(
+            text: recognizedText, confidence: confidence, audioDurationSeconds: audioDurationSeconds)
+        guard case .accepted = admission.verdict, appliesDictionary else { return admission }
+        return TranscriptGate.Admission(verdict: .accepted, text: dictionary(admission.text))
+    }
+
     private static func captureSourceLabel(commandLane: Bool) -> String {
         commandLane ? "command_lane" : "quick_dictation"
     }
@@ -1041,7 +1056,7 @@ final class AppCoordinator: ObservableObject {
             : nil
         // A recognized skill passes the same gate on its original utterance;
         // dictionary corrections cannot turn its name into a different command.
-        let rawText = resolvedSkill == nil && resolvedAction == nil ? cockpitDictionary.apply(to: recognizedText) : recognizedText
+        let appliesDictionary = resolvedSkill == nil && resolvedAction == nil
         lastTranscriptionConfidence = transcription.confidenceEstimate
         lastCaptureAudioStats = (
             audioSeconds: capturedAudio.durationSeconds,
@@ -1054,9 +1069,9 @@ final class AppCoordinator: ObservableObject {
         let secondsSinceLastCapture = lastDecodeAt.map { Date().timeIntervalSince($0) }
         lastDecodeAt = Date()
         #if DEBUG
-        log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        log.info("Transcription: '\(recognizedText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
         #else
-        log.info("Transcription: \(rawText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        log.info("Transcription: \(recognizedText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
         #endif
 
         let audioDurationSec = capturedAudio.durationSeconds
@@ -1064,12 +1079,15 @@ final class AppCoordinator: ObservableObject {
         // Single ingress gate: empty/placeholder, hallucination filter, and the
         // low-confidence rules live in TranscriptGate so every transcript path
         // (quick dictation, cockpit chunks, command lane) applies them identically.
-        // The gate also strips Whisper's non-speech annotations; everything
-        // after it uses `acceptedText`, while the receipt keeps the raw decode.
-        let admission = TranscriptGate.admit(
-            text: rawText,
+        // The gate judges the raw decode and strips Whisper's non-speech
+        // annotations, then the dictionary applies (the cockpit's order);
+        // everything after it uses `acceptedText`, the reject receipt the raw decode.
+        let admission = Self.admitQuickDictation(
+            recognizedText: recognizedText,
             confidence: transcription.confidenceEstimate,
-            audioDurationSeconds: audioDurationSec
+            audioDurationSeconds: audioDurationSec,
+            appliesDictionary: appliesDictionary,
+            dictionary: { [cockpitDictionary] in cockpitDictionary.apply(to: $0) }
         )
         let acceptedText = admission.text
         if case .rejected(let reason) = admission.verdict {
@@ -1084,7 +1102,7 @@ final class AppCoordinator: ObservableObject {
                 reason: reason.rawValue
             )
             insertionAudit.recordRejection(
-                text: rawText,
+                text: recognizedText,
                 reason: reason.rawValue,
                 confidence: transcription.confidenceEstimate,
                 durationSeconds: audioDurationSec,

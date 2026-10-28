@@ -70,11 +70,24 @@ enum HallucinationFilter {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Sound words that are an annotation even alone ("(laughter)",
+    /// "*typing*"). Everyday words like "static", "running" or "water" count
+    /// only beside another sound word, so "the (static) variable" and
+    /// "the *running* total" survive. Mirrors `_SINGLE_SOUND_ANNOTATION_WORDS`.
+    private static let singleSoundAnnotationWords: Set<String> = [
+        "applause", "barking", "beeping", "blank_audio", "breathing", "buzzing", "chirping",
+        "chuckles", "chuckling", "clacking", "clapping", "clicking", "coughing", "coughs",
+        "footsteps", "gasps", "humming", "inaudible", "laughing", "laughs", "laughter",
+        "mumbling", "music", "noise", "noises", "ringing", "sighs", "silence", "sniffs",
+        "typing", "whispering",
+    ]
+
     private static func isSoundAnnotation(_ inner: String) -> Bool {
         let words = inner.lowercased()
             .split(whereSeparator: { $0 == " " || $0 == "-" })
             .map(String.init)
         guard (1...4).contains(words.count) else { return false }
+        if words.count == 1 { return singleSoundAnnotationWords.contains(words[0]) }
         return words.allSatisfy { soundAnnotationWords.contains($0) }
     }
 

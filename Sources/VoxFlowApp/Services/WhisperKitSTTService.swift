@@ -54,24 +54,31 @@ final class WhisperKitSTTService: ChunkTranscribing {
         promptUsed && segmentTemperatures.contains { $0 > 0 }
     }
 
-    /// What the prompt-free retry is judged on: whether real words survive
+    /// What the prompt-free retry is judged on: the words that survive
     /// annotation stripping, then the mean segment log-probability.
     struct DecodeQuality: Equatable {
-        let hasSpeechText: Bool
+        let speechWordCount: Int
         let meanAvgLogprob: Double?
+        var hasSpeechText: Bool { speechWordCount > 0 }
     }
 
     nonisolated static func decodeQuality(text: String, avgLogprobs: [Float]) -> DecodeQuality {
-        let hasSpeech = HallucinationFilter.stripNonSpeechAnnotations(text).contains(where: \.isLetter)
+        let words = HallucinationFilter.stripNonSpeechAnnotations(text)
+            .split(whereSeparator: \.isWhitespace)
+            .filter { $0.contains(where: \.isLetter) }
         let mean = avgLogprobs.isEmpty
             ? nil : avgLogprobs.reduce(0.0) { $0 + Double($1) } / Double(avgLogprobs.count)
-        return DecodeQuality(hasSpeechText: hasSpeech, meanAvgLogprob: mean)
+        return DecodeQuality(speechWordCount: words.count, meanAvgLogprob: mean)
     }
 
-    /// Real words beat none; otherwise the higher mean log-probability wins,
-    /// and a tie keeps the prompted decode (it carries the spelling bias).
+    /// Coverage first: more real words win, so a decode that skipped or
+    /// stopped early loses whichever side it is on. Only an equal word count
+    /// falls to the higher mean log-probability, and a tie keeps the prompted
+    /// decode (it carries the spelling bias).
     nonisolated static func prefersUnprompted(prompted: DecodeQuality, unprompted: DecodeQuality) -> Bool {
-        if prompted.hasSpeechText != unprompted.hasSpeechText { return unprompted.hasSpeechText }
+        if prompted.speechWordCount != unprompted.speechWordCount {
+            return unprompted.speechWordCount > prompted.speechWordCount
+        }
         return (unprompted.meanAvgLogprob ?? -.infinity) > (prompted.meanAvgLogprob ?? -.infinity)
     }
 

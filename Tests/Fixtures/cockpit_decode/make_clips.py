@@ -1,3 +1,17 @@
+"""Generate the cockpit decode probe clips.
+
+Usage: python make_clips.py <speech.wav> <out_dir>
+<speech.wav> is 16 kHz mono s16 `say` output of: "The quarterly review covers three
+areas. First, the governance program now tracks every model in production, with an
+owner and a review date for each one. Second, the vendor assessments moved from
+spreadsheets into a shared register, which cut the turnaround from two weeks to
+four days." (macOS default voice, then ffmpeg -ac 1 -ar 16000 -sample_fmt s16).
+
+Committed fixtures, renamed from this script's outputs:
+  speech_then_quiet_normal.wav = n4_s8_speech4_noise3.wav
+  speech_then_quiet_weak.wav   = n6_s3_speech4_noise3.wav
+  room_noise_6s.wav            = n4_noise_6s.wav
+"""
 import sys, wave, numpy as np
 src, out = sys.argv[1], sys.argv[2]
 rng = np.random.default_rng(7)
