@@ -53,6 +53,18 @@ struct CommandPaletteView: View {
 
             lastCaptureRow
 
+            SkillProfileMenu(store: coordinator.skillProfiles)
+                .font(VF.captionFont)
+                .padding(.horizontal, VF.spacingLarge)
+            VoiceActionModeMenu(settings: coordinator.computerActionSettings, selectMode: coordinator.selectVoiceActionMode)
+                .font(VF.captionFont)
+                .padding(.horizontal, VF.spacingLarge)
+
+            Text("Automatic Enter: \(state.autoSubmitMode.displayName)")
+                .font(VF.captionFont)
+                .foregroundStyle(state.autoSubmitMode == .off ? .secondary : VF.colorWarning)
+                .padding(.horizontal, VF.spacingLarge)
+
             footerBar
         }
         .padding(.vertical, VF.spacingMedium)

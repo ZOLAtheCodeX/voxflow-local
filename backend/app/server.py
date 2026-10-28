@@ -1,7 +1,7 @@
 """VoxFlow Local Backend — composition root.
 
 This module is the FastAPI application entry point. It constructs the
-``app`` object, registers CORS + rate-limit middleware, mounts the API
+``app`` object, registers the trust-boundary + rate-limit middleware, mounts the API
 router from :mod:`api.endpoints`, and re-exports every singleton, helper,
 and type that was historically imported as ``from server import X`` so
 that the 360+ existing tests continue to work without modification.
@@ -9,6 +9,7 @@ that the 360+ existing tests continue to work without modification.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Mapping
@@ -16,7 +17,6 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 # ── Re-exports ────────────────────────────────────────────────────────
@@ -108,6 +108,8 @@ from routing import (  # noqa: F401
 )
 
 from smart_actions import SmartActionEngine  # noqa: F401
+from token_file import remove_token_file, token_file_path, write_token_file
+from trust import TrustBoundaryMiddleware, active_token
 
 from schemas import (  # noqa: F401
     NotionAppendRequest,
@@ -161,24 +163,51 @@ from api.endpoints import (  # noqa: E402, F401
 # ── Application setup ────────────────────────────────────────────────
 
 
+logger = logging.getLogger("voxflow")
+
+
+def _resolve_token_path():  # type: ignore[no-untyped-def]
+    """Where to mirror the token, or ``None`` to skip the mirror.
+
+    The mirror is a convenience for scripts and adopt mode; failing to resolve
+    its path must never stop the backend. An empty ``HOME`` with no
+    ``VOXFLOW_TOKEN_DIR`` would resolve to ``/Library/...`` (``Path.home()``
+    of an empty HOME is ``/``), so it is refused rather than written.
+    """
+    try:
+        if not os.environ.get("VOXFLOW_TOKEN_DIR") and not os.environ.get("HOME"):
+            logger.warning(
+                "HOME is empty and VOXFLOW_TOKEN_DIR is unset; "
+                "not writing the backend token file"
+            )
+            return None
+        return token_file_path()
+    except (RuntimeError, OSError) as exc:
+        logger.warning("Cannot resolve the backend token file path (%s); skipping it", exc)
+        return None
+
+
 @asynccontextmanager
 async def app_lifespan(_: FastAPI):
-    initialize_runtime_state()
-    yield
+    # Resolving the token here makes a malformed VOXFLOW_API_TOKEN stop the
+    # backend at startup (SystemExit propagates) instead of failing each request.
+    token = active_token()
+    token_path = _resolve_token_path()
+    token_identity = (
+        write_token_file(token, token_path) if token_path is not None else None
+    )
+    try:
+        initialize_runtime_state()
+        yield
+    finally:
+        if token_identity is not None:
+            remove_token_file(token_path, token_identity)
 
 
 app = FastAPI(
     title="VoxFlow Local Backend",
     version="0.1.0",
     lifespan=app_lifespan,
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1", "http://localhost"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
 )
 
 # ── Rate-limit middleware ─────────────────────────────────────────────
@@ -192,7 +221,12 @@ async def rate_limit_middleware(
     call_next,
 ):  # type: ignore[no-untyped-def]
     global _LAST_CLEANUP_TIME
-    client = request.client.host if request.client else "unknown"
+    # /v1/health is exempt: the app's per-request identity probe depends on it
+    # and every local caller shares 127.0.0.1, so counting it would let any
+    # other local process starve the probe. Exactly this path, nothing else.
+    if request.url.path == "/v1/health":
+        return await call_next(request)
+    bucket = request.client.host if request.client else "unknown"
     now = time.time()
 
     with _RATE_LIMIT_LOCK:
@@ -208,11 +242,11 @@ async def rate_limit_middleware(
                 _rate_limit_timestamps.pop(ip, None)
             _LAST_CLEANUP_TIME = now
 
-        timestamps = _rate_limit_timestamps[client]
+        timestamps = _rate_limit_timestamps[bucket]
         valid_timestamps = [
             ts for ts in timestamps if now - ts < _RATE_LIMIT_WINDOW
         ]
-        _rate_limit_timestamps[client] = valid_timestamps
+        _rate_limit_timestamps[bucket] = valid_timestamps
 
         if len(valid_timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
             return JSONResponse(
@@ -224,6 +258,10 @@ async def rate_limit_middleware(
     return await call_next(request)
 
 
+# Added last so it is the outermost middleware: every http and websocket
+# request passes the trust boundary before rate limiting or routing.
+app.add_middleware(TrustBoundaryMiddleware)
+
 app.include_router(api_router)
 
 
@@ -232,8 +270,9 @@ def _is_loopback_host(host: str) -> bool:
 
     Literal forms only, matching the Swift launcher's whitelist
     (``BackendEndpoint.isLoopback``) — a hosts-file alias that RESOLVES to
-    loopback is still refused here (no DNS at bind time); use
-    ``scripts/run_backend.sh`` for exotic hosts.
+    loopback is still refused here (no DNS at bind time). A backend run by hand
+    must still be addressed as ``127.0.0.1``, ``localhost`` or ``[::1]``: the
+    Host-header check rejects any other name.
     """
     if host.lower() == "localhost":
         return True
@@ -285,8 +324,8 @@ def resolve_bind_host_port(env: Mapping[str, str] | None = None) -> tuple[str, i
     if not _is_loopback_host(host):
         raise SystemExit(
             f"refusing to bind non-loopback host {host!r}: the managed spawn "
-            "binds loopback only. Run the backend yourself "
-            "(scripts/run_backend.sh) for a custom host."
+            "binds loopback only, and a manually run backend must still be "
+            "addressed as 127.0.0.1, localhost, or [::1]."
         )
     return host, port
 

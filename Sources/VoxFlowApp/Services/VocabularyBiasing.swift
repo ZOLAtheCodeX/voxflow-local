@@ -23,7 +23,8 @@ enum VocabularyBiasing {
     static func terms(from entries: [DictionaryEntry]) -> [String] {
         var seen = Set<String>()
         var result: [String] = []
-        for entry in entries {
+        let ordered = entries.filter { $0.prioritized == true } + entries.filter { $0.prioritized != true }
+        for entry in ordered {
             let term = entry.right.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !term.isEmpty, seen.insert(term.lowercased()).inserted else { continue }
             result.append(term)

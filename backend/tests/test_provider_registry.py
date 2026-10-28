@@ -161,11 +161,10 @@ class TestProvidersTestEndpoint:
 
     @pytest.fixture()
     def client(self):
-        import httpx
         import server
+        from api_clients import async_api_client
 
-        transport = httpx.ASGITransport(app=server.app)
-        return httpx.AsyncClient(transport=transport, base_url="http://testserver")
+        return async_api_client(server.app)
 
     @pytest.mark.anyio
     async def test_unknown_provider_returns_404(self, client):

@@ -41,6 +41,8 @@ class DictationMockURLProtocol: URLProtocol {
 final class DictationWorkflowCoordinatorTests: XCTestCase {
     private var originalSession: URLSession!
     private var originalBaseURL: URL!
+    private var originalAuthToken: String?
+    private var originalAuthStamp: String?
 
     private final class FakeTextInsertionCoordinator: TextInsertionCoordinating {
         var shouldSucceed = true
@@ -56,6 +58,13 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         }
 
         var lastTiming: InsertTimingContext?
+        var lastPolicy: TextInsertionPolicy?
+
+        func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?,
+                        timing: InsertTimingContext?, policy: TextInsertionPolicy) -> Bool {
+            lastPolicy = policy
+            return insertText(text, statusSuffix: statusSuffix, targetApp: targetApp, timing: timing)
+        }
 
         func insertText(_ text: String, statusSuffix: String, targetApp: NSRunningApplication?, timing: InsertTimingContext?) -> Bool {
             lastTiming = timing
@@ -78,6 +87,11 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         super.setUp()
         originalSession = BackendAPIClient.session
         originalBaseURL = BackendAPIClient.baseURL
+        // Same hazard as BackendAPIClientTests: a stamp left by an earlier
+        // BackendProcessManager would turn every call into a /v1/health probe.
+        originalAuthToken = BackendAuthToken.current()
+        originalAuthStamp = BackendAuthToken.expectedStamp()
+        BackendAuthToken.set(nil)
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [DictationMockURLProtocol.self]
@@ -89,6 +103,7 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         DictationMockURLProtocol.requestHandler = nil
         BackendAPIClient.session = originalSession
         BackendAPIClient.baseURL = originalBaseURL
+        BackendAuthToken.set(originalAuthToken, expectedStamp: originalAuthStamp)
         super.tearDown()
     }
 
@@ -128,6 +143,42 @@ final class DictationWorkflowCoordinatorTests: XCTestCase {
         let timing = try XCTUnwrap(textInsertion.lastTiming)
         XCTAssertEqual(timing.sttMs, 500)
         XCTAssertNotNil(timing.cleanupMs)
+    }
+
+    @MainActor func testAutomaticEnterUsesCapturedChoiceForRawAndCleanedDictation() async throws {
+        for behavior: InsertBehavior in [.autoInsertRaw, .autoInsertLight] {
+            for capturedChoice in [false, true] {
+                let (sut, state, insertion, _) = makeSUT()
+                state.backendReadiness.readyForDictation = false
+                // A later setting edit must not turn an earlier capture into
+                // a submission that the user had not selected at capture start.
+                state.autoSubmitMode = capturedChoice ? .off : .both
+                var request = DictationWorkflowRequest(
+                    sessionID: "submission-snapshot", rawText: "Schedule the meeting tomorrow",
+                    providerMode: .localOnly, consentToken: nil, allowRaw: false,
+                    toneStyle: .neutral, insertBehavior: behavior, sttBackend: .whisperKit,
+                    lastTranscriptionConfidence: 0.95, targetApp: nil)
+                request.autoSubmit = capturedChoice
+                try await sut.processDictation(request) { _, _, _ in }
+                XCTAssertEqual(insertion.insertCallCount, 1)
+                XCTAssertEqual(insertion.lastPolicy?.submits, capturedChoice)
+                XCTAssertEqual(insertion.lastPolicy?.isVerbatim, false)
+            }
+        }
+    }
+
+    @MainActor func testAutomaticEnterDoesNotBypassAnExplicitReviewMode() async throws {
+        let (sut, state, insertion, _) = makeSUT()
+        state.backendReadiness.readyForDictation = false
+        var request = DictationWorkflowRequest(
+            sessionID: "submission-review", rawText: "Schedule the meeting tomorrow",
+            providerMode: .localOnly, consentToken: nil, allowRaw: false,
+            toneStyle: .neutral, insertBehavior: .alwaysReview, sttBackend: .whisperKit,
+            lastTranscriptionConfidence: 0.95, targetApp: nil)
+        request.autoSubmit = true
+        try await sut.processDictation(request) { _, _, _ in }
+        XCTAssertEqual(insertion.insertCallCount, 0)
+        XCTAssertEqual(state.sessionState, .review)
     }
 
     /// Rules-only polish (Settings → "Local rules only"): the backend would

@@ -65,6 +65,54 @@ final class AudioCaptureIngestTests: XCTestCase {
         XCTAssertNil(state.firstBufferLatencyMs, "stale callback must not poison the latency receipt")
     }
 
+    // MARK: - Device-change salvage
+
+    /// The real service's salvage, without a microphone: invalidation parks
+    /// exactly the buffered PCM, retires the generation so a late tap block
+    /// cannot append to it, and the take returns it once.
+    func testInvalidationParksTheBufferedAudioForOneTake() {
+        var state = makeState(generation: 4)
+        state.onCaptureLive = {}
+        let pcm = Data([1, 2, 3, 4, 5, 6])
+        _ = AudioCaptureService.ingest(state: &state, chunk: pcm, generation: 4)
+
+        AudioCaptureService.invalidate(state: &state)
+
+        XCTAssertEqual(state.generation, 5)
+        XCTAssertNil(state.onCaptureLive)
+        XCTAssertNil(AudioCaptureService.ingest(state: &state, chunk: Data([9, 9]), generation: 4))
+        let taken = AudioCaptureService.takeInvalidatedAudio(state: &state)
+        XCTAssertEqual(taken?.pcm, pcm)
+        XCTAssertEqual(taken?.sampleRate, AudioCaptureService.targetSampleRate)
+        XCTAssertNil(AudioCaptureService.takeInvalidatedAudio(state: &state), "the audio is returned once")
+    }
+
+    func testInvalidationWithNothingBufferedParksNothing() {
+        var state = makeState(generation: 1)
+        AudioCaptureService.invalidate(state: &state)
+        XCTAssertNil(AudioCaptureService.takeInvalidatedAudio(state: &state))
+    }
+
+    func testInvalidationKeepsTheBufferLimitFlag() {
+        var state = makeState(generation: 1)
+        state.pcmBuffer = Data([1, 2])
+        state.bufferLimitReached = true
+        AudioCaptureService.invalidate(state: &state)
+        XCTAssertEqual(AudioCaptureService.takeInvalidatedAudio(state: &state)?.bufferLimitReached, true)
+    }
+
+    func testRestartClearsParkedAudio() {
+        var state = makeState(generation: 1)
+        state.pcmBuffer = Data([7, 7])
+        AudioCaptureService.invalidate(state: &state)
+
+        let generation = AudioCaptureService.resetForCapture(state: &state, onCaptureLive: nil)
+
+        XCTAssertNil(AudioCaptureService.takeInvalidatedAudio(state: &state), "a fresh start drops the old audio")
+        XCTAssertTrue(state.pcmBuffer.isEmpty)
+        XCTAssertEqual(generation, state.generation)
+    }
+
     func testBufferLimitFlagsAndStopsAppending() {
         var state = makeState(generation: 1)
         state.pcmBuffer = Data([0, 0, 0, 0])

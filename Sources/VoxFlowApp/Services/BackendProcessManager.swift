@@ -119,6 +119,22 @@ final class BackendProcessManager: @unchecked Sendable {
     /// app undetected) and gets replaced.
     let instanceStamp = UUID().uuidString
 
+    /// Per-app-launch API token. Passed to every backend spawn as
+    /// VOXFLOW_API_TOKEN (so a restart or crash-relaunch keeps the same token
+    /// the client already holds) and published to `BackendAuthToken` for the
+    /// API clients. Never logged.
+    let apiToken = BackendAuthToken.generate()
+
+    /// Pure identity gate for port reaping: of the PIDs listening on the port,
+    /// keep only `ownPID` and only when its command line is a VoxFlow backend.
+    /// `ownPID` may come from the in-memory spawn or from the PID file; either
+    /// can be stale (PID reuse), so the command line is the confirmation.
+    nonisolated static func ownedListenerPIDs(
+        _ listening: [pid_t], ownPID: pid_t, commandLine: (pid_t) -> String?
+    ) -> [pid_t] {
+        listening.filter { $0 == ownPID && isVoxFlowBackendCommand(commandLine($0)) }
+    }
+
     /// Pure verdict: a responder is foreign when this manager does NOT own
     /// a running child and the echoed stamp differs (absent counts as
     /// differing — pre-stamp backends are by definition stale).
@@ -147,8 +163,6 @@ final class BackendProcessManager: @unchecked Sendable {
         )
     }
 
-    /// Terminate whatever is listening on the backend port (SIGTERM). Only
-    /// called after a foreign verdict; never signals our own process.
     /// True when a process command line identifies a VoxFlow backend — the
     /// managed spawn (`python …/backend/app/server.py`) or a manually-run
     /// `uvicorn server:app` (dev flow). Used to refuse terminating unrelated
@@ -158,6 +172,8 @@ final class BackendProcessManager: @unchecked Sendable {
         return command.contains("backend/app/server.py") || command.contains("server:app")
     }
 
+    /// Terminate whatever is listening on the backend port (SIGTERM). Only
+    /// called after a foreign verdict; never signals our own process.
     func terminateForeignListenerAsync(port: Int = BackendProcessManager.defaultBackendPort) {
         workQueue.async { [runner, log] in
             let ownPid = ProcessInfo.processInfo.processIdentifier
@@ -245,6 +261,9 @@ final class BackendProcessManager: @unchecked Sendable {
 
     init(runner: BackendProcessRunning = BackendProcessManager.defaultRunner()) {
         self.runner = runner
+        // The stamp rides with the token so the API client verifies the listener's
+        // /v1/health stamp before any token-bearing request leaves the process.
+        BackendAuthToken.set(apiToken, expectedStamp: instanceStamp)
         workQueue.setSpecific(key: workQueueSpecificKey, value: workQueueSpecificValue)
     }
 
@@ -337,7 +356,7 @@ final class BackendProcessManager: @unchecked Sendable {
         // socket). Either means "talk to a backend I run myself" — run it
         // manually (adopt-foreign) instead.
         guard endpoint.isManagedSpawnEligible else {
-            let issue = "Refusing to spawn a managed backend for \(endpoint.url.absoluteString) — managed spawn supports only a plain-HTTP loopback URL; run the backend yourself for a custom host or TLS"
+            let issue = "Refusing to spawn a managed backend for \(endpoint.url.absoluteString) — managed spawn supports only a plain-HTTP loopback URL. A backend you run yourself must still be addressed as 127.0.0.1, localhost, or [::1]"
             log.error("\(issue)")
             _lastStartupFailureReason = issue
             process = nil
@@ -593,6 +612,12 @@ final class BackendProcessManager: @unchecked Sendable {
         }
         environment["PYTHONUNBUFFERED"] = "1"
         environment["VOXFLOW_INSTANCE_STAMP"] = instanceStamp
+        environment["VOXFLOW_API_TOKEN"] = apiToken
+        // The backend publishes its token file under this directory; forward the
+        // override so the app (adopt mode, scripts) and the child agree on it.
+        if let tokenDir = inherited["VOXFLOW_TOKEN_DIR"], !tokenDir.isEmpty {
+            environment["VOXFLOW_TOKEN_DIR"] = tokenDir
+        }
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment["VOXFLOW_OFFLINE"] = "1"
         // Tell the spawned uvicorn exactly where to bind so the client URL, the
@@ -703,15 +728,17 @@ final class BackendProcessManager: @unchecked Sendable {
         pids.removeAll { $0 == getpid() }
         guard !pids.isEmpty else { return true }
 
-        // Only kill PIDs that we previously spawned (in-memory or from PID file).
-        // If an unknown process holds the port, log a warning and fail rather than force-killing.
+        // Only kill a PID that we previously spawned (in-memory or from PID file)
+        // AND whose command line is still a VoxFlow backend: a PID-file entry can
+        // outlive its process and be reused by an unrelated program that now holds
+        // the port. Anything else is refused and logged, never signalled.
         let stalePID = runner.readPIDFile()
         if let ownPID = lastSpawnedPID ?? stalePID {
-            let ownPIDs = pids.filter { $0 == ownPID }
-            let foreignPIDs = pids.filter { $0 != ownPID }
+            let ownPIDs = Self.ownedListenerPIDs(pids, ownPID: ownPID, commandLine: runner.commandLine(forPID:))
+            let foreignPIDs = pids.filter { !ownPIDs.contains($0) }
 
             if !foreignPIDs.isEmpty {
-                log.warning("Port \(port) held by unknown process(es): \(foreignPIDs). Not killing.")
+                log.warning("Port \(port) held by unknown or unconfirmed process(es): \(foreignPIDs). Not killing.")
             }
 
             if !ownPIDs.isEmpty {
@@ -719,8 +746,10 @@ final class BackendProcessManager: @unchecked Sendable {
                 runner.terminate(ownPIDs, signal: SIGTERM)
                 usleep(400_000)
 
-                // Check again — force-kill only our own PID if still alive
-                let remaining = runner.listeningPIDs(onPort: port).filter { $0 == ownPID }
+                // Check again; force-kill only our own PID, re-confirmed by command
+                // line, if it is still alive.
+                let remaining = Self.ownedListenerPIDs(
+                    runner.listeningPIDs(onPort: port), ownPID: ownPID, commandLine: runner.commandLine(forPID:))
                 if !remaining.isEmpty {
                     runner.terminate(remaining, signal: SIGKILL)
                     usleep(250_000)
@@ -738,9 +767,10 @@ final class BackendProcessManager: @unchecked Sendable {
     // MARK: - PID file persistence
     //
     // Format: first line = pid, second line = the spawning session's instance
-    // stamp. The stamp lets the stale reaper verify (via /v1/health) that the
-    // file still describes the live backend before SIGTERM. Legacy bare-pid
-    // files (no stamp line) parse fine and skip the stamp check.
+    // stamp. `killStaleBackend` checks the pid's command line, then compares the
+    // recorded stamp with this process's `spawnedSessionStamp` (no /v1/health
+    // probe) so it never kills another session's backend. Legacy bare-pid files
+    // (no stamp line) parse fine and skip the stamp check.
 
     /// Pure encoder — kept separate so the format is unit-testable without
     /// touching the real PID file (tests must never do that).

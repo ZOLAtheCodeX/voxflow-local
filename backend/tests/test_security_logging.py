@@ -31,13 +31,13 @@ for module_name in (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 import httpx
+from api_clients import async_api_client
 from server import STTExecutionResult, app, provider_router
 
 @pytest.fixture()
 async def client():
     """Create a fresh async httpx client against the FastAPI app."""
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+    async with async_api_client(app) as c:
         yield c
 
 class TestSecurityLogging:

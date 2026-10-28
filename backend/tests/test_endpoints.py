@@ -24,14 +24,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import httpx
 import server
 
+from api_clients import async_api_client
 from server import _rate_limit_timestamps, app
 
 
 @pytest.fixture()
 async def client():
     """Create a fresh async httpx client against the FastAPI app."""
-    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+    async with async_api_client(app) as c:
         yield c
 
 
@@ -219,21 +219,43 @@ class TestTranscribe:
 
 class TestRateLimiting:
     @pytest.mark.anyio
-    async def test_exceeding_limit_returns_429(self, client: httpx.AsyncClient):
-        # Fill up 120 requests
+    async def test_health_is_never_rate_limited(self, client: httpx.AsyncClient):
+        # The app's per-request identity probe depends on /v1/health always
+        # answering, so no volume of local callers may starve it.
+        for _ in range(130):
+            assert (await client.get("/v1/health")).status_code == 200
+        assert len(_rate_limit_timestamps) == 0
+
+    @pytest.mark.anyio
+    async def test_health_traffic_cannot_starve_authenticated_budget(
+        self, client: httpx.AsyncClient
+    ):
         for _ in range(120):
             await client.get("/v1/health")
+        assert (await client.get("/v1/health")).status_code == 200
+        assert (await client.get("/v1/ready")).status_code == 200
 
-        # 121st should be rate limited
-        resp = await client.get("/v1/health")
-        assert resp.status_code == 429
-
-
-# ── CORS ─────────────────────────────────────────────────────────────
-
-class TestCORS:
     @pytest.mark.anyio
-    async def test_cors_headers_for_localhost(self, client: httpx.AsyncClient):
+    async def test_authenticated_bucket_still_limits(self, client: httpx.AsyncClient):
+        for _ in range(120):
+            assert (await client.get("/v1/ready")).status_code == 200
+        assert (await client.get("/v1/ready")).status_code == 429
+
+    @pytest.mark.anyio
+    async def test_rejected_requests_never_count(self, client: httpx.AsyncClient):
+        for _ in range(130):
+            r = await client.get(
+                "/v1/ready", headers={"X-VoxFlow-Token": "cd" * 32}
+            )
+            assert r.status_code == 401
+        assert sum(len(v) for v in _rate_limit_timestamps.values()) == 0
+
+
+# ── Browser requests ─────────────────────────────────────────────────
+
+class TestBrowserRequestsRejected:
+    @pytest.mark.anyio
+    async def test_origin_preflight_is_403(self, client: httpx.AsyncClient):
         resp = await client.options(
             "/v1/health",
             headers={
@@ -241,10 +263,7 @@ class TestCORS:
                 "Access-Control-Request-Method": "GET",
             },
         )
-        # CORS preflight should include allow-origin
-        assert "access-control-allow-origin" in resp.headers
-        # Security hardening: credentials should NOT be allowed
-        assert resp.headers.get("access-control-allow-credentials") is None
+        assert resp.status_code == 403
 
 
 # ── Transcribe Chunking ──────────────────────────────────────────────
@@ -405,6 +424,49 @@ class TestOpenAISTTFilterParity:
         data = resp.json()
         assert data["text"] == ""
         assert data["confidence_estimate"] == 0.0
+
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("decoded", "expected_text"),
+        [
+            ("[Silence] Fourth check, closing the cockpit.", "Fourth check, closing the cockpit."),
+            ("(water rushing)", ""),
+            ("[ [ [BLANK_AUDIO]", ""),
+        ],
+    )
+    async def test_non_speech_annotations_are_stripped(
+        self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, decoded: str, expected_text: str
+    ):
+        import base64
+        import struct
+
+        from api import endpoints as ep
+        from engines.results import STTExecutionResult
+
+        def fake_transcribe(pcm, sample_rate, language_hint):
+            return STTExecutionResult(
+                text=decoded,
+                confidence=0.9,
+                stage_timings_ms={},
+                model_loaded_before_request=True,
+                model_loaded_after_request=True,
+                cold_start=False,
+            )
+
+        monkeypatch.setattr(ep, "current_stt_backend", lambda: "openai")
+        monkeypatch.setattr(ep.provider_router, "transcribe", fake_transcribe)
+
+        loud = struct.pack("<" + "h" * 96000, *([8000, -8000] * 48000))
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-annotation-strip",
+            "audio_pcm16le": base64.b64encode(loud).decode(),
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["text"] == expected_text
 
 
 class TestMLSemaphoreAtomicity:

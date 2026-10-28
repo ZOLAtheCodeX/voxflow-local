@@ -114,10 +114,15 @@ final class AudioCaptureServiceTests: XCTestCase {
             XCTAssertThrowsError(try service.stopCapture()) { error in
                 XCTAssertEqual(error as? AudioCaptureError, .deviceChanged)
             }
+            // The pre-change audio is salvageable exactly once (nil when the
+            // device delivered nothing yet).
+            _ = service.takeInvalidatedAudio()
+            XCTAssertNil(service.takeInvalidatedAudio(), "invalidated audio is returned once")
             // Service is recoverable: a fresh start works (or fails with a
             // known environment error, never a stuck state).
             do {
                 try service.startCapture()
+                XCTAssertNil(service.takeInvalidatedAudio(), "a fresh start clears invalidated audio")
                 _ = try? service.stopCapture()
             } catch { /* environment-dependent — acceptable */ }
         } catch {
@@ -127,6 +132,7 @@ final class AudioCaptureServiceTests: XCTestCase {
             XCTAssertThrowsError(try service.stopCapture()) { error in
                 XCTAssertEqual(error as? AudioCaptureError, .captureNotRunning)
             }
+            XCTAssertNil(service.takeInvalidatedAudio())
         }
     }
 }

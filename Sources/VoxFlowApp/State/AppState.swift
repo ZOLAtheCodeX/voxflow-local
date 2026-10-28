@@ -12,6 +12,8 @@ final class AppState: ObservableObject {
     @Published var lastInsertResult: InsertResult?
     @Published var targetingMode: TargetingMode = .anyApp
     @Published var focusTarget: FocusTargetSnapshot = .unavailable
+    /// The last non-VoxFlow app the user activated; the cockpit's next target.
+    @Published var lastExternalApp: ExternalAppIdentity?
     @Published var onboardingPhase: OnboardingPhase = .notStarted
     @Published var calibrationItems: [CalibrationItem] = []
     @Published var activeCalibrationIndex: Int = 0
@@ -19,6 +21,7 @@ final class AppState: ObservableObject {
     @Published var dictationCoreModeEnabled = true
     @Published var toneStyle: ToneStyle = .neutral
     @Published var insertBehavior: InsertBehavior = .autoInsertLight
+    @Published var autoSubmitMode: AutoSubmitMode = .off
     @Published var appProfiles: [String: AppProfile] = [:]
     @Published var recentDictations: [TranscriptCandidate] = []
     @Published var translationCandidate: TranslationCandidate?

@@ -12,10 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
-from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import server
+from api_clients import api_client
 
 
 def test_websocket_idle_closes_cleanly(monkeypatch) -> None:
@@ -23,7 +23,7 @@ def test_websocket_idle_closes_cleanly(monkeypatch) -> None:
     # Shrink the idle window to keep the test fast.
     monkeypatch.setattr(server, "_WEBSOCKET_IDLE_TIMEOUT_S", 0.3)
 
-    client = TestClient(server.app)
+    client = api_client(server.app)
     with client.websocket_connect("/v1/events") as ws:
         # First message is the connect handshake the server sends.
         msg = ws.receive_json()
@@ -44,7 +44,7 @@ def test_websocket_acks_messages(monkeypatch) -> None:
     """Sanity: when the client sends messages, the server acks each one."""
     monkeypatch.setattr(server, "_WEBSOCKET_IDLE_TIMEOUT_S", 5.0)
 
-    client = TestClient(server.app)
+    client = api_client(server.app)
     with client.websocket_connect("/v1/events") as ws:
         connect_msg = ws.receive_json()
         assert connect_msg.get("event") == "connected"

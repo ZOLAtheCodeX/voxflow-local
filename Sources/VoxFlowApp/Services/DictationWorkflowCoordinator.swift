@@ -22,6 +22,12 @@ struct DictationWorkflowRequest {
     /// STT stage ms, so the insert receipt can carry total latency.
     var pipelineStartedAt: ContinuousClock.Instant? = nil
     var sttMs: Int? = nil
+    var autoSubmit = false
+    var insertionFocus: CapturedInsertionFocus? = nil
+
+    var insertionPolicy: TextInsertionPolicy {
+        .prose.withSubmission(autoSubmit).withCapturedFocus(insertionFocus)
+    }
 }
 
 @MainActor
@@ -76,7 +82,7 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             try Task.checkCancellation()
             let insertStarted = ContinuousClock.now
             let timing = Self.timingContext(for: request, cleanupMs: 0)
-            if await textInsertion.insertText(request.rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: request.targetApp, timing: timing) {
+            if await textInsertion.insertText(request.rawText, statusSuffix: "Inserted (raw — \(appLabel))", targetApp: request.targetApp, timing: timing, policy: request.insertionPolicy) {
                 recordStage("insert", insertStarted, "mode=raw")
                 state.sessionState = .idle
             } else {
@@ -296,7 +302,7 @@ final class DictationWorkflowCoordinator: DictationWorkflowCoordinating {
             let provenanceTag = (provenance.map { $0.isEmpty ? "" : " · \($0)" }) ?? ""
             let insertStarted = ContinuousClock.now
             let timing = Self.timingContext(for: request, cleanupMs: cleanupMs)
-            if await textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel)\(provenanceTag) — \(appLabel))", targetApp: request.targetApp, timing: timing) {
+            if await textInsertion.insertText(text, statusSuffix: "Inserted (\(autoMode.displayName.lowercased())\(toneLabel)\(provenanceTag) — \(appLabel))", targetApp: request.targetApp, timing: timing, policy: request.insertionPolicy) {
                 recordStage("insert", insertStarted, "mode=\(autoMode.rawValue)")
                 state.sessionState = .idle
             } else {

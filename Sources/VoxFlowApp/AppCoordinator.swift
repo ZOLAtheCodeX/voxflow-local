@@ -155,6 +155,10 @@ final class AppCoordinator: ObservableObject {
         return DictionaryStore(fileURL: base.appendingPathComponent("dictionary.json"))
     }()
     private(set) lazy var cockpitSnippets: SnippetStore = SnippetStore(fileURL: SnippetStore.defaultFileURL)
+    private(set) lazy var skillProfiles = SkillProfileStore()
+    private(set) lazy var computerActionSettings = ComputerActionSettings()
+    private lazy var computerActions = ComputerActionService(
+        preparer: PythonComputerActionPreparer(), bridge: NativeComputerActionBridge())
     // BYOM (R3.6): providers.json store — shared file the backend registry
     // reads at launch. Mutations are followed by a backend restart so chains
     // take effect (SettingsView calls applyProviderChanges()).
@@ -176,9 +180,9 @@ final class AppCoordinator: ObservableObject {
         textInsertion: textInsertion,
         currentTranscript: { [weak self] in self?.cockpitSessionService.currentSession?.transcript },
         frozenTarget: { [weak self] in
-            self?.cockpitSessionService.currentSession?.targetApp?.processIdentifier
-                .flatMap { NSRunningApplication(processIdentifier: $0) }
+            ExternalAppTracker.liveRunningApp(for: self?.cockpitSessionService.currentSession?.targetApp)
         },
+        currentSessionID: { [weak self] in self?.cockpitSessionService.currentSession?.id },
         performAppStep: { [weak self] step in
             self?.performChainAppStep(step) ?? false
         })
@@ -214,6 +218,10 @@ final class AppCoordinator: ObservableObject {
     private var fnTriggeredCaptureInProgress = false
     private var isRunningChain = false
     private var capturedTargetApp: NSRunningApplication?
+    private var capturedSkillMatcher: SpokenSkillMatcher?
+    private var capturedVoiceActions: CapturedVoiceActions?
+    private var capturedAutoSubmitMode: AutoSubmitMode = .off
+    private var capturedInsertionFocus: CapturedInsertionFocus?
     private var lastTranscriptionConfidence: Double = 0.0
     /// Audio stats of the last decoded capture (true input level, pre-gain),
     /// threaded onto the workflow request → candidate → insert receipt so
@@ -247,6 +255,22 @@ final class AppCoordinator: ObservableObject {
         }
         self.settings = settingsCoordinator
         startFocusMonitoring()
+        startExternalAppTracking()
+        // Adopt mode: backendManager (a stored property) already published its
+        // generated launch token, so this load, running afterwards, wins.
+        if Self.explicitAdoptRequested(ProcessInfo.processInfo.environment),
+           Self.loadAdoptedBackendToken(explicitAdopt: true, reader: BackendTokenFile()) == .missing {
+            state.backendReadiness.statusSummary = Self.tokenRejectionStatus(outcome: .missing)
+        }
+        // Adopt mode: the manual backend may restart with a new token at any time,
+        // so any 401 to a token-bearing request re-reads the token file (spec
+        // Decision 8, "again after any 401"). Managed mode registers nothing: its
+        // token is this launch's own and never changes.
+        if Self.explicitAdoptRequested(ProcessInfo.processInfo.environment) {
+            BackendAuthToken.setRejectionHandler {
+                _ = Self.loadAdoptedBackendToken(explicitAdopt: true, reader: BackendTokenFile())
+            }
+        }
         beginWarmupMonitoring()
         state.$sessionState
             .removeDuplicates()
@@ -254,6 +278,10 @@ final class AppCoordinator: ObservableObject {
                 self?.recordingOverlay.sessionStateChanged(newState)
                 if newState == .idle {
                     self?.capturedTargetApp = nil
+                    self?.capturedSkillMatcher = nil
+                    self?.capturedVoiceActions = nil
+                    self?.capturedAutoSubmitMode = .off
+                    self?.capturedInsertionFocus = nil
                     self?.lastTranscriptionConfidence = 0.0
                     self?.state.recordingDuration = 0
                     self?.focusMonitor.unfreeze()
@@ -261,12 +289,26 @@ final class AppCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        Self.observeSkillProfileChanges(in: skillProfiles,
+            capturedPermission: { [weak self] in self?.capturedVoiceActions },
+            revokeSubmission: { [weak self] in self?.capturedInsertionFocus?.revokeSubmission() })
+            .store(in: &cancellables)
+
         cockpit.onHandoffRequested = { [weak self] in self?.requestAssistantHandoff() }
 
         // Stale-backend hardening (2026-06-12): an open cockpit makes
         // backendShouldRun true (smart actions need the backend); spawn +
         // warmup-poll it through the existing machinery.
-        cockpit.onCockpitOpened = { [weak self] in self?.scheduleRuntimeWarmupIfNeeded() }
+        cockpit.onCockpitOpened = { [weak self] in
+            // Seed before the cockpit window takes focus, so a cockpit opened
+            // without any app activation since launch still has a target.
+            self?.recordExternalApp(NSWorkspace.shared.frontmostApplication)
+            self?.scheduleRuntimeWarmupIfNeeded()
+        }
+        cockpit.recordingTargetProvider = { [weak self] in
+            self?.externalAppTracker.currentVerified(lookup: ExternalAppTracker.liveLookup)?.targetSnapshot
+        }
+        cockpit.drainRecording = { [weak self] in await self?.cockpitCapture.stopRecording() ?? false }
 
         // R5.6: cockpit review can trigger protocols (gated inside the
         // coordinator on state.protocolCommandsEnabled + strict grammar).
@@ -388,7 +430,19 @@ final class AppCoordinator: ObservableObject {
         isRunningChain = true
         defer { isRunningChain = false }
 
-        let result = await chainExecutor.run(chain)
+        // A chain acts on one reviewed session, so a live recording drains
+        // first. A drain that ended in an interruption leaves nothing cleanly
+        // reviewed to act on: the chain stops before its first step and is
+        // reported through the same failure branch.
+        let result: ChainExecutor.ChainRunResult
+        if case .recording = cockpitSessionService.state,
+           await cockpitCapture.stopRecording() == false {
+            result = ChainExecutor.ChainRunResult(
+                completedSteps: 0, finalText: "", failedStepIndex: 0,
+                error: .sessionChanged, clipboardFallback: false)
+        } else {
+            result = await chainExecutor.run(chain)
+        }
         if result.error == nil {
             state.statusLine = "Chain '\(chain.name)' complete"
         } else {
@@ -433,9 +487,9 @@ final class AppCoordinator: ObservableObject {
         var listenerResponded = false
         var reportedStamp: String?
         do {
-            let readiness = try await BackendAPIClient.readyProbe()
+            // /v1/health, never the token: the listener is not yet verified.
+            reportedStamp = try await BackendAPIClient.identityProbe()
             listenerResponded = true
-            reportedStamp = readiness.instanceStamp
         } catch {
             // Connection refused / timeout / non-JSON responder: nothing we
             // recognise is listening. A wedged or draining stray from a
@@ -471,25 +525,33 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        do {
-            let readiness = try await BackendAPIClient.ready()
-            // R4.7: a healthy port answered by a backend we didn't launch is
-            // stale/foreign — replace it instead of silently trusting it.
-            if !Self.adoptForeignBackendOverride,
-               BackendProcessManager.isForeignBackend(
-                reportedStamp: readiness.instanceStamp,
-                expectedStamp: backendManager.instanceStamp,
-                managerOwnsProcess: backendManager.isRunning
-            ) {
-                log.warning("Foreign/stale backend on port \(BackendEndpoint.resolved().port) (stamp mismatch) — terminating")
-                backendManager.terminateForeignListenerAsync()
-                state.backendReadiness.readyForDictation = false
-                state.backendReadiness.statusSummary = "Stale backend replaced — restarting"
-                if state.backendShouldRun {
-                    backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
-                }
-                return
+        // Identity first, over /v1/health without the token: nothing that
+        // attaches the token may run until the listener is verified as ours.
+        // R4.7: a healthy port answered by a backend we didn't launch is
+        // stale/foreign — replace it instead of silently trusting it.
+        let identityStamp = try? await BackendAPIClient.identityProbe()
+        if let reportedStamp = identityStamp,
+           !Self.adoptForeignBackendOverride,
+           BackendProcessManager.isForeignBackend(
+            reportedStamp: reportedStamp,
+            expectedStamp: backendManager.instanceStamp,
+            managerOwnsProcess: backendManager.isRunning
+           ) {
+            log.warning("Foreign/stale backend on port \(BackendEndpoint.resolved().port) (stamp mismatch) — terminating")
+            backendManager.terminateForeignListenerAsync()
+            state.backendReadiness.readyForDictation = false
+            state.backendReadiness.statusSummary = "Stale backend replaced — restarting"
+            if state.backendShouldRun {
+                backendManager.startIfNeededAsync(configuration: settings.currentBackendLaunchConfiguration())
             }
+            return
+        }
+
+        do {
+            // ready() verifies the listener's stamp itself before sending the
+            // token; an unverified listener lands in the non-401 branches below
+            // as BackendError.listenerUnverified.
+            let readiness = try await BackendAPIClient.ready()
             state.backendReadiness.readyForDictation = readiness.readyForDictation
             state.backendReadiness.warmupInProgress = false
             state.backendReadiness.readinessIssue = readiness.issues.first
@@ -508,6 +570,21 @@ final class AppCoordinator: ObservableObject {
         } catch {
             state.backendReadiness.readyForDictation = false
             state.backendReadiness.activeSTTModel = ""
+            if Self.isTokenRejection(error) {
+                // Verified-ours-or-adopted listener refused the token: surface
+                // it, and in adopt mode re-read the file for the next poll.
+                state.backendReadiness.warmupInProgress = false
+                let outcome = Self.loadAdoptedBackendToken(
+                    explicitAdopt: Self.explicitAdoptRequested(ProcessInfo.processInfo.environment),
+                    reader: BackendTokenFile())
+                let message = Self.tokenRejectionStatus(outcome: outcome)
+                state.backendReadiness.readinessIssue = message
+                state.backendReadiness.statusSummary = message
+                if shouldSurfaceBackendStatusInStatusLine() {
+                    state.statusLine = message
+                }
+                return
+            }
             if let startupIssue {
                 state.backendReadiness.warmupInProgress = false
                 state.backendReadiness.readinessIssue = startupIssue
@@ -685,6 +762,10 @@ final class AppCoordinator: ObservableObject {
         // audio is flowing — the manager defers it until this clears.
         backendManager.setCaptureActive(true)
         capturedTargetApp = NSWorkspace.shared.frontmostApplication
+        capturedVoiceActions = commandLane ? nil : computerActionSettings.snapshot()
+        capturedSkillMatcher = capturedVoiceActions?.mode.includesCustomPrompts == true ? skillProfiles.activeMatcher : nil
+        capturedAutoSubmitMode = commandLane ? .off : state.autoSubmitMode
+        capturedInsertionFocus = commandLane ? nil : CapturedInsertionFocus.capture(for: capturedTargetApp)
         focusMonitor.freeze()
         sessionCounter += 1
         state.isCommandLaneActive = commandLane
@@ -870,6 +951,21 @@ final class AppCoordinator: ObservableObject {
         state.statusLine = commandLane ? "Interpreting command..." : "Transcribing..."
     }
 
+    /// Quick dictation's admission, in the cockpit's order: the gate judges the
+    /// raw decode (stripping Whisper's non-speech annotations), then the user's
+    /// dictionary applies to the cleaned text. Gating after the dictionary
+    /// deleted dictionary terms written with brackets ("[sic]"). Skills and
+    /// computer actions skip the dictionary.
+    static func admitQuickDictation(
+        recognizedText: String, confidence: Double, audioDurationSeconds: Double,
+        appliesDictionary: Bool, dictionary: (String) -> String
+    ) -> TranscriptGate.Admission {
+        let admission = TranscriptGate.admit(
+            text: recognizedText, confidence: confidence, audioDurationSeconds: audioDurationSeconds)
+        guard case .accepted = admission.verdict, appliesDictionary else { return admission }
+        return TranscriptGate.Admission(verdict: .accepted, text: dictionary(admission.text))
+    }
+
     /// Audit-log source label for the quick-capture lanes. Single source of
     /// truth so the silence and gate-rejection receipts can't drift apart.
     private static func captureSourceLabel(commandLane: Bool) -> String {
@@ -946,8 +1042,21 @@ final class AppCoordinator: ObservableObject {
         // R5.1: dictionary post-correction now applies on the quick path too
         // (it was cockpit-only). Biasing improves recognition; this catches
         // what biasing missed.
-        let rawText = cockpitDictionary.apply(
-            to: transcription.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let recognizedText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedSkill: SpokenSkill? = state.workflowMode == .dictation && !commandLane
+            && state.onboardingPhase != .calibrating
+            ? capturedSkillMatcher?.resolve(recognizedText, targetBundleID: capturedTargetApp?.bundleIdentifier)
+            : nil
+        let resolvedAction: ComputerAction? = state.workflowMode == .dictation && !commandLane
+            && state.onboardingPhase != .calibrating && resolvedSkill == nil
+            && capturedVoiceActions?.mode.includesComputerActions == true
+            ? computerActionSettings.catalog.resolve(recognizedText,
+                enabledIDs: capturedVoiceActions?.enabledIDs ?? [],
+                requiresPrefix: capturedVoiceActions?.requiresPrefix ?? true)
+            : nil
+        // A recognized skill passes the same gate on its original utterance;
+        // dictionary corrections cannot turn its name into a different command.
+        let appliesDictionary = resolvedSkill == nil && resolvedAction == nil
         lastTranscriptionConfidence = transcription.confidenceEstimate
         lastCaptureAudioStats = (
             audioSeconds: capturedAudio.durationSeconds,
@@ -960,9 +1069,9 @@ final class AppCoordinator: ObservableObject {
         let secondsSinceLastCapture = lastDecodeAt.map { Date().timeIntervalSince($0) }
         lastDecodeAt = Date()
         #if DEBUG
-        log.info("Transcription: '\(rawText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        log.info("Transcription: '\(recognizedText.prefix(100))' (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
         #else
-        log.info("Transcription: \(rawText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
+        log.info("Transcription: \(recognizedText.count) chars (confidence=\(transcription.confidenceEstimate), latency=\(transcription.latencyMs)ms)")
         #endif
 
         let audioDurationSec = capturedAudio.durationSeconds
@@ -970,11 +1079,18 @@ final class AppCoordinator: ObservableObject {
         // Single ingress gate: empty/placeholder, hallucination filter, and the
         // low-confidence rules live in TranscriptGate so every transcript path
         // (quick dictation, cockpit chunks, command lane) applies them identically.
-        if case .rejected(let reason) = TranscriptGate.evaluate(
-            text: rawText,
+        // The gate judges the raw decode and strips Whisper's non-speech
+        // annotations, then the dictionary applies (the cockpit's order);
+        // everything after it uses `acceptedText`, the reject receipt the raw decode.
+        let admission = Self.admitQuickDictation(
+            recognizedText: recognizedText,
             confidence: transcription.confidenceEstimate,
-            audioDurationSeconds: audioDurationSec
-        ) {
+            audioDurationSeconds: audioDurationSec,
+            appliesDictionary: appliesDictionary,
+            dictionary: { [cockpitDictionary] in cockpitDictionary.apply(to: $0) }
+        )
+        let acceptedText = admission.text
+        if case .rejected(let reason) = admission.verdict {
             let rms = capturedAudio.rmsEnergy
             log.info("TranscriptGate rejected transcript (\(reason.rawValue), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s, rms=\(String(format: "%.4f", rms))) — discarding")
             // Retain the capture BEFORE it goes out of scope: the WAV is both
@@ -986,7 +1102,7 @@ final class AppCoordinator: ObservableObject {
                 reason: reason.rawValue
             )
             insertionAudit.recordRejection(
-                text: rawText,
+                text: recognizedText,
                 reason: reason.rawValue,
                 confidence: transcription.confidenceEstimate,
                 durationSeconds: audioDurationSec,
@@ -1026,12 +1142,56 @@ final class AppCoordinator: ObservableObject {
         }
 
         if state.onboardingPhase == .calibrating {
-            onboarding.handleCalibrationResult(rawText: rawText)
+            onboarding.handleCalibrationResult(rawText: acceptedText)
             return
         }
 
         if commandLane {
-            executeCommandLane(rawText: rawText)
+            executeCommandLane(rawText: acceptedText)
+            return
+        }
+
+        // Match the accepted original utterance before personal corrections can
+        // rename a skill. Both the profile and target were frozen at capture start.
+        if resolvedSkill != nil || resolvedAction != nil, capturedVoiceActions?.revoked == true {
+            state.statusLine = "Voice action canceled — settings changed"
+            state.sessionState = .idle
+            return
+        }
+        if let action = resolvedAction, let permissions = capturedVoiceActions {
+            let started = ContinuousClock.now
+            let target = capturedTargetApp
+            let destination = action.operation == .openApplication ? action.argument : target?.localizedName
+            let status: String
+            do {
+                let outcome = try await computerActions.execute(action, permissions: permissions,
+                    target: target, focus: capturedInsertionFocus)
+                status = "\(action.name) — \(outcome.label)"
+                insertionAudit.recordComputerAction(id: action.id, name: action.name, outcome: outcome.rawValue,
+                    targetApp: destination, durationMs: started.elapsedMilliseconds())
+            } catch {
+                let canceled = Self.isUserCancellation(error)
+                status = canceled ? "Voice action canceled" : error.localizedDescription
+                insertionAudit.recordComputerAction(id: action.id, name: action.name, outcome: canceled ? "canceled" : "failed",
+                    targetApp: destination, durationMs: started.elapsedMilliseconds())
+            }
+            // LaunchServices may finish an already dispatched open after cancel.
+            // Keep its receipt, but never reset a newer capture's UI to idle.
+            guard !Task.isCancelled else { return }
+            state.statusLine = status
+            Self.finishShortCircuitCapture(state, taskCancelled: false)
+            return
+        }
+        if let skill = resolvedSkill {
+            try Task.checkCancellation()
+            _ = await textInsertion.insertText(
+                skill.command, statusSuffix: "Skill ‘\(skill.name)’ inserted",
+                targetApp: capturedTargetApp,
+                timing: InsertTimingContext(pipelineStartedAt: trace.startedAt,
+                                            sttMs: transcription.processingTimeMs, cleanupMs: 0),
+                policy: .verbatim.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: true))
+                    .withCapturedFocus(capturedInsertionFocus).withVoiceActionPermission(capturedVoiceActions))
+            Self.finishShortCircuitCapture(state, taskCancelled: Task.isCancelled)
             return
         }
 
@@ -1042,7 +1202,7 @@ final class AppCoordinator: ObservableObject {
         // so Settings edits take effect immediately; reserved/action-word
         // precedence is guaranteed by resolveSnippet.
         if let snippet = VoiceCommandRouter.resolveSnippet(
-            rawText, snippets: cockpitSnippets.snippets, context: .quickOnly) {
+            acceptedText, snippets: cockpitSnippets.snippets, context: .quickOnly) {
             let appLabel = state.focusTarget.appName ?? "app"
             // Final cancellation gate: a snippet is built after STT, so a cancel
             // (or superseding capture) between transcription and this insert must
@@ -1057,14 +1217,15 @@ final class AppCoordinator: ObservableObject {
             _ = await textInsertion.insertText(
                 snippet.text,
                 statusSuffix: "Snippet '\(snippet.keyword)' inserted — \(appLabel)",
-                targetApp: capturedTargetApp
+                targetApp: capturedTargetApp, timing: nil,
+                policy: .prose.withSubmission(capturedAutoSubmitMode.includes(voiceActionPrompt: false))
+                    .withCapturedFocus(capturedInsertionFocus)
             )
-            state.recordingDuration = 0
-            state.sessionState = .idle
+            Self.finishShortCircuitCapture(state, taskCancelled: Task.isCancelled)
             return
         }
 
-        try await processWorkflow(sessionID: sessionID, rawText: rawText, trace: trace)
+        try await processWorkflow(sessionID: sessionID, rawText: acceptedText, trace: trace)
 
         // Capture-quality warnings, appended AFTER the workflow set its own
         // status so the insert/review message stays first and the user learns
@@ -1128,6 +1289,52 @@ final class AppCoordinator: ObservableObject {
     /// network failures are NOT cancellation and still surface.
     nonisolated static func isUserCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    /// Explicit dev opt-in to pair with a manually launched backend. Env flag
+    /// only: unlike `adoptForeignBackendOverride` it has no XCTest clause, so
+    /// it gates reading the token file and nothing else.
+    nonisolated static func explicitAdoptRequested(_ environment: [String: String]) -> Bool {
+        environment["VOXFLOW_ADOPT_FOREIGN_BACKEND"] == "1"
+    }
+
+    /// Adopt mode only: replace the process token with the one the adopted
+    /// backend published in its token file (nil when absent or malformed, so
+    /// requests go out unauthenticated rather than with a stale launch token).
+    /// A no-op that never touches the reader when not adopting.
+    nonisolated static func loadAdoptedBackendToken(
+        explicitAdopt: Bool,
+        reader: BackendTokenFileReading
+    ) -> AdoptedTokenOutcome {
+        guard explicitAdopt else { return .notAdopting }
+        if let token = reader.readToken() {
+            BackendAuthToken.set(token)
+            return .loaded
+        }
+        BackendAuthToken.set(nil)
+        return .missing
+    }
+
+    /// Status text for a token rejection. In adopt mode a missing/malformed token
+    /// file is the likelier cause and says so; otherwise the backend refused a
+    /// token we do hold.
+    nonisolated static func tokenRejectionStatus(outcome: AdoptedTokenOutcome) -> String {
+        outcome == .missing ? "Backend token file not found" : "Backend rejected the app's token"
+    }
+
+    /// The backend answered but refused the app's token.
+    nonisolated static func isTokenRejection(_ error: Error) -> Bool {
+        guard case BackendError.httpError(let statusCode, _) = error else { return false }
+        return statusCode == 401
+    }
+
+    /// Action, skill, and snippet captures return straight to idle. A cancelled
+    /// one can finish its insertion wait after a newer capture started, and the
+    /// `.idle` sink would then clear THAT capture's frozen target and permissions.
+    static func finishShortCircuitCapture(_ state: AppState, taskCancelled: Bool) {
+        guard !taskCancelled else { return }
+        state.recordingDuration = 0
+        state.sessionState = .idle
     }
 
     /// Audit reason for a capture-pipeline error that silently DISCARDS a
@@ -1393,6 +1600,48 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Settings Forwarding
 
     func selectInsertBehavior(_ behavior: InsertBehavior) { settings.selectInsertBehavior(behavior) }
+    func selectAutoSubmitMode(_ mode: AutoSubmitMode) {
+        if mode != state.autoSubmitMode { capturedInsertionFocus?.revokeSubmission() }
+        settings.selectAutoSubmitMode(mode)
+    }
+    /// Tested directly without the coordinator singleton, microphone, or keyboard
+    /// services. Helper tests do not cover its installation in init above.
+    static func observeSkillProfileChanges(
+        in store: SkillProfileStore,
+        capturedPermission: @escaping () -> CapturedVoiceActions?,
+        revokeSubmission: @escaping () -> Void
+    ) -> AnyCancellable {
+        store.$profiles.combineLatest(store.$activeProfileID)
+            .map { profiles, activeID in profiles.first { $0.id == activeID } }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { _ in
+                // Store mutations publish synchronously on MainActor, only after
+                // saving succeeds. Ignore inactive-profile edits and no-op saves.
+                guard let permission = capturedPermission(), permission.mode.includesCustomPrompts else { return }
+                permission.revoke()
+                revokeSubmission()
+                // Keep the captured matcher: clearing it would turn a canceled
+                // command into ordinary dictation, potentially followed by Enter.
+            }
+    }
+
+    func selectVoiceActionMode(_ mode: VoiceActionMode) {
+        if mode != computerActionSettings.mode {
+            capturedVoiceActions?.revoke()
+            capturedInsertionFocus?.revokeSubmission()
+        }
+        computerActionSettings.setMode(mode)
+        state.statusLine = "Voice actions: \(mode.displayName)"
+    }
+    func setComputerActionEnabled(_ enabled: Bool, id: String) {
+        if computerActionSettings.enabledIDs.contains(id) != enabled { capturedVoiceActions?.revoke() }
+        computerActionSettings.setEnabled(enabled, id: id)
+    }
+    func setComputerActionRequiresPrefix(_ required: Bool) {
+        if computerActionSettings.requiresPrefix != required { capturedVoiceActions?.revoke() }
+        computerActionSettings.setRequiresPrefix(required)
+    }
     func updateAppProfile(bundleID: String, profile: AppProfile?) { settings.updateAppProfile(bundleID: bundleID, profile: profile) }
     func setTranslationModeEnabled(_ isEnabled: Bool) { settings.setTranslationModeEnabled(isEnabled) }
     func setMeetingModeEnabled(_ isEnabled: Bool) { settings.setMeetingModeEnabled(isEnabled) }
@@ -1456,6 +1705,8 @@ final class AppCoordinator: ObservableObject {
 
     private var windowOpenHandler: ((String) -> Void)?
     private var windowNotificationTokens: [NSObjectProtocol] = []
+    private var externalAppTracker = ExternalAppTracker()
+    private var workspaceActivationObserver: NSObjectProtocol?
 
     /// Bridges the window-open notifications (⌥⌘V hotkey, menu-panel
     /// buttons, voice commands, protocol `.openWindow` steps) to SwiftUI's
@@ -1733,6 +1984,8 @@ final class AppCoordinator: ObservableObject {
             // stage the pipeline already recorded before handing off here.
             request.pipelineStartedAt = trace.startedAt
             request.sttMs = trace.durationMs(of: "stt")
+            request.autoSubmit = self.capturedAutoSubmitMode.includes(voiceActionPrompt: false)
+            request.insertionFocus = self.capturedInsertionFocus
 
             try await self.dictationWorkflow.processDictation(request) { name, startedAt, detail in
                 trace.recordStage(name, startedAt: startedAt, detail: detail)
@@ -2033,7 +2286,11 @@ final class AppCoordinator: ObservableObject {
         // Observe sessionState and commandLane for icon updates + auto-open on review
         state.$sessionState
             .combineLatest(state.$isCommandLaneActive)
-            .receive(on: RunLoop.main)
+            // Keep this deferred (Published emits before the properties update),
+            // but deliver through the main dispatch executor. A live release
+            // capture exposed a crash in the CF run-loop executor's isolation
+            // check when entering this MainActor-isolated sink.
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] newState, _ in
                 guard let self else { return }
                 self.menuBarPanel?.updateIcon(state: Self.menuBarIconState(for: self.state.sessionState, commandLane: self.state.isCommandLaneActive))
@@ -2122,6 +2379,57 @@ final class AppCoordinator: ObservableObject {
     /// Called from AppDelegate.applicationWillTerminate to cleanly stop the backend.
     func shutdownBackend() {
         backendManager.stop()
+    }
+
+    /// Tracks the last activated non-VoxFlow app so the cockpit can freeze it
+    /// at ⌘R. Reading `frontmostApplication` here (launch) and at cockpit open
+    /// is allowed; it is never read at insert time.
+    private func startExternalAppTracking() {
+        recordExternalApp(NSWorkspace.shared.frontmostApplication)
+        // The token is retained for the app's lifetime (AppCoordinator is a
+        // singleton), like the window-open observers.
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            // Extract Sendable facts before hopping onto the main actor.
+            let pid = app?.processIdentifier
+            let bundleID = app?.bundleIdentifier
+            let name = app?.localizedName
+            let launchDate = app?.launchDate
+            let isRegularApp = app?.activationPolicy == .regular
+            MainActor.assumeIsolated {
+                guard let pid else { return }
+                self?.recordExternalApp(
+                    pid: pid, bundleID: bundleID, name: name, launchDate: launchDate,
+                    isRegularApp: isRegularApp)
+            }
+        }
+    }
+
+    private func recordExternalApp(_ app: NSRunningApplication?) {
+        guard let app else { return }
+        recordExternalApp(
+            pid: app.processIdentifier,
+            bundleID: app.bundleIdentifier,
+            name: app.localizedName,
+            launchDate: app.launchDate,
+            isRegularApp: app.activationPolicy == .regular)
+    }
+
+    private func recordExternalApp(
+        pid: Int32, bundleID: String?, name: String?, launchDate: Date?, isRegularApp: Bool
+    ) {
+        externalAppTracker.record(
+            pid: pid, bundleID: bundleID, name: name, launchDate: launchDate,
+            isRegularApp: isRegularApp, ownPID: ProcessInfo.processInfo.processIdentifier)
+        // Every app activation lands here; publish only a real change so the
+        // side panel does not re-render on each one.
+        if state.lastExternalApp != externalAppTracker.current {
+            state.lastExternalApp = externalAppTracker.current
+        }
     }
 
     private func startFocusMonitoring() {

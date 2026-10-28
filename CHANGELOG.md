@@ -6,7 +6,35 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- The local backend now accepts only the VoxFlow app (via a per-launch
+  token) and refuses browser-originated, wrong-host, and non-JSON requests,
+  closing a blind cross-site request path and DNS rebinding. Scripts read the
+  token from `~/Library/Application Support/VoxFlow/backend.token`.
+
 ### Fixed
+- Dictation no longer drops words when your dictionary terms bias recognition:
+  a decode that went wrong is retried once without the glossary, which had
+  made Whisper skip speech at the end of a pause.
+- Whisper's sound labels (`[BLANK_AUDIO]`, `[Silence]`, `(water rushing)`) no
+  longer end up in your text, and a chunk of room noise that Whisper only
+  labels is no longer inserted.
+- Cockpit chunks that were rejected but contained speech now keep their
+  audio in the rejected-audio folder, so nothing is lost without a trace.
+- Cockpit dictation no longer loses its last words when you stop: stopping
+  drains the tail, a double stop is safe, and Cmd+Return while still recording
+  inserts everything that was said.
+- Cockpit paragraph breaks now appear only at real pauses in your speech, and
+  chunks no longer glue words together.
+- The cockpit inserts into the app you came from, and never into a different
+  app that happened to reuse its process id.
+- The shipped "Memo" and "Action items" chains now run on the current
+  transcript instead of sending an empty one.
+- Closing the cockpit while recording no longer leaves the microphone on:
+  the recording stops and the transcript stays for review.
+- A smart action tapped while recording no longer drops the words dictated
+  while it runs: the recording stops first and the action works on the whole
+  transcript.
 - Building the app no longer adds another "VoxFlow" to Spotlight and the app
   launcher: the staging bundle now lives in `dist.noindex/`, which Spotlight
   skips, and installing unregisters it so only `~/Applications/VoxFlow.app`

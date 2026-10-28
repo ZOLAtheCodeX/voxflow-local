@@ -15,6 +15,34 @@ final class CancellationClassificationTests: XCTestCase {
         XCTAssertTrue(AppCoordinator.isUserCancellation(URLError(.cancelled)))
     }
 
+    /// Action, skill, and snippet captures short-circuit straight back to idle.
+    /// A cancelled one may finish its insertion wait after a newer capture
+    /// started; resetting to idle then would make the `.idle` sink clear the
+    /// NEW capture's frozen target, focus, and permissions.
+    @MainActor
+    func testCancelledShortCircuitCaptureNeverResetsANewerCapture() {
+        let state = AppState()
+        state.sessionState = .recording
+        state.recordingDuration = 2.5
+
+        AppCoordinator.finishShortCircuitCapture(state, taskCancelled: true)
+
+        XCTAssertEqual(state.sessionState, .recording)
+        XCTAssertEqual(state.recordingDuration, 2.5)
+    }
+
+    @MainActor
+    func testCompletedShortCircuitCaptureReturnsToIdle() {
+        let state = AppState()
+        state.sessionState = .inserting
+        state.recordingDuration = 2.5
+
+        AppCoordinator.finishShortCircuitCapture(state, taskCancelled: false)
+
+        XCTAssertEqual(state.sessionState, .idle)
+        XCTAssertEqual(state.recordingDuration, 0)
+    }
+
     func testGenuineNetworkErrorsAreNotCancellation() {
         XCTAssertFalse(AppCoordinator.isUserCancellation(URLError(.timedOut)))
         XCTAssertFalse(AppCoordinator.isUserCancellation(URLError(.cannotConnectToHost)))

@@ -470,6 +470,21 @@ struct InsertResult {
     let success: Bool
     let fallbackUsed: Bool
     let errorCode: String?
+    var submission: Submission = .notRequested
+
+    enum Submission: String {
+        case notRequested
+        case enterPosted
+        case skipped
+
+        var statusSuffix: String {
+            switch self {
+            case .notRequested: ""
+            case .enterPosted: " · Enter sent"
+            case .skipped: " · Enter skipped"
+            }
+        }
+    }
 
     enum InsertMethod: String {
         case accessibilityDirect
@@ -605,6 +620,9 @@ struct FocusTargetSnapshot: Codable, Sendable, Equatable {
     // window would itself be at that moment). ``nil`` only when the
     // AX query failed and the rest of the snapshot is .unavailable.
     let processIdentifier: Int32?
+    // Pairs with ``processIdentifier`` so a recycled pid is detected at insert
+    // time. Optional so sessions persisted before this field still decode.
+    var launchDate: Date? = nil
 
     static let unavailable = FocusTargetSnapshot(
         hasFocusedTextInput: false,
@@ -821,6 +839,8 @@ struct DictionaryEntry: Codable, Identifiable, Equatable, Sendable {
     let right: String
     var context: String?
     let learnedAt: Date
+    /// Optional for compatibility with dictionaries saved before prioritization.
+    var prioritized: Bool? = nil
 }
 
 enum SnippetScope: String, Codable, CaseIterable, Sendable {

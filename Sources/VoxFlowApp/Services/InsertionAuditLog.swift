@@ -95,6 +95,13 @@ final class InsertionAuditLog {
             .map { String(format: "%02x", $0) }.joined()
     }
 
+    func recordComputerAction(id: String, name: String? = nil, outcome: String, targetApp: String?, durationMs: Int) {
+        var entry: [String: Any] = ["event": "computer_action", "ts": iso.string(from: Date()),
+                                    "action_id": id, "source": name ?? id, "outcome": outcome, "action_ms": durationMs]
+        if let targetApp { entry["target"] = targetApp }
+        append(entry)
+    }
+
     func recordInsertion(
         text: String,
         targetApp: String?,
@@ -108,7 +115,8 @@ final class InsertionAuditLog {
         cleanupMs: Int? = nil,
         insertMs: Int? = nil,
         totalMs: Int? = nil,
-        insertMethod: String? = nil
+        insertMethod: String? = nil,
+        submission: String? = nil
     ) {
         var entry: [String: Any] = [
             "event": "insert",
@@ -135,6 +143,7 @@ final class InsertionAuditLog {
         if let insertMs { entry["insert_ms"] = insertMs }
         if let totalMs { entry["total_ms"] = totalMs }
         if let insertMethod { entry["insert_method"] = insertMethod }
+        if let submission { entry["submission"] = submission }
         append(entry)
     }
 

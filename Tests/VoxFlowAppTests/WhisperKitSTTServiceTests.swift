@@ -80,6 +80,21 @@ final class WhisperKitSTTServiceTests: XCTestCase {
         XCTAssertEqual(options.logProbThreshold, -1.0)
     }
 
+    func testAcceptedShortCapturesReachTheDecoderWithoutChangingLongClipTailGuard() {
+        for duration in [0.3, 0.48, 0.94, 0.999, 1.0] {
+            let options = WhisperKitSTTService.makeDecodeOptions(
+                promptTokens: [1, 2], audioDurationSeconds: duration)
+            XCTAssertEqual(options.windowClipTime, 0, "duration=\(duration)")
+            XCTAssertEqual(WhisperKitSTTService.retryDecodeOptions(from: options).windowClipTime, 0)
+            XCTAssertEqual(options.noSpeechThreshold, 0.6)
+        }
+        for duration in [1.001, 2.3, 30, 0, -.infinity, .nan] {
+            XCTAssertEqual(WhisperKitSTTService.makeDecodeOptions(
+                promptTokens: nil, audioDurationSeconds: duration).windowClipTime, 1)
+        }
+        XCTAssertEqual(WhisperKitSTTService.makeDecodeOptions(promptTokens: nil).windowClipTime, 1)
+    }
+
     /// The retry must VARY the decode, not replay it byte-identically: a
     /// deterministic decode failure (gappy PCM) reproduces under identical
     /// options, so the second attempt drops the vocabulary prompt (a known
@@ -97,6 +112,64 @@ final class WhisperKitSTTServiceTests: XCTestCase {
         XCTAssertEqual(retry.noSpeechThreshold, primary.noSpeechThreshold)
         XCTAssertEqual(retry.compressionRatioThreshold, primary.compressionRatioThreshold)
         XCTAssertEqual(retry.logProbThreshold, primary.logProbThreshold)
+    }
+
+    // MARK: - Prompt-free retry after temperature fallback (2026-10-27 probe)
+
+    /// The vocabulary prompt's failure signature: on a chunk where speech is
+    /// followed by quiet, the prompted greedy decode skips the speech, scores
+    /// under logProbThreshold, and WhisperKit falls back to higher
+    /// temperatures that return junk. A decode that used fallback is retried
+    /// without the prompt; a clean greedy decode is not.
+    func testFallbackOnAPromptedDecodeTriggersThePromptFreeRetry() {
+        XCTAssertTrue(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: [0.4]))
+        XCTAssertTrue(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: [0, 0.6]))
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: [0, 0]))
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: false, segmentTemperatures: [0.6]))
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: []))
+    }
+
+    func testUnpromptedDecodeWinsWhenThePromptedOneHasNoSpeech() {
+        // Probe n4_s8_speech4_noise3: prompted "(" at lp -0.88 vs unprompted speech at lp -0.37.
+        let prompted = WhisperKitSTTService.decodeQuality(text: "(", avgLogprobs: [-0.88])
+        let unprompted = WhisperKitSTTService.decodeQuality(
+            text: "with an owner and a review date for each one. Second, the vendor", avgLogprobs: [-0.37, -0.34])
+        XCTAssertFalse(prompted.hasSpeechText)
+        XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: unprompted))
+    }
+
+    func testFullDecodeBeatsTheTruncatedOneEitherWay() {
+        // Probe n6_s3_speech4_noise3: prompted "The vendor is" at lp -0.81.
+        let truncated = WhisperKitSTTService.decodeQuality(text: "The vendor is", avgLogprobs: [-0.81])
+        let full = WhisperKitSTTService.decodeQuality(
+            text: "with an owner and a review date for each one. Second, the vendor", avgLogprobs: [-0.40, -0.65])
+        XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: truncated, unprompted: full))
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: full, unprompted: truncated))
+    }
+
+    /// Coverage before confidence: an unprompted decode that stopped early (the
+    /// session-29 tail-loss class) must not beat a prompted decode that kept
+    /// every word, however much better its log-probability.
+    func testMoreWordsBeatsABetterLogProbability() {
+        let fullPrompted = WhisperKitSTTService.decodeQuality(
+            text: "with an owner and a review date for each one. Second, the vendor", avgLogprobs: [-1.2, -0.9])
+        let truncatedUnprompted = WhisperKitSTTService.decodeQuality(
+            text: "with an owner", avgLogprobs: [-0.2])
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: fullPrompted, unprompted: truncatedUnprompted))
+    }
+
+    func testEqualWordCountFallsToLogProbabilityAndATieKeepsThePrompt() {
+        let prompted = WhisperKitSTTService.decodeQuality(text: "Draft the HIPAA notice.", avgLogprobs: [-0.9])
+        let better = WhisperKitSTTService.decodeQuality(text: "Draft the hipper notice.", avgLogprobs: [-0.4])
+        let tied = WhisperKitSTTService.decodeQuality(text: "Draft the hipper notice.", avgLogprobs: [-0.9])
+        XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: better))
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: tied))
+    }
+
+    func testPromptedDecodeIsKeptWhenTheUnpromptedOneHasNoSpeech() {
+        let prompted = WhisperKitSTTService.decodeQuality(text: "Draft the HIPAA notice.", avgLogprobs: [-0.9])
+        let unprompted = WhisperKitSTTService.decodeQuality(text: "[BLANK_AUDIO]", avgLogprobs: [-0.2])
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: unprompted))
     }
 
     // MARK: - Untranscribed speech tail (partial decode detection)

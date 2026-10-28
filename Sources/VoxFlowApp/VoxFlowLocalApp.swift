@@ -33,6 +33,8 @@ struct VoxFlowLocalApp: App {
         }
         .commands {
             CommandMenu("VoxFlow") {
+                SkillProfileMenu(store: coordinator.skillProfiles)
+                Divider()
                 Button("Welcome Window") {
                     coordinator.showMainWindow()
                 }

@@ -1,0 +1,83 @@
+{
+  "source_commit": "8daa4c8",
+  "installed_cdhash": "0a3bfd257174ae1156c991083c092cc82a172be1",
+  "swift": {
+    "tests": 751,
+    "skipped": 3,
+    "failures": 0
+  },
+  "automatic_enter_cases_passed": 8,
+  "guards": [
+    {
+      "test": "Enter revoked during capture",
+      "passed": true,
+      "receipts": [
+        {
+          "total_ms": 1450,
+          "cleanup_ms": 0,
+          "ts": "2026-09-06T00:37:28Z",
+          "insert_ms": 340,
+          "target": "Terminal",
+          "insert_method": "simulatedPaste",
+          "chars": 9,
+          "source": "Skill \u2018research\u2019 inserted \u00b7 Enter skipped",
+          "stt_ms": 1039,
+          "event": "insert",
+          "submission": "skipped",
+          "text": "/research"
+        }
+      ]
+    },
+    {
+      "test": "revoke-actions",
+      "passed": true,
+      "receipts": []
+    },
+    {
+      "test": "revoke-prefix",
+      "passed": true,
+      "receipts": []
+    },
+    {
+      "test": "cancel",
+      "passed": true,
+      "receipts": []
+    },
+    {
+      "test": "same-window-switch",
+      "passed": true,
+      "receipts": []
+    }
+  ],
+  "code_editor": {
+    "actual_saved_text": "/research",
+    "submission": "Off",
+    "verified": true
+  },
+  "verified_action_effects": [
+    "open_calculator",
+    "open_finder",
+    "open_terminal",
+    "copy_selection",
+    "paste_clipboard",
+    "select_all",
+    "undo",
+    "redo",
+    "find"
+  ],
+  "unverified_effects": {
+    "open_safari": "LaunchServices reported success; immediate foreground not confirmed",
+    "open_notes": "bare phrase misrecognized; prefixed attempt rejected empty",
+    "new_tab": "shortcut posted; tracked Terminal tab count unchanged"
+  },
+  "restoration": {
+    "dictionary_originals_intact": true,
+    "dictionary_count": 5,
+    "qa_profile_removed": true,
+    "other_profiles": 0,
+    "voice_actions": "all",
+    "requires_prefix": false,
+    "automatic_enter": "off",
+    "clipboard": "restored"
+  }
+}

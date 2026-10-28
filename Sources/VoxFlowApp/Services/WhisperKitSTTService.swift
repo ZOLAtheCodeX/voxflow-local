@@ -44,6 +44,50 @@ final class WhisperKitSTTService: ChunkTranscribing {
     /// speech at rms ~0.016 peaks well under 0.15), so the captures most
     /// likely to empty were the ones the retry refused (session 29 review).
     /// A decode that already produced segments is never retried.
+    /// The vocabulary prompt's failure signature (2026-10-27 decode probe): on
+    /// a chunk where speech is followed by quiet, the prompted greedy decode
+    /// skips the speech ("The vendor is"), scores under logProbThreshold, and
+    /// WhisperKit's temperature fallback then returns junk ("(", "[", "") that
+    /// the gate rejects, so the words are lost. Any fallback on a prompted
+    /// decode earns one prompt-free retry; a clean greedy decode does not.
+    nonisolated static func shouldRetryWithoutPrompt(promptUsed: Bool, segmentTemperatures: [Float]) -> Bool {
+        promptUsed && segmentTemperatures.contains { $0 > 0 }
+    }
+
+    /// What the prompt-free retry is judged on: the words that survive
+    /// annotation stripping, then the mean segment log-probability.
+    struct DecodeQuality: Equatable {
+        let speechWordCount: Int
+        let meanAvgLogprob: Double?
+        var hasSpeechText: Bool { speechWordCount > 0 }
+    }
+
+    nonisolated static func decodeQuality(text: String, avgLogprobs: [Float]) -> DecodeQuality {
+        let words = HallucinationFilter.stripNonSpeechAnnotations(text)
+            .split(whereSeparator: \.isWhitespace)
+            .filter { $0.contains(where: \.isLetter) }
+        let mean = avgLogprobs.isEmpty
+            ? nil : avgLogprobs.reduce(0.0) { $0 + Double($1) } / Double(avgLogprobs.count)
+        return DecodeQuality(speechWordCount: words.count, meanAvgLogprob: mean)
+    }
+
+    /// Coverage first: more real words win, so a decode that skipped or
+    /// stopped early loses whichever side it is on. Only an equal word count
+    /// falls to the higher mean log-probability, and a tie keeps the prompted
+    /// decode (it carries the spelling bias).
+    nonisolated static func prefersUnprompted(prompted: DecodeQuality, unprompted: DecodeQuality) -> Bool {
+        if prompted.speechWordCount != unprompted.speechWordCount {
+            return unprompted.speechWordCount > prompted.speechWordCount
+        }
+        return (unprompted.meanAvgLogprob ?? -.infinity) > (prompted.meanAvgLogprob ?? -.infinity)
+    }
+
+    private static func decodeQuality(_ results: [TranscriptionResult]) -> DecodeQuality {
+        decodeQuality(
+            text: results.map(\.text).joined(separator: " "),
+            avgLogprobs: results.flatMap(\.segments).map(\.avgLogprob))
+    }
+
     nonisolated static func shouldRetryEmptyDecode(
         segmentCount: Int, rmsEnergy: Double, silenceFloor: Double = CapturedAudio.silenceFloor
     ) -> Bool {
@@ -59,11 +103,17 @@ final class WhisperKitSTTService: ChunkTranscribing {
     /// fallbacks instead of 5 (up to 6 full passes on exactly the marginal
     /// clips that already struggle; high-T passes mostly produced garbage
     /// the gate then had to catch).
-    nonisolated static func makeDecodeOptions(promptTokens: [Int]?) -> DecodingOptions {
-        DecodingOptions(
+    nonisolated static func makeDecodeOptions(
+        promptTokens: [Int]?, audioDurationSeconds: Double? = nil
+    ) -> DecodingOptions {
+        // WhisperKit skips windows no longer than windowClipTime. Keep the
+        // normal one-second tail guard, but let accepted short captures decode.
+        let shortCapture = audioDurationSeconds.map { $0 > 0 && $0 <= 1 } ?? false
+        return DecodingOptions(
             language: "en",
             temperatureFallbackCount: 3,
             wordTimestamps: false,
+            windowClipTime: shortCapture ? 0 : 1,
             promptTokens: promptTokens,
             compressionRatioThreshold: 2.4,
             logProbThreshold: -1.0,
@@ -163,7 +213,8 @@ final class WhisperKitSTTService: ChunkTranscribing {
         // noSpeechThreshold marks a segment silent when noSpeechProb exceeds
         // it AND avgLogprob falls below logProbThreshold; segment noSpeechProb
         // also feeds TranscriptionConfidence regardless of this gate.
-        let decodeOptions = Self.makeDecodeOptions(promptTokens: vocabularyPromptTokens())
+        let decodeOptions = Self.makeDecodeOptions(
+            promptTokens: vocabularyPromptTokens(), audioDurationSeconds: audio.durationSeconds)
         let inferenceStarted = ContinuousClock.now
         var results: [TranscriptionResult] = try await pipe.transcribe(
             audioArray: floatSamples, decodeOptions: decodeOptions)
@@ -171,11 +222,27 @@ final class WhisperKitSTTService: ChunkTranscribing {
         // attempt on the audio already in memory (no re-recording for the
         // user) — with VARIED options, since a deterministic failure would
         // reproduce under an identical replay.
+        var promptUsed = decodeOptions.promptTokens != nil
         if Self.shouldRetryEmptyDecode(
             segmentCount: results.flatMap(\.segments).count, rmsEnergy: rawRMS) {
+            try Task.checkCancellation()
             log.info("WhisperKit returned 0 segments on audio with rms \(String(format: "%.4f", rawRMS)) — retrying decode once with varied options")
             results = try await pipe.transcribe(
                 audioArray: floatSamples, decodeOptions: Self.retryDecodeOptions(from: decodeOptions))
+            promptUsed = false
+        }
+        // A prompted decode that needed temperature fallback gets one
+        // prompt-free attempt; the better of the two is kept.
+        if Self.shouldRetryWithoutPrompt(
+            promptUsed: promptUsed, segmentTemperatures: results.flatMap(\.segments).map(\.temperature)) {
+            try Task.checkCancellation()
+            log.info("Prompted decode needed temperature fallback; retrying once without the vocabulary prompt")
+            let unprompted = try await pipe.transcribe(
+                audioArray: floatSamples, decodeOptions: Self.retryDecodeOptions(from: decodeOptions))
+            if Self.prefersUnprompted(
+                prompted: Self.decodeQuality(results), unprompted: Self.decodeQuality(unprompted)) {
+                results = unprompted
+            }
         }
         let inferenceLatencyMs = inferenceStarted.elapsedMilliseconds()
 

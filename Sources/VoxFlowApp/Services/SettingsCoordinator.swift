@@ -18,6 +18,7 @@ import os.log
     func setDictationHotkeyPreset(_ preset: DictationHotkeyPreset)
     func setCommandLaneHotkeyPreset(_ preset: CommandLaneHotkeyPreset)
     func selectInsertBehavior(_ behavior: InsertBehavior)
+    func selectAutoSubmitMode(_ mode: AutoSubmitMode)
     func updateAppProfile(bundleID: String, profile: AppProfile?)
     func restartBackendWithCurrentConfiguration(status: String)
     func currentBackendLaunchConfiguration() -> BackendLaunchConfiguration
@@ -99,6 +100,7 @@ final class SettingsCoordinator: SettingsCoordinating {
 
     func configureInitialState() {
         let defaults = UserDefaults.standard
+        state.autoSubmitMode = AutoSubmitMode.load(from: defaults)
 
         if let profileRawValue = defaults.string(forKey: translationProfileKey),
            let profile = TranslationProfile(rawValue: profileRawValue) {
@@ -242,6 +244,12 @@ final class SettingsCoordinator: SettingsCoordinating {
             return
         }
         restartBackendWithCurrentConfiguration(status: "OpenAI speech configuration updated")
+    }
+
+    func selectAutoSubmitMode(_ mode: AutoSubmitMode) {
+        state.autoSubmitMode = mode
+        mode.save()
+        state.statusLine = "Automatic Enter: \(mode.displayName)"
     }
 
     func selectInsertBehavior(_ behavior: InsertBehavior) {

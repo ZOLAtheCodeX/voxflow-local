@@ -22,6 +22,10 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
     MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem
     FocusContextMonitor.swift           Focused-target poller; frozen during capture
     CockpitCoordinator.swift            @MainActor cockpit orchestration — chip MRU + voice routing + insert/copy/undo + Notion target/search + assistant handoff + protocol/chain dispatch
+    CockpitCaptureCoordinator.swift     Cockpit capture loop: periodic chunk cuts, single-flight drain on stop, session-bound appends, device-change salvage
+    CockpitPauseDetector.swift          20 ms frame RMS and per-chunk quiet threshold for measured pauses
+    ChunkJoiner.swift                   Punctuation-aware separator between cockpit chunks
+    ExternalAppTracker.swift            Last activated regular non-VoxFlow app (the ⌘R target) + pid/bundle/launch-date verification
     LongFormSessionService.swift        State machine (idle → recording → reviewing) + JSON auto-save (~5 s)
     SmartActionService.swift            actor: smart-action backend dispatch + 20-entry undo history
     VoiceCommandRouter.swift            Single-keyword parser for in-review voice commands
@@ -62,7 +66,7 @@ swift build && swift run VoxFlowLocal      # frontend (requires backend running)
 
 - Swift 6.2 strict concurrency, macOS 14+ deployment target
 - Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.10.0, transformers 5.5.0
-- Health: `curl http://127.0.0.1:8765/v1/health` · Readiness: `curl http://127.0.0.1:8765/v1/ready`
+- Health: `curl http://127.0.0.1:8765/v1/health` · Readiness (token read from the file and passed on stdin, so it never appears in argv): `printf 'X-VoxFlow-Token: %s\n' "$(cat ~/Library/Application\ Support/VoxFlow/backend.token)" | curl -H @- http://127.0.0.1:8765/v1/ready`
 
 ### Ollama (text polish)
 
@@ -81,7 +85,9 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | Variable | Purpose | Default |
 |---|---|---|
 | `VOXFLOW_MODELS_DIR` | Pre-downloaded model cache | `./models` |
-| `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself). | `http://127.0.0.1:8765` |
+| `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself), and a non-loopback manual backend is unsupported: it now rejects requests (loopback `Host` only). | `http://127.0.0.1:8765` |
+| `VOXFLOW_API_TOKEN` | Per-launch backend token (`X-VoxFlow-Token`), 64 lowercase hex. The app generates one and passes it to the managed backend; a manually run backend generates its own when unset. Scripts fall back to it when no token file exists | generated per launch |
+| `VOXFLOW_TOKEN_DIR` | Directory of the `backend.token` mirror file (mode 0600) that `doctor.sh` and `check_runtime_readiness.sh` read | `~/Library/Application Support/VoxFlow` |
 | `VOXFLOW_STT_BACKEND` | `whisper` / `whisperKit` / `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model id | `openai/whisper-small` |
 | `VOXFLOW_STT_ALLOW_FALLBACK` | Opt-in: let a dead local Whisper fall back to cloud OpenAI STT (sends raw, un-redactable audio). Fail-closed when unset | unset (off) |
@@ -107,6 +113,7 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 - Non-activating menu bar panel via `NSPanel(.nonactivatingPanel, .floating)` in `MenuBarPanelController`.
 - Dynamic activation policy: `activateForWindow()` toggles `.regular`/`.accessory`. `LSUIElement = true` in Info.plist.
 - WhisperKit native STT via `WhisperKitSTTService` with `WhisperKitConfig(modelFolder:, download: false)` — zero network.
+- Decode recovery (2026-10-27 probe): a decode that used the vocabulary prompt and needed temperature fallback gets one prompt-free retry, and the better result is kept (real words first, then mean log-probability), because the prompt makes Whisper skip speech in chunks that end in quiet. `TranscriptGate.admit` strips Whisper's non-speech annotations (`[BLANK_AUDIO]`, `[Silence]`, sound-word parentheticals like `(water rushing)`) before its rules, rejects annotation-only output as `hallucination_filter`, and returns the cleaned text, which callers must use downstream (reject receipts keep the raw decode). A one-word parenthetical or asterisk group is stripped only for unambiguous annotation words ("(laughter)", "*typing*"); everyday words like "static" or "running" need a second sound word. The backend's `strip_non_speech_annotations` mirrors it via `Tests/Fixtures/annotation_strip_parity.json`. Quick dictation gates the raw decode and applies the dictionary afterwards (`AppCoordinator.admitQuickDictation`, the cockpit's order), so dictionary terms written with brackets survive. Rejected cockpit chunks with measurable speech keep their audio as rejected-audio clips, at most 3 per recording because the ring is shared with quick dictation's forensic clips; pure noise is never kept.
 - WhisperKit dictation polish routes through the backend Gemma chain when the backend is warm and falls back to Swift-native `TextCleanupService` cleanup when it is cold or the insert behavior is raw. `backendShouldRun` includes non-raw local dictation via `localDictationWantsBackendCleanup`, which warms whenever the GLOBAL insert behavior OR any effective per-app profile (user override layered over the shipped `defaultAppProfiles`, e.g. Mail/Outlook's light-review default) wants cleanup — NOT keyed on the focused app, so it stays focus-independent (the spawn trigger only re-fires at launch/settings-change). Consulting the shipped defaults is what makes those apps get cleanup out of the box even when the fresh-install global default is raw. (Chrome ships as `autoInsertLight`, NOT polish: loading the ~6 GB Gemma model for polish starves WhisperKit capture on ≤16 GB machines, so the browser default is light cleanup with no model load; high-RAM users opt into Auto-Insert Polish per-app.) A cancelled in-flight backend cleanup re-throws (CancellationError / `URLError.cancelled`) instead of falling through to a local insert — only a genuine backend failure falls back. Auto-insert resolves only the inserted mode via the backend; review/private-API resolve both. Prompt framing (`PromptFramingService`) stays fully in-app.
 - All typography, colors, motion presets, and material surfaces flow through `VFDesignTokens.swift` (`VF.*Font`, `VF.color*`, `VF.animation*`, `VF.cardBackground` / `VF.elevatedBackground` / `VF.panelMaterial`). Phase 4 eliminated raw `.font(.system(size:))` literals and `Color.gray.opacity(...)` from `SetupWizardView`, `SettingsView`, `DashboardWindowView`, and the `Views/` tree.
 - Keychain for secrets (`KeychainService`); never UserDefaults.
@@ -115,7 +122,8 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 
 ### Cockpit (Layer 0)
 - Long-form workspace opened via `⌥⌘V` (VoxFlow menu → "Open Cockpit"). Window scene `id: "cockpit"` in `VoxFlowLocalApp`.
-- `LongFormSessionService` is a `@MainActor ObservableObject` with a 3-state machine — `.idle → .recording(startedAt:) → .reviewing` — and Codable `LongFormSession` persisted as JSON to `~/Library/Application Support/VoxFlow/sessions/`. Auto-save fires every ~5 s during recording. `appendChunk(_:)` inserts a `\n\n` paragraph break if ≥4 s of silence elapsed since the last chunk. `recoverLatestSession()` returns the most recently updated session for crash recovery.
+- `LongFormSessionService` is a `@MainActor ObservableObject` with a 3-state machine — `.idle → .recording(startedAt:) → .reviewing` — and Codable `LongFormSession` persisted as JSON to `~/Library/Application Support/VoxFlow/sessions/`. Auto-save fires every ~5 s during recording. `appendChunk(_:pauseBefore:sessionID:)` breaks a paragraph only at a measured pause that spans a chunk boundary (`pauseBefore >= LongFormSessionService.paragraphBreakPause`, 2 s; the pause comes from 20 ms frame RMS per chunk via `CockpitPauseDetector`, with `CockpitCaptureCoordinator` carrying the quiet across boundaries); otherwise `ChunkJoiner` picks the punctuation-aware separator. ⌘R freezes the last activated regular non-VoxFlow app from `ExternalAppTracker` as the session target (none when that app cannot be identified, so insert falls back to the clipboard); insert re-verifies it by bundle ID and launch date, so a recycled pid is never targeted. `recoverLatestSession()` returns the most recently updated session for crash recovery.
+- Drain contracts: `CockpitCaptureCoordinator.stopRecording()` is a single-flight drain (a second call joins the running stop and gets its result) that returns true only when the recording reached `.reviewing` through the normal stop sequence, and false when an interruption ended the session during the drain. ⌘↩, chains (`AppCoordinator.runChain`), smart actions (`CockpitCoordinator.applyAction`) and closing the cockpit (`close()`, and `windowDidClose()` from the window's `.onDisappear`) drain a live recording first; the first three consume the transcript only after a clean drain, and chains and smart actions bind to the session id they started on. A device change makes `stopCapture()` throw without the PCM, so the audio buffered before it is salvaged once through `AudioCapturing.takeInvalidatedAudio()`: transcribed at a periodic cut, used as the tail at a stop, otherwise kept as an `interrupted_tail` clip.
 - `SmartActionService` is an `actor` that wraps a `SmartActionBackend` and keeps a 20-entry undo stack (`AppliedAction`). Guardrail trips and unchanged echoes don't go on the stack — they aren't undoable. The default backend is `BackendAPISmartActionAdapter`, which POSTs to `/v1/smart_action`.
 - `CockpitCoordinator` (@MainActor) routes chip taps + voice utterances + keyboard shortcuts. Chip MRU promotion threshold is 3 invocations (`promotionThreshold`); voice-prompt strip auto-dismisses after 10 review states (`voicePromptStripDismissThreshold`).
 - `VoiceCommandRouter.parse(_:)` is intentionally simple: single keyword, trailing punctuation stripped, case-insensitive. Multi-word utterances return `.none` — Layer 0 ships memo/MECE/items/cancel/undo only.
@@ -137,12 +145,47 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 
 ## Testing
 
+Vocabulary and spoken skills: `docs/vocabulary-and-skills.md` documents the
+portable version-1 schemas. `DictionaryStore` compiles corrections on mutation;
+matching prefers longer spoken forms and never cascades replacements. Existing
+dictionary arrays remain readable; `prioritized` is an optional field. Do not
+overwrite unreadable configuration or publish in-memory changes before an
+atomic save succeeds.
+
+`SkillProfileStore` caches an immutable matcher. Quick Dictation snapshots it
+alongside the target app at capture start; accepted skill utterances bypass
+vocabulary substitutions and prose cleanup. Use `.verbatim` insertion for exact
+commands. Automatic Enter is opt-in with Off / Voice Action Prompts only /
+ordinary dictation only / both scopes; freeze the choice and AX window/field at
+capture start. Post Return only after successful insertion and final target,
+focus, cancellation, and secure-input checks. Record submission separately. Keep profiles explicitly selected, bound
+to allowed app bundle IDs, and separate from cockpit commands and snippets.
+Commands reject newlines/control characters. Successful changes to the effective
+active skill profile revoke captured permissions and pending Enter through the
+coordinator subscription. Retain the captured matcher so cancellation cannot fall
+through to prose. Revoked insertion failures must not become recovery clipboard
+copies. Unit tests use insertion fakes and the shared subscription seam.
+
+Built-in computer actions use `computer_actions.json` and a standalone isolated
+Python preparer, then `ComputerActionService` and the signed native bridge. Keep
+Swift/Python operation allowlists aligned. Only complete registered phrases
+match. The name prefix is required by default and can be made optional in Settings.
+Freeze prefix choice and action permissions at capture start; revoke pending actions
+on mode/toggle/prefix changes. Recheck after preparation; no model/server loading, arbitrary
+shell execution, automatic retries, or implicit Enter in this path. Tests inject
+`ComputerActionPreparing` and `ComputerActionPerforming` fakes. Preserve the
+separate `computer_action` audit event and its dispatch-versus-opened outcome.
+
 ```bash
-swift test                                              # ~689 Swift tests
-./.venv/bin/python -m pytest backend/tests              # ~551 Python tests (+26 model/live-Ollama skipped)
+swift test                                              # Swift unit and integration suite
+./.venv/bin/python -m pytest backend/tests              # Python suite; model/live checks may skip
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
 VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py  # live Ollama acceptance
+VOXFLOW_WHISPERKIT_GOLDEN=1 swift test --filter WhisperKitShortCaptureIntegrationTests
+VOXFLOW_WHISPERKIT_GOLDEN=1 swift test --filter CockpitDecodeRegressionTests  # real-model speech-then-quiet + room-noise clips
+VOXFLOW_DICTIONARY_BENCHMARK=1 swift test --filter DictionaryPerformanceTests
+VOXFLOW_STT_BENCHMARK=1 swift test --filter WhisperKitPerformanceTests
 ```
 
 Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish golden set: `backend/tests/golden_polish_set.json`.
@@ -189,8 +232,9 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Add a new `SmartActionId` to `AppModels.swift` without adding the matching system-prompt entry in `backend/app/smart_actions.py` — the engine will fall back to a generic prompt template and the action label/tooltip will look fine while the LLM output stays generic.
 - Have the cockpit voice router fire actions while the session is `.recording` — voice keywords only resolve in `.reviewing`. Multi-word utterances must remain `.none` for Layer 0.
 - Bypass `BackendAPISmartActionAdapter` to call `/v1/smart_action` directly from views — go through `CockpitCoordinator.applyAction` so MRU + undo stay correct.
+- Call `CockpitCaptureCoordinator.flushNow()` from production: go through `periodicFlush()`, which runs the cut inside `flushTask` so a stop can await the chunk it already cut (`flushNow()` is callable directly only from tests with no concurrent stop).
 - Insert dictation text without a final `try Task.checkCancellation()` first — every auto-insert path (raw, `autoInsertOrReview`, the snippet path) must gate on it so a cancelled/superseded capture never inserts stale text. Cancellation propagates as `CancellationError`/`URLError.cancelled` and is handled quietly by `handleCaptureError` (`AppCoordinator.isUserCancellation`); genuine backend/STT failures still fall back/insert.
-- SIGTERM a process by port or PID file without confirming identity — `terminateForeignListenerAsync` and `killStaleBackend` must gate on `BackendProcessManager.isVoxFlowBackendCommand(...)` (via the `BackendProcessRunning.commandLine` seam: managed `backend/app/server.py` or dev `uvicorn server:app`). Unknown/reused PIDs are refused + logged, never killed. The PID file also records the spawning session's instance stamp (`pid\nstamp`); `killStaleBackend` additionally refuses when a live `/v1/health` stamp contradicts the recorded one (probe failure falls back to the cmdline gate — the stamp check only ever reduces kills). Stamp-probe defaults are XCTest-inert like `defaultRunner()`.
+- SIGTERM a process by port or PID file without confirming identity — `terminateForeignListenerAsync`, `killStaleBackend`, and `ensureBackendPortAvailable` must gate on `BackendProcessManager.isVoxFlowBackendCommand(...)` (via the `BackendProcessRunning.commandLine` seam: managed `backend/app/server.py` or dev `uvicorn server:app`). Unknown/reused PIDs are refused + logged, never killed. The PID file also records the spawning session's instance stamp (`pid\nstamp`); `killStaleBackend` checks the command line, plus the recorded stamp against the in-process `spawnedSessionStamp` (it refuses when this session has spawned and the file records a different session's stamp; no `/v1/health` probe).
 - Lower cleanup consent `max_uses` below 2 (it is the light+polish review flow) or drop the payload/choice bindings — `ConsentStore.resolve(expected_text:, allow_raw:)` must reject reusing a token for a different payload AND reject flipping the raw/redacted choice locked by the first use, both checked BEFORE consuming a use.
 - Classify `openai_compat` locality from the raw `base_url` — use the resolved URL (`spec.base_url or _OPENAI_COMPAT_DEFAULT_URL`); a no-`base_url` provider is LOCAL (matches the localhost server the backend actually calls), so it isn't mislabeled cloud and over-redacted.
 - Guard `AudioGain.normalize` at the *speech* floor (0.02) — valid weak speech occurs below it (live empties at rms ~0.016); only skip boosting below `silenceFloor` (0.003). The boost applies to the decoder's float copy only; the stored PCM / audit RMS stay the TRUE input level.

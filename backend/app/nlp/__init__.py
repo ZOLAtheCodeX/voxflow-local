@@ -13,7 +13,7 @@ from .cleanup import (
     replace_spoken_punctuation,
     split_and_recase,
 )
-from .hallucination import is_whisper_hallucination
+from .hallucination import is_whisper_hallucination, strip_non_speech_annotations
 from .meeting import (
     build_meeting_summary,
     coerce_speaker_segments,
@@ -34,6 +34,7 @@ __all__ = [
     "infer_speaker_segments",
     "infer_task_owners",
     "is_whisper_hallucination",
+    "strip_non_speech_annotations",
     "light_cleanup",
     "normalize_whitespace",
     "remove_fillers",

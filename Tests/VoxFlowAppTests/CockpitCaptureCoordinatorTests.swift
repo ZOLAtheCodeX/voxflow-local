@@ -8,6 +8,17 @@ private final class FakeCapture: AudioCapturing {
     var failNextStart = false
     var failNextStop = false
     var nextAudio: CapturedAudio
+    /// Audio served by successive stopCapture calls before `nextAudio` takes
+    /// over, so a test can tell the periodic chunk from the stop's tail.
+    var queue: [CapturedAudio] = []
+    /// Mirrors AudioCaptureService: true between a successful start and a
+    /// successful stop. A stop while stopped is a coordinator bug.
+    private(set) var isRunning = false
+    /// Audio a device change invalidated: AudioCaptureService.stopCapture
+    /// throws deviceChanged without returning it, so it is only reachable
+    /// through `takeInvalidatedAudio()`.
+    private var invalidatedAudio: CapturedAudio?
+    var restartCount: Int { max(0, startCount - 1) }
     /// Scripted tail energy + consult counter for the quiet-boundary flush.
     var tailRMSValue: Double?
     private(set) var tailRMSConsults = 0
@@ -26,22 +37,102 @@ private final class FakeCapture: AudioCapturing {
         liveCallbackPresence.append(onCaptureLive != nil)
         lastLiveCallback = onCaptureLive
         if failNextStart { failNextStart = false; throw AudioCaptureError.captureNotRunning }
+        isRunning = true
     }
     func stopCapture() throws -> CapturedAudio {
         stopCount += 1
-        if failNextStop { failNextStop = false; throw AudioCaptureError.deviceChanged }
-        return nextAudio
+        guard isRunning else {
+            XCTFail("stopCapture on a stopped engine")
+            throw AudioCaptureError.captureNotRunning
+        }
+        let audio = queue.isEmpty ? nextAudio : queue.removeFirst()
+        isRunning = false
+        // handleConfigurationChange already stopped the engine, so the throw
+        // leaves it stopped and the buffered audio is only salvageable.
+        if failNextStop {
+            failNextStop = false
+            invalidatedAudio = audio
+            throw AudioCaptureError.deviceChanged
+        }
+        return audio
+    }
+    func takeInvalidatedAudio() -> CapturedAudio? {
+        defer { invalidatedAudio = nil }
+        return invalidatedAudio
     }
 }
 
-private final class FakeTranscriber: ChunkTranscribing, @unchecked Sendable {
+/// Yields until `condition` holds, a bounded number of times. On exhaustion it
+/// fails the test instead of hanging the suite, and returns false. Shared by
+/// the cockpit test files.
+@MainActor
+func yieldUntil(
+    _ condition: () -> Bool, limit: Int = 10_000, _ message: String,
+    file: StaticString = #filePath, line: UInt = #line
+) async -> Bool {
+    for _ in 0..<limit {
+        if condition() { return true }
+        await Task.yield()
+    }
+    if condition() { return true }
+    XCTFail(message, file: file, line: line)
+    return false
+}
+
+/// A completion flag a test task sets after its awaited call returns, so a
+/// test can tell a call that is still waiting from one that returned.
+@MainActor
+final class DoneFlag {
+    var isDone = false
+}
+
+@MainActor
+private final class FakeTranscriber: ChunkTranscribing {
     var nextText: String = ""
+    /// Per-call text and confidence, falling back to `nextText` and 0.9.
+    var texts: [String] = []
+    var confidences: [Double] = []
     /// Number of upcoming transcribe calls that should throw (backend dead,
     /// WhisperKit failure) — decremented per call.
     var failuresRemaining = 0
+    /// Zero-based call indexes that throw, for a failure between successes.
+    var failingCalls: Set<Int> = []
     /// PCM byte counts of each transcribed chunk — pins the carry semantics.
     private(set) var receivedPCMCounts: [Int] = []
+    /// While positive, each call suspends until `releaseNext()`.
+    var holdCalls = 0
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private var callIndex = 0
+    var heldCount: Int { held.count }
+
+    func releaseNext() {
+        guard !held.isEmpty else { return }
+        held.removeFirst().resume()
+    }
+
+    func waitUntilHeld(
+        _ n: Int, file: StaticString = #filePath, line: UInt = #line
+    ) async -> Bool {
+        await yieldUntil({ held.count >= n }, "transcriber never held \(n) call(s)", file: file, line: line)
+    }
+
+    /// Frees every suspended call and stops holding, so a failed wait cannot
+    /// leave tasks (and the suite) hanging.
+    func releaseAll() {
+        holdCalls = 0
+        let pending = held
+        held = []
+        pending.forEach { $0.resume() }
+    }
+
     func transcribe(_ audio: CapturedAudio) async throws -> TranscribeResponse {
+        let index = callIndex
+        callIndex += 1
+        if holdCalls > 0 {
+            holdCalls -= 1
+            await withCheckedContinuation { held.append($0) }
+        }
+        if failingCalls.contains(index) { throw URLError(.cannotConnectToHost) }
         if failuresRemaining > 0 {
             failuresRemaining -= 1
             throw URLError(.cannotConnectToHost)
@@ -49,7 +140,8 @@ private final class FakeTranscriber: ChunkTranscribing, @unchecked Sendable {
         receivedPCMCounts.append(audio.pcm.count)
         // TranscribeResponse has no defaults — all 9 fields required (BackendAPIClient.swift:3).
         return TranscribeResponse(
-            text: nextText, isFinal: true, latencyMs: 1, confidenceEstimate: 0.9,
+            text: index < texts.count ? texts[index] : nextText, isFinal: true, latencyMs: 1,
+            confidenceEstimate: index < confidences.count ? confidences[index] : 0.9,
             processingTimeMs: 1, stageTimingsMs: nil,
             modelLoadedBeforeRequest: nil, modelLoadedAfterRequest: nil, coldStart: nil)
     }
@@ -96,8 +188,97 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
             capture: capture, transcriber: FakeTranscriber(), session: session,
             onCaptureLive: {})
         coord.startRecording(targetApp: nil)
-        await coord.flushNow(force: true)
+        await coord.flushNow()
         XCTAssertEqual(capture.liveCallbackPresence, [true, false])
+        await coord.stopRecording()
+    }
+
+    // MARK: - Rejected chunks with speech keep their audio
+
+    private func makeRetainingCoordinator(
+        audio: CapturedAudio, text: String, confidence: Double
+    ) -> (CockpitCaptureCoordinator, LongFormSessionService, URL, URL) {
+        let capture = FakeCapture(nextAudio: audio)
+        let transcriber = FakeTranscriber()
+        transcriber.texts = [text]
+        transcriber.confidences = [confidence]
+        let wavDir = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-wav-\(UUID().uuidString)")
+        let auditURL = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-audit-\(UUID().uuidString).jsonl")
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            audit: InsertionAuditLog(fileURL: auditURL),
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        return (coord, session, wavDir, auditURL)
+    }
+
+    private func clips(in dir: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasSuffix(".wav") }
+    }
+
+    func test_gate_rejected_chunk_with_speech_is_kept_as_a_clip() async throws {
+        let (coord, _, wavDir, auditURL) = makeRetainingCoordinator(
+            audio: makeTone([(seconds: 5.0, rms: 0.08)]), text: "um", confidence: 0.05)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        XCTAssertEqual(clips(in: wavDir).filter { $0.contains("low_confidence") }.count, 1)
+        let receipt = try String(contentsOf: auditURL, encoding: .utf8)
+        XCTAssertTrue(receipt.contains("low_confidence") && receipt.contains("audio_file"), receipt)
+        await coord.stopRecording()
+    }
+
+    func test_empty_decode_of_speech_is_kept_as_a_clip_with_a_receipt() async throws {
+        let (coord, _, wavDir, auditURL) = makeRetainingCoordinator(
+            audio: makeTone([(seconds: 5.0, rms: 0.08)]), text: "", confidence: 0)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        XCTAssertEqual(clips(in: wavDir).filter { $0.contains("empty") }.count, 1)
+        let receipt = try String(contentsOf: auditURL, encoding: .utf8)
+        XCTAssertTrue(receipt.contains("\"empty\""), receipt)
+        await coord.stopRecording()
+    }
+
+    /// The ring is shared with quick dictation's forensic clips: noisy rooms
+    /// or breaths can push a quiet chunk past the speech threshold, so one
+    /// recording keeps at most three rejected-chunk clips.
+    func test_rejected_speech_clips_are_capped_per_recording() async {
+        let capture = FakeCapture(nextAudio: makeTone([(seconds: 5.0, rms: 0.08)]))
+        let transcriber = FakeTranscriber()
+        transcriber.texts = Array(repeating: "um", count: 5)
+        transcriber.confidences = Array(repeating: 0.05, count: 5)
+        let wavDir = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-wav-\(UUID().uuidString)")
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        coord.startRecording(targetApp: nil)
+        for _ in 0..<5 { await coord.periodicFlush() }
+        XCTAssertEqual(clips(in: wavDir).count, 3)
+        await coord.stopRecording()
+    }
+
+    func test_gate_rejected_noise_chunk_is_not_kept() async {
+        let (coord, _, wavDir, _) = makeRetainingCoordinator(
+            audio: makeTone([(seconds: 5.0, rms: 0.005)]), text: "(water rushing)", confidence: 0.45)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        XCTAssertTrue(clips(in: wavDir).isEmpty, "room noise must not fill the clip ring")
+        await coord.stopRecording()
+    }
+
+    /// 2026-10-27 acceptance run: Whisper's non-speech annotations reached the
+    /// transcript ("[Silence] Fourth check", "[ [ [BLANK_AUDIO]").
+    func test_non_speech_annotations_never_reach_the_transcript() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber()
+        transcriber.texts = ["[Silence] Fourth check, closing the cockpit.", "[ [ [BLANK_AUDIO]", "(water rushing)"]
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+        XCTAssertEqual(session.currentSession?.transcript, "Fourth check, closing the cockpit.")
         await coord.stopRecording()
     }
 
@@ -325,7 +506,7 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         coord.startRecording(targetApp: nil)
 
         capture.failNextStart = true
-        await coord.flushNow(force: true)
+        await coord.flushNow()
 
         if case .recording = session.state {
             XCTFail("session must end after a restart failure")
@@ -334,9 +515,10 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
                       "the in-hand chunk must be transcribed before the session ends")
     }
 
-    /// Audit S12: when the mid-chunk capture restart fails, the engine must
-    /// be cleaned up with a best-effort stop before the session ends, so the
-    /// next cockpit recording starts from a known-stopped engine.
+    /// Audit S12: when the mid-chunk capture restart fails the session must
+    /// end. AudioCaptureService.startCapture removes its own tap when
+    /// engine.start() throws, so no second stop is needed (it could only
+    /// throw captureNotRunning); the fake fails the test on a stop-while-stopped.
     @MainActor
     func test_flushNow_restart_failure_stops_capture_before_ending_session() async {
         let capture = FakeCapture(nextAudio: makeAudio(silent: false))
@@ -346,12 +528,638 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
 
         sut.startRecording(targetApp: nil)
         capture.failNextStart = true
-        await sut.flushNow(force: true)
+        await sut.flushNow()
 
-        // stop #1: the flush's stop -> restart fails -> stop #2: cleanup.
-        XCTAssertEqual(capture.stopCount, 2)
+        XCTAssertEqual(capture.stopCount, 1)
         if case .recording = session.state {
             XCTFail("session must not stay in .recording after a restart failure")
         }
+    }
+
+    // MARK: - Safe drain, session binding, interruption tail retention
+
+    private func makeSession() -> LongFormSessionService {
+        LongFormSessionService(
+            autoSaveDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString))
+    }
+
+    private func makeTempDir() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-wav-\(UUID().uuidString)")
+    }
+
+    private func clipNames(_ dir: URL) -> [String] {
+        (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+    }
+
+    private func occurrences(of needle: String, in text: String) -> Int {
+        text.components(separatedBy: needle).count - 1
+    }
+
+    func test_stop_during_inflight_transcription_appends_chunk_then_tail() async {
+        let a = makeAudio(silent: false, samples: 8000), b = makeAudio(silent: false, samples: 4000)
+        let capture = FakeCapture(nextAudio: a); capture.queue = [a, b]
+        let transcriber = FakeTranscriber()
+        transcriber.texts = ["first part", "second part"]; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop = Task { await coord.stopRecording() }
+        guard await yieldUntil({ capture.stopCount >= 2 }, "stop never reached 2 stopCapture calls") else { transcriber.releaseAll(); return }   // the tail is cut at the keypress
+        transcriber.releaseNext()
+        _ = await stop.value; await flush.value
+
+        XCTAssertEqual(session.currentSession?.transcript, "first part second part")
+        XCTAssertEqual(session.state, .reviewing)
+        XCTAssertEqual(transcriber.receivedPCMCounts, [16_000, 8_000])
+    }
+
+    func test_tail_is_cut_at_the_keypress() async {
+        let a = makeAudio(silent: false, samples: 8000), b = makeAudio(silent: false, samples: 4000)
+        let c = makeAudio(silent: false, samples: 6000)
+        let capture = FakeCapture(nextAudio: a); capture.queue = [a, b, c]
+        let transcriber = FakeTranscriber()
+        transcriber.texts = ["first part", "second part"]; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop = Task { await coord.stopRecording() }
+        guard await yieldUntil({ capture.stopCount >= 2 }, "stop never reached 2 stopCapture calls") else { transcriber.releaseAll(); return }
+        transcriber.releaseNext()
+        _ = await stop.value; await flush.value
+
+        XCTAssertEqual(capture.queue.count, 1, "audio after the keypress must never be served")
+        XCTAssertEqual(capture.stopCount, 2)
+        XCTAssertEqual(capture.restartCount, 1)
+    }
+
+    func test_double_stop_appends_tail_once_and_never_restarts() async {
+        let a = makeAudio(silent: false, samples: 8000), b = makeAudio(silent: false, samples: 4000)
+        let capture = FakeCapture(nextAudio: a); capture.queue = [a, b]
+        let transcriber = FakeTranscriber()
+        transcriber.texts = ["first part", "second part"]; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop1 = Task { await coord.stopRecording() }
+        let stop2 = Task { await coord.stopRecording() }
+        guard await yieldUntil({ capture.stopCount >= 2 }, "stop never reached 2 stopCapture calls") else { transcriber.releaseAll(); return }
+        transcriber.releaseNext()
+        _ = await stop1.value; _ = await stop2.value; await flush.value
+
+        let transcript = session.currentSession?.transcript ?? ""
+        XCTAssertEqual(occurrences(of: "second part", in: transcript), 1)
+        XCTAssertEqual(capture.stopCount, 2)
+        XCTAssertEqual(capture.restartCount, 1)
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    func test_stop_during_flush_deferral_abandons_the_cut() async {
+        let b = makeAudio(silent: false, samples: 4000)
+        let capture = FakeCapture(nextAudio: b); capture.queue = [b]
+        capture.tailRMSValue = 0.05   // speech at the tail, forever
+        let transcriber = FakeTranscriber(); transcriber.nextText = "tail words"
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            flushDeferralStepNs: 1_000_000, maxFlushDeferralNs: 10_000_000_000)
+        coord.startRecording(targetApp: nil)
+
+        let flush = Task { await coord.periodicFlush() }
+        guard await yieldUntil({ capture.tailRMSConsults >= 1 }, "flush never consulted the tail") else {
+            await coord.stopRecording(); return
+        }
+        await coord.stopRecording()
+        await flush.value
+
+        XCTAssertEqual(transcriber.receivedPCMCounts, [8_000])
+        XCTAssertEqual(capture.stopCount, 1)
+        XCTAssertEqual(capture.restartCount, 0)
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    func test_stop_after_restart_failure_issues_no_stop() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "last words"
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStart = true
+        await coord.periodicFlush()   // the session ends on the restart failure
+        await coord.stopRecording()
+
+        XCTAssertEqual(capture.stopCount, 1, "no stop may hit an engine that is already stopped")
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    func test_start_is_refused_while_a_stop_drains() async {
+        let a = makeAudio(silent: false, samples: 8000), b = makeAudio(silent: false, samples: 4000)
+        let capture = FakeCapture(nextAudio: a); capture.queue = [a, b]
+        let transcriber = FakeTranscriber(); transcriber.nextText = "words"; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop = Task { await coord.stopRecording() }
+        guard await yieldUntil({ capture.stopCount >= 2 }, "stop never reached 2 stopCapture calls") else { transcriber.releaseAll(); return }
+
+        session.reset()
+        let startsBefore = capture.startCount
+        coord.startRecording(targetApp: nil)
+        XCTAssertEqual(capture.startCount, startsBefore, "a stop in progress must fence off a new start")
+        XCTAssertEqual(session.state, .idle)
+
+        transcriber.releaseNext()
+        _ = await stop.value; await flush.value
+    }
+
+    /// Review Focus 1: a device change has already stopped the engine, so
+    /// stopCapture throws deviceChanged and never returns the PCM. The audio
+    /// buffered before the change must still reach the transcript.
+    func test_stop_with_device_change_keeps_tail_from_invalidated_capture() async {
+        let b = makeAudio(silent: false, samples: 4000)
+        let capture = FakeCapture(nextAudio: b); capture.queue = [b]
+        let transcriber = FakeTranscriber(); transcriber.nextText = "the tail words"
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStop = true
+        await coord.stopRecording()
+
+        XCTAssertEqual(capture.stopCount, 1)
+        XCTAssertFalse(capture.isRunning)
+        XCTAssertEqual(session.currentSession?.transcript, "the tail words")
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    /// The audio buffered before a device change at a periodic cut is
+    /// transcribed before the session ends, so its words land in front of
+    /// the marker. Nothing is left over for an interrupted_tail clip.
+    func test_device_change_at_periodic_cut_transcribes_buffered_audio_before_the_marker() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "salvaged words"
+        let wavDir = makeTempDir()
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStop = true
+        await coord.periodicFlush()
+
+        XCTAssertEqual(session.currentSession?.transcript,
+                       "salvaged words\n\n[recording interrupted — audio device changed or capture stopped]")
+        XCTAssertEqual(clipNames(wavDir).filter { $0.contains("interrupted_tail") }.count, 0)
+        XCTAssertEqual(capture.stopCount, 1)
+        XCTAssertEqual(capture.restartCount, 0)
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    /// The salvaged audio goes through the transcriber's normal failure path:
+    /// a failed transcription still keeps the clip.
+    func test_device_change_at_periodic_cut_keeps_the_clip_when_transcription_fails() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.failuresRemaining = 1
+        let wavDir = makeTempDir()
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStop = true
+        await coord.periodicFlush()
+
+        let names = clipNames(wavDir)
+        XCTAssertEqual(names.filter { $0.contains("transcription_error") }.count, 1)
+        XCTAssertEqual(names.filter { $0.contains("interrupted_tail") }.count, 0)
+        XCTAssertEqual(session.currentSession?.transcript,
+                       "[recording interrupted — audio device changed or capture stopped]")
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    /// The salvage transcription awaits. A recording started meanwhile (the
+    /// old one cancelled from review) belongs to someone else: the late
+    /// cleanup must not end it or stop its engine.
+    func test_device_change_salvage_does_not_end_a_newer_recording() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber()
+        transcriber.nextText = "stale words"; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStop = true
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        session.stop(); session.reset()   // the user cancels, then records again
+        coord.startRecording(targetApp: nil)
+        transcriber.releaseNext()
+        await flush.value
+
+        guard case .recording = session.state else {
+            return XCTFail("the newer recording must keep recording, got \(session.state)")
+        }
+        XCTAssertEqual(session.currentSession?.transcript, "")
+        XCTAssertTrue(capture.isRunning, "the newer recording's engine must stay on")
+        _ = await coord.stopRecording()
+    }
+
+    func test_third_failure_interruption_retains_buffered_tail() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.failuresRemaining = 3
+        let wavDir = makeTempDir()
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        coord.startRecording(targetApp: nil)
+
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+
+        let names = clipNames(wavDir)
+        XCTAssertEqual(names.filter { $0.contains("transcription_error") }.count, 3)
+        XCTAssertEqual(names.filter { $0.contains("interrupted_tail") }.count, 1)
+        XCTAssertTrue((session.currentSession?.transcript ?? "").hasSuffix(
+            "[recording interrupted — transcription failing repeatedly — audio clips kept]"))
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    /// Review Focus 2: the third failure lands while a stop is awaiting the
+    /// flush, after the stop already took the tail. That tail must be kept.
+    func test_interruption_during_stop_retains_taken_tail() async {
+        let a = makeAudio(silent: false, samples: 8000), b = makeAudio(silent: false, samples: 4000)
+        let capture = FakeCapture(nextAudio: a); capture.queue = [a, a, a, b]
+        let transcriber = FakeTranscriber(); transcriber.failuresRemaining = 3
+        let wavDir = makeTempDir()
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        coord.startRecording(targetApp: nil)
+
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+        transcriber.holdCalls = 1
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop = Task { await coord.stopRecording() }
+        guard await yieldUntil({ capture.stopCount >= 4 }, "stop never reached 4 stopCapture calls") else { transcriber.releaseAll(); return }   // the stop took the tail
+        transcriber.releaseNext()
+        _ = await stop.value; await flush.value
+
+        let names = clipNames(wavDir)
+        XCTAssertEqual(names.filter { $0.contains("interrupted_tail") }.count, 1)
+        XCTAssertEqual(names.filter { $0.contains("transcription_error") }.count, 3)
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    func test_late_chunk_from_old_session_is_ignored() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "stale words"; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        session.stop(); session.reset(); session.start()   // a different session id
+        transcriber.releaseNext()
+        await flush.value
+
+        XCTAssertEqual(session.currentSession?.transcript, "")
+    }
+
+    func test_new_recording_starts_with_empty_carry() async {
+        let tiny = makeAudio(silent: false, samples: 4000)   // 8000 bytes, under the minimum
+        let capture = FakeCapture(nextAudio: tiny)
+        let transcriber = FakeTranscriber(); transcriber.nextText = "fresh words"
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()   // carried, not transcribed
+        XCTAssertEqual(transcriber.receivedPCMCounts, [])
+
+        session.stop(); session.reset()   // bypasses stopRecording on purpose
+        let normal = makeAudio(silent: false, samples: 16_000)
+        capture.nextAudio = normal
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+
+        XCTAssertEqual(transcriber.receivedPCMCounts.last, normal.pcm.count,
+                       "the previous recording's carry must not leak into this one")
+    }
+
+    func test_new_recording_starts_with_zero_failure_count() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.failuresRemaining = 2
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+
+        session.stop(); session.reset()   // bypasses stopRecording on purpose
+        transcriber.failuresRemaining = 1
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+
+        if case .recording = session.state {} else {
+            XCTFail("a stale failure count would have ended this recording on its first failure")
+        }
+    }
+
+    func test_second_stop_during_tail_transcription_keeps_the_tail() async {
+        let b = makeAudio(silent: false, samples: 4000)
+        let capture = FakeCapture(nextAudio: b); capture.queue = [b]
+        let transcriber = FakeTranscriber()
+        transcriber.nextText = "the tail words"; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let stop1 = Task { await coord.stopRecording() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop2Done = DoneFlag()
+        let stop2 = Task {
+            await coord.stopRecording()
+            stop2Done.isDone = true
+        }
+        // Give a second stop that wrongly returns early every chance to do so.
+        for _ in 0..<100 where !stop2Done.isDone { await Task.yield() }
+        XCTAssertFalse(stop2Done.isDone, "the second stop must wait for the drain it joined")
+        transcriber.releaseNext()
+        _ = await stop1.value; _ = await stop2.value
+        XCTAssertTrue(stop2Done.isDone)
+
+        let transcript = session.currentSession?.transcript ?? ""
+        XCTAssertEqual(occurrences(of: "the tail words", in: transcript), 1)
+        XCTAssertEqual(capture.stopCount, 1)
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    func test_stop_during_restart_failure_flush_keeps_chunk_and_marker() async {
+        let a = makeAudio(silent: false, samples: 8000)
+        let capture = FakeCapture(nextAudio: a)
+        let transcriber = FakeTranscriber()
+        transcriber.nextText = "chunk words"; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStart = true
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop = Task { await coord.stopRecording() }
+        for _ in 0..<10 { await Task.yield() }   // let the stop start draining
+        transcriber.releaseNext()
+        _ = await stop.value; await flush.value
+
+        let transcript = session.currentSession?.transcript ?? ""
+        XCTAssertTrue(transcript.contains("chunk words"))
+        XCTAssertTrue(transcript.contains("[recording interrupted — microphone restart failed]"))
+        XCTAssertEqual(capture.stopCount, 1)
+    }
+
+    // MARK: - Drain result
+
+    func test_stopRecording_reports_a_clean_drain() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "the tail words"
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let drained = await coord.stopRecording()
+
+        XCTAssertTrue(drained)
+        XCTAssertEqual(session.state, .reviewing)
+    }
+
+    func test_stopRecording_with_nothing_recording_reports_no_drain() async {
+        let coord = CockpitCaptureCoordinator(
+            capture: FakeCapture(nextAudio: makeAudio(silent: false)),
+            transcriber: FakeTranscriber(), session: makeSession())
+
+        let drained = await coord.stopRecording()
+
+        XCTAssertFalse(drained)
+    }
+
+    func test_joined_stop_reports_the_same_clean_drain() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false, samples: 4000))
+        let transcriber = FakeTranscriber()
+        transcriber.nextText = "the tail words"; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        let stop1 = Task { await coord.stopRecording() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop2 = Task { await coord.stopRecording() }
+        for _ in 0..<10 { await Task.yield() }   // let the second stop join
+        transcriber.releaseNext()
+        let first = await stop1.value, second = await stop2.value
+
+        XCTAssertTrue(first)
+        XCTAssertTrue(second, "a joined stop gets the result of the drain it joined")
+    }
+
+    /// The restart-failure flush ends the session with a marker while the
+    /// stop awaits it. That is an interruption, not a clean drain, for the
+    /// stop and for every stop that joined it.
+    func test_stop_joining_an_interrupted_flush_reports_no_drain() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false, samples: 8000))
+        let transcriber = FakeTranscriber()
+        transcriber.nextText = "chunk words"; transcriber.holdCalls = 1
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+
+        capture.failNextStart = true
+        let flush = Task { await coord.periodicFlush() }
+        guard await transcriber.waitUntilHeld(1) else { transcriber.releaseAll(); return }
+        let stop1 = Task { await coord.stopRecording() }
+        let stop2 = Task { await coord.stopRecording() }
+        for _ in 0..<10 { await Task.yield() }   // let both stops start draining
+        transcriber.releaseNext()
+        let first = await stop1.value, second = await stop2.value
+        await flush.value
+
+        XCTAssertFalse(first)
+        XCTAssertFalse(second)
+        XCTAssertEqual(session.state, .reviewing)
+        XCTAssertTrue((session.currentSession?.transcript ?? "").hasSuffix(
+            "[recording interrupted — microphone restart failed]"))
+    }
+
+    /// The tail's own transcription is the third consecutive failure, so the
+    /// session ends through the interruption path inside the stop.
+    func test_stop_whose_tail_ends_the_session_reports_no_drain() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.failuresRemaining = 3
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+
+        let drained = await coord.stopRecording()
+
+        XCTAssertFalse(drained)
+        XCTAssertEqual(session.state, .reviewing)
+        XCTAssertTrue((session.currentSession?.transcript ?? "").hasSuffix(
+            "[recording interrupted — transcription failing repeatedly — audio clips kept]"))
+    }
+
+    // MARK: - Pause accounting across chunk boundaries
+
+    /// Runs one `periodicFlush()` per queued chunk, then stops, and returns the
+    /// final transcript. The stop's tail is a short silent buffer unless the
+    /// caller queued one more chunk.
+    private func transcriptAfterFlushes(
+        _ chunks: [CapturedAudio], texts: [String], confidences: [Double] = [],
+        failingCalls: Set<Int> = [], extraTail: CapturedAudio? = nil
+    ) async -> String {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: true, samples: 1600))
+        capture.queue = chunks + (extraTail.map { [$0] } ?? [])
+        let transcriber = FakeTranscriber()
+        transcriber.texts = texts
+        transcriber.confidences = confidences
+        transcriber.failingCalls = failingCalls
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        for _ in chunks { await coord.periodicFlush() }
+        await coord.stopRecording()
+        return session.currentSession?.transcript ?? ""
+    }
+
+    func test_continuous_speech_across_three_flushes_is_one_paragraph() async {
+        let chunk = makeTone([(5.0, 0.08)])
+        let transcript = await transcriptAfterFlushes(
+            [chunk, chunk, chunk], texts: ["one", "two", "three"])
+        XCTAssertEqual(transcript, "one two three")
+    }
+
+    func test_quiet_span_across_boundary_breaks_once() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (1.2, 0)]), makeTone([(1.0, 0), (3.0, 0.08)])],
+            texts: ["one", "two"])
+        XCTAssertEqual(transcript, "one\n\ntwo")
+    }
+
+    func test_short_quiet_span_across_boundary_joins() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (0.95, 0)]), makeTone([(0.95, 0), (3.0, 0.08)])],
+            texts: ["one", "two"])
+        XCTAssertEqual(transcript, "one two")
+    }
+
+    func test_all_quiet_window_between_speech_breaks() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(5.0, 0.08)]), makeTone([(5.0, 0.004)]), makeTone([(5.0, 0.08)])],
+            texts: ["one", "", "three"])
+        XCTAssertEqual(transcript, "one\n\nthree")
+    }
+
+    func test_gate_rejected_speech_chunk_does_not_create_break() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (1.5, 0)]),
+             makeTone([(5.0, 0.08)]),
+             makeTone([(1.0, 0), (4.0, 0.08)])],
+            texts: ["one", "um", "three"], confidences: [0.9, 0.05, 0.9])
+        XCTAssertEqual(transcript, "one three")
+    }
+
+    func test_carried_subminimum_merge_counts_once() async {
+        // 8000 bytes (below the 9600-byte minimum) is carried, then merged into
+        // the next flush. Counting the carry's quiet lead twice would reach 2.0.
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (1.8, 0)]),
+             makeTone([(0.15, 0), (0.1, 0.08)]),
+             makeTone([(0.7, 0), (4.0, 0.08)])],
+            texts: ["one", "three"])
+        XCTAssertEqual(transcript, "one three")
+    }
+
+    func test_short_word_after_long_quiet_does_not_break_next_chunk() async {
+        // The first chunk's p95 is room noise (quietThreshold is nil) yet it
+        // produced text, so its trailing quiet is measured at the fallback
+        // threshold: the short word ends it and nothing carries forward.
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.8, 0.004), (0.2, 0.08)]), makeTone([(5.0, 0.08)])],
+            texts: ["hello", "world"])
+        XCTAssertEqual(transcript, "hello world")
+    }
+
+    /// Ruling R3a: sustained weak speech (p95 under 3x the silence floor, so
+    /// no measured threshold) is measured at the detector's own floor, so the
+    /// speech never reads as quiet and continuous chunks join.
+    func test_sustained_weak_speech_across_boundary_joins() async {
+        let chunk = makeTone([(5.0, 0.008)])
+        let transcript = await transcriptAfterFlushes([chunk, chunk], texts: ["one", "two"])
+        XCTAssertEqual(transcript, "one two")
+    }
+
+    func test_room_noise_below_the_floor_still_counts_as_quiet() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(5.0, 0.08)]), makeTone([(2.5, 0.004), (2.5, 0.008)])],
+            texts: ["one", "two"])
+        XCTAssertEqual(transcript, "one\n\ntwo")
+    }
+
+    /// A chunk whose transcription throws had speech in it, so it restarts
+    /// the pending pause from its own trailing quiet, like a gate rejection.
+    /// The 1.5 s before it plus its 1.0 s lead must not carry forward.
+    func test_transcription_error_chunk_restarts_the_pending_pause() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (1.5, 0)]),
+             makeTone([(1.0, 0), (4.0, 0.08)]),
+             makeTone([(0.6, 0), (4.4, 0.08)])],
+            texts: ["one", "", "three"], failingCalls: [1])
+        XCTAssertEqual(transcript, "one three")
+    }
+
+    func test_new_recording_does_not_inherit_pending_pause() async {
+        let capture = FakeCapture(nextAudio: makeTone([(5.0, 0.08)]))
+        capture.queue = [makeTone([(4.0, 0.08), (2.5, 0)])]
+        let transcriber = FakeTranscriber(); transcriber.texts = ["one", "two"]
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()   // "one", then 2.5 s of quiet pending
+
+        session.stop(); session.reset()   // bypasses stopRecording, which would settle the pause
+        coord.startRecording(targetApp: nil)
+        // A first append ignores its pause; a non-empty transcript makes the
+        // inherited pause, if any, observable.
+        session.setTranscript("seed")
+        await coord.periodicFlush()   // continuous speech: no quiet of its own
+
+        XCTAssertEqual(session.currentSession?.transcript, "seed two")
+    }
+
+    func test_pause_carries_into_the_stop_tail() async {
+        let transcript = await transcriptAfterFlushes(
+            [makeTone([(4.0, 0.08), (2.5, 0)])], texts: ["one", "two"],
+            extraTail: makeTone([(3.0, 0.08)]))
+        XCTAssertEqual(transcript, "one\n\ntwo")
     }
 }

@@ -3,6 +3,10 @@ set -euo pipefail
 
 BACKEND_URL="${VOXFLOW_BACKEND_URL:-http://127.0.0.1:8765}"
 READINESS_URL="${BACKEND_URL%/}/v1/ready"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# shellcheck source=lib/backend_token.sh
+source "${ROOT_DIR}/scripts/lib/backend_token.sh"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "[readiness] curl is required"
@@ -10,8 +14,20 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 echo "[readiness] checking ${READINESS_URL}"
+AUTH_HEADER=""
+if BACKEND_TOKEN="$(voxflow_backend_token)"; then
+  AUTH_HEADER="X-VoxFlow-Token: ${BACKEND_TOKEN}"
+else
+  echo "[warn] no backend token found; start the app or scripts/run_backend.sh first (looked in $(voxflow_token_dir)/backend.token)"
+fi
 TMP_BODY="$(mktemp)"
-HTTP_CODE="$(curl -sS -o "${TMP_BODY}" -w "%{http_code}" "${READINESS_URL}" || true)"
+# The header goes in over stdin (-H @-) so the token never appears in argv,
+# and only when a token was found.
+if [[ -n "${AUTH_HEADER}" ]]; then
+  HTTP_CODE="$(printf '%s\n' "${AUTH_HEADER}" | curl -sS -H @- -o "${TMP_BODY}" -w "%{http_code}" "${READINESS_URL}" || true)"
+else
+  HTTP_CODE="$(curl -sS -o "${TMP_BODY}" -w "%{http_code}" "${READINESS_URL}" || true)"
+fi
 READINESS_JSON="$(cat "${TMP_BODY}" 2>/dev/null || true)"
 rm -f "${TMP_BODY}"
 
