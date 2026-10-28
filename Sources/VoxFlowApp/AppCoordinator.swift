@@ -951,8 +951,6 @@ final class AppCoordinator: ObservableObject {
         state.statusLine = commandLane ? "Interpreting command..." : "Transcribing..."
     }
 
-    /// Audit-log source label for the quick-capture lanes. Single source of
-    /// truth so the silence and gate-rejection receipts can't drift apart.
     /// Quick dictation's admission, in the cockpit's order: the gate judges the
     /// raw decode (stripping Whisper's non-speech annotations), then the user's
     /// dictionary applies to the cleaned text. Gating after the dictionary
@@ -968,6 +966,8 @@ final class AppCoordinator: ObservableObject {
         return TranscriptGate.Admission(verdict: .accepted, text: dictionary(admission.text))
     }
 
+    /// Audit-log source label for the quick-capture lanes. Single source of
+    /// truth so the silence and gate-rejection receipts can't drift apart.
     private static func captureSourceLabel(commandLane: Bool) -> String {
         commandLane ? "command_lane" : "quick_dictation"
     }
