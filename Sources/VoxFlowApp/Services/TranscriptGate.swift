@@ -33,22 +33,43 @@ enum TranscriptGate {
         case rejected(reason: Rejection)
     }
 
-    static func evaluate(text: String, confidence: Double, audioDurationSeconds: Double) -> Verdict {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return .rejected(reason: .empty) }
-        if trimmed.hasPrefix("[transcription") { return .rejected(reason: .placeholder) }
+    /// A verdict plus the text callers must use from here on: trimmed, with
+    /// Whisper's non-speech annotations ("[BLANK_AUDIO]", "(water rushing)")
+    /// removed. Rejections carry the cleaned text too; receipts should still
+    /// record the raw decoder output for forensics.
+    struct Admission: Equatable {
+        let verdict: Verdict
+        let text: String
+    }
 
-        let shortAudio = audioDurationSeconds < 3.0
-        if HallucinationFilter.isLikelyHallucination(trimmed, shortAudio: shortAudio) {
-            return .rejected(reason: .hallucinationFilter)
+    static func admit(text: String, confidence: Double, audioDurationSeconds: Double) -> Admission {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return Admission(verdict: .rejected(reason: .empty), text: "") }
+        if trimmed.hasPrefix("[transcription") {
+            return Admission(verdict: .rejected(reason: .placeholder), text: trimmed)
         }
 
-        let wordCount = trimmed.split(whereSeparator: \.isWhitespace).count
+        // Annotation-only output is the decoder labelling non-speech, so it is
+        // a hallucination, not an empty decode: the two stay distinguishable
+        // in the forensics log.
+        let cleaned = HallucinationFilter.stripNonSpeechAnnotations(trimmed)
+        if cleaned.isEmpty { return Admission(verdict: .rejected(reason: .hallucinationFilter), text: "") }
+
+        let shortAudio = audioDurationSeconds < 3.0
+        if HallucinationFilter.isLikelyHallucination(cleaned, shortAudio: shortAudio) {
+            return Admission(verdict: .rejected(reason: .hallucinationFilter), text: cleaned)
+        }
+
+        let wordCount = cleaned.split(whereSeparator: \.isWhitespace).count
         let isSuspect = (wordCount == 1 && confidence < 0.15)
             || (shortAudio && wordCount <= 2 && confidence < 0.08)
             || (wordCount <= 3 && audioDurationSeconds > 4.0 && confidence <= 0.1)
-        if isSuspect { return .rejected(reason: .lowConfidence) }
+        if isSuspect { return Admission(verdict: .rejected(reason: .lowConfidence), text: cleaned) }
 
-        return .accepted
+        return Admission(verdict: .accepted, text: cleaned)
+    }
+
+    static func evaluate(text: String, confidence: Double, audioDurationSeconds: Double) -> Verdict {
+        admit(text: text, confidence: confidence, audioDurationSeconds: audioDurationSeconds).verdict
     }
 }

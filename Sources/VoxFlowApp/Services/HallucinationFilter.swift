@@ -22,6 +22,75 @@ enum HallucinationFilter {
         "listening", "everyone", "everybody", "guys", "all"
     ]
 
+    /// Words Whisper writes inside a sound annotation such as "(water rushing)"
+    /// or "*typing*". A parenthetical or asterisk group is stripped only when
+    /// EVERY word is in this set, so a dictated aside that merely mentions one
+    /// ("see the noise report") survives. Mirrors `_SOUND_ANNOTATION_WORDS` in
+    /// backend/app/nlp/hallucination.py.
+    private static let soundAnnotationWords: Set<String> = [
+        "ambient", "applause", "background", "barking", "beep", "beeping", "beeps",
+        "birds", "blank_audio", "blowing", "breathing", "buzzing", "chirping", "chuckles",
+        "chuckling", "clack", "clacking", "clapping", "click", "clicking", "clicks",
+        "cough", "coughing", "coughs", "crowd", "door", "engine", "footsteps", "gasps",
+        "humming", "inaudible", "keyboard", "laughing", "laughs", "laughter", "mumbling",
+        "music", "noise", "noises", "phone", "playing", "pop", "rain", "ringing",
+        "running", "rushing", "sighs", "silence", "sniffs", "sound", "sounds", "static",
+        "thunder", "traffic", "typing", "water", "whispering", "wind",
+    ]
+
+    /// Removes Whisper's non-speech annotations so they never reach a transcript:
+    /// every square-bracket group ("[BLANK_AUDIO]", "[Silence]"), stray square
+    /// brackets ("[ [" runs), and parenthetical or asterisk groups made only of
+    /// sound words. Dictated speech never contains square brackets. Text with
+    /// nothing to strip is returned trimmed and otherwise untouched. Mirrors
+    /// `strip_non_speech_annotations` in backend/app/nlp/hallucination.py; the
+    /// shared contract is Tests/Fixtures/annotation_strip_parity.json.
+    static func stripNonSpeechAnnotations(_ text: String) -> String {
+        var result = text
+        var removed = false
+        while let match = result.firstMatch(of: /\[[^\[\]]*\]/) {
+            result.replaceSubrange(match.range, with: " ")
+            removed = true
+        }
+        for pattern in [/\(([^()]*)\)/, /\*([^*]*)\*/] {
+            result = result.replacing(pattern) { match in
+                guard isSoundAnnotation(String(match.output.1)) else { return String(match.output.0) }
+                removed = true
+                return " "
+            }
+        }
+        if result.contains(where: { $0 == "[" || $0 == "]" }) {
+            result.removeAll { $0 == "[" || $0 == "]" }
+            removed = true
+        }
+        guard removed else { return text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return result
+            .replacing(/\s+/, with: " ")
+            .replacing(/\s+([.,;:!?])/) { String($0.output.1) }
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Sound words that are an annotation even alone ("(laughter)",
+    /// "*typing*"). Everyday words like "static", "running" or "water" count
+    /// only beside another sound word, so "the (static) variable" and
+    /// "the *running* total" survive. Mirrors `_SINGLE_SOUND_ANNOTATION_WORDS`.
+    private static let singleSoundAnnotationWords: Set<String> = [
+        "applause", "barking", "beeping", "blank_audio", "breathing", "buzzing", "chirping",
+        "chuckles", "chuckling", "clacking", "clapping", "clicking", "coughing", "coughs",
+        "footsteps", "gasps", "humming", "inaudible", "laughing", "laughs", "laughter",
+        "mumbling", "music", "noise", "noises", "ringing", "sighs", "silence", "sniffs",
+        "typing", "whispering",
+    ]
+
+    private static func isSoundAnnotation(_ inner: String) -> Bool {
+        let words = inner.lowercased()
+            .split(whereSeparator: { $0 == " " || $0 == "-" })
+            .map(String.init)
+        guard (1...4).contains(words.count) else { return false }
+        if words.count == 1 { return singleSoundAnnotationWords.contains(words[0]) }
+        return words.allSatisfy { soundAnnotationWords.contains($0) }
+    }
+
     static func isLikelyHallucination(_ text: String, shortAudio: Bool) -> Bool {
         let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !stripped.isEmpty else { return true }

@@ -1,0 +1,29 @@
+{
+  "_comment": "Shared contract for stripping Whisper non-speech annotations before the transcript gate. HallucinationFilter.stripNonSpeechAnnotations (Swift) and strip_non_speech_annotations (backend/app/nlp/hallucination.py) must both map every text to its expected value. Cases marked observed came from the 2026-10-27 cockpit acceptance run and the offline decode probe.",
+  "cases": [
+    {"text": "[BLANK_AUDIO]", "expected": "", "note": "observed: decoder marker on a noise chunk"},
+    {"text": "[ [ [BLANK_AUDIO]", "expected": "", "note": "observed: marker after stray brackets, accepted by the old filter"},
+    {"text": "[ [", "expected": "", "note": "observed: bare bracket run"},
+    {"text": "[ [ [ [ [ [ ]", "expected": "", "note": "observed: bracket run with a closing bracket"},
+    {"text": "[POP]", "expected": "", "note": "observed: sound marker"},
+    {"text": "[Silence] Fourth check, closing the cockpit.", "expected": "Fourth check, closing the cockpit.", "note": "observed: leading marker on real speech"},
+    {"text": "Second, the vendor (water rushing)", "expected": "Second, the vendor", "note": "observed: trailing sound description on real speech"},
+    {"text": "(water rushing)", "expected": "", "note": "observed: gain-boosted noise chunk, accepted by the old gate"},
+    {"text": "the steering [BLANK_AUDIO].", "expected": "the steering.", "note": "no space left before punctuation"},
+    {"text": "(background noise)", "expected": "", "note": "every word is a sound word"},
+    {"text": "*typing*", "expected": "", "note": "asterisk enclosure"},
+    {"text": "We should (laughs) move on.", "expected": "We should move on.", "note": "inline sound word"},
+    {"text": "Please see the appendix (section four) for details.", "expected": "Please see the appendix (section four) for details.", "note": "dictated parenthetical stays"},
+    {"text": "Check (see the noise report) first.", "expected": "Check (see the noise report) first.", "note": "a sound word alone does not make a parenthetical an annotation"},
+    {"text": "Budget rose (3 percent) this year.", "expected": "Budget rose (3 percent) this year.", "note": "digits mean dictated content"},
+    {"text": "Hello world", "expected": "Hello world", "note": "plain speech unchanged"},
+    {"text": "  Hello   world  ", "expected": "Hello   world", "note": "nothing stripped: only trimmed, inner spacing untouched"},
+    {"text": "We should  (laughs)  move on.", "expected": "We should move on.", "note": "spacing tidied only where something was stripped"},
+    {"text": "The (static) variable is set.", "expected": "The (static) variable is set.", "note": "review: an everyday word alone is not an annotation"},
+    {"text": "the *running* total", "expected": "the *running* total", "note": "review: asterisk emphasis on an everyday word stays"},
+    {"text": "We need (water) here.", "expected": "We need (water) here.", "note": "single ambiguous sound word stays"},
+    {"text": "(laughter)", "expected": "", "note": "single unambiguous annotation word"},
+    {"text": "Hello (music) again", "expected": "Hello again", "note": "music alone is a Whisper annotation"},
+    {"text": "(wind blowing)", "expected": "", "note": "two sound words"}
+  ]
+}

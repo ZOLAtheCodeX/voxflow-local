@@ -426,6 +426,49 @@ class TestOpenAISTTFilterParity:
         assert data["confidence_estimate"] == 0.0
 
 
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("decoded", "expected_text"),
+        [
+            ("[Silence] Fourth check, closing the cockpit.", "Fourth check, closing the cockpit."),
+            ("(water rushing)", ""),
+            ("[ [ [BLANK_AUDIO]", ""),
+        ],
+    )
+    async def test_non_speech_annotations_are_stripped(
+        self, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, decoded: str, expected_text: str
+    ):
+        import base64
+        import struct
+
+        from api import endpoints as ep
+        from engines.results import STTExecutionResult
+
+        def fake_transcribe(pcm, sample_rate, language_hint):
+            return STTExecutionResult(
+                text=decoded,
+                confidence=0.9,
+                stage_timings_ms={},
+                model_loaded_before_request=True,
+                model_loaded_after_request=True,
+                cold_start=False,
+            )
+
+        monkeypatch.setattr(ep, "current_stt_backend", lambda: "openai")
+        monkeypatch.setattr(ep.provider_router, "transcribe", fake_transcribe)
+
+        loud = struct.pack("<" + "h" * 96000, *([8000, -8000] * 48000))
+        resp = await client.post("/v1/transcribe", json={
+            "session_id": "test-annotation-strip",
+            "audio_pcm16le": base64.b64encode(loud).decode(),
+            "sample_rate": 16000,
+            "language_hint": "en",
+            "chunk_index": 0,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["text"] == expected_text
+
+
 class TestMLSemaphoreAtomicity:
     """Audit S3 verdict: FALSE POSITIVE, pinned here. The endpoints' pattern
     `if sem.locked(): 503` followed by `async with sem:` cannot oversubscribe:

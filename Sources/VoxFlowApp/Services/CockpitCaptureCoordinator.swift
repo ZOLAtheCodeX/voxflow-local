@@ -29,6 +29,11 @@ final class CockpitCaptureCoordinator {
     /// session lost 17 minutes with zero signal). Reset on success.
     private var consecutiveTranscriptionFailures = 0
     private static let maxConsecutiveTranscriptionFailures = 3
+    /// Rejected chunks with speech keep their audio, but the clip ring is
+    /// shared with quick dictation's forensic clips, so one recording keeps at
+    /// most this many. Reset per recording.
+    private var retainedRejectionClips = 0
+    private static let maxRetainedRejectionClipsPerRecording = 3
     /// Non-silent audio under minChunkBytes, carried into the next flush.
     /// stopCapture has already consumed it from the engine — discarding it
     /// (the old behavior) was a permanent syllable-scale loss whenever the
@@ -121,6 +126,7 @@ final class CockpitCaptureCoordinator {
         carryPCM = Data()
         consecutiveTranscriptionFailures = 0
         pendingPause = 0
+        retainedRejectionClips = 0
         stopRequested = false
         captureRunning = false
         loopTask?.cancel()
@@ -345,25 +351,36 @@ final class CockpitCaptureCoordinator {
             // bypassed the confidence rules entirely, so every 5 s flush of
             // ambient noise was a ghost-text opportunity (audit cause #5).
             let durationSeconds = audio.durationSeconds
-            if case .rejected(let reason) = TranscriptGate.evaluate(
+            let admission = TranscriptGate.admit(
                 text: text,
                 confidence: response.confidenceEstimate,
                 audioDurationSeconds: durationSeconds
-            ) {
-                if reason != .empty {
+            )
+            if case .rejected(let reason) = admission.verdict {
+                // A rejected chunk with measurable speech may be lost words
+                // (the 2026-10-27 acceptance run lost the opening this way),
+                // so its audio is kept for recovery, up to a per-recording cap.
+                // Pure noise (no quiet threshold) is never kept.
+                let keepsClip = threshold != nil && isCurrentRecording(id)
+                    && retainedRejectionClips < Self.maxRetainedRejectionClipsPerRecording
+                let retained = keepsClip ? rejectedAudio?.store(
+                    pcm: audio.pcm, sampleRate: audio.sampleRate, reason: reason.rawValue) : nil
+                if retained != nil { retainedRejectionClips += 1 }
+                if reason != .empty || retained != nil {
                     log.info("TranscriptGate rejected cockpit chunk (\(reason.rawValue))")
                     audit?.recordRejection(
                         text: text,
                         reason: reason.rawValue,
                         confidence: response.confidenceEstimate,
                         durationSeconds: durationSeconds,
-                        source: "cockpit_chunk"
+                        source: "cockpit_chunk",
+                        audioFile: retained?.path
                     )
                 }
                 settleWithoutText()
                 return
             }
-            let corrected = dictionary?.apply(to: text) ?? text
+            let corrected = dictionary?.apply(to: admission.text) ?? admission.text
             if let id {
                 // Stale work is rejected by the session's id guard, and must
                 // leave the newer recording's counter alone.

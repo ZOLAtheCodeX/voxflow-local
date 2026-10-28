@@ -45,6 +45,7 @@ from engines.whisper import WhisperEngine
 
 from nlp import (
     is_whisper_hallucination,
+    strip_non_speech_annotations,
     normalize_whitespace,
     coerce_speaker_segments,
     coerce_task_owners,
@@ -258,7 +259,12 @@ async def transcribe(payload: TranscribeRequest) -> TranscribeResponse:
     confidence = result.confidence
     audio_duration_s = len(audio_bytes) / max(payload.sample_rate * 2, 1)
     is_short = audio_duration_s < 3.0
-    if is_whisper_hallucination(text, short_audio=is_short):
+    # Non-speech annotations ("[BLANK_AUDIO]", "(water rushing)") are removed
+    # first, so one attached to real speech never reaches the transcript and
+    # annotation-only output is filtered like any other hallucination.
+    raw_text = text
+    text = strip_non_speech_annotations(text)
+    if (raw_text.strip() and not text) or is_whisper_hallucination(text, short_audio=is_short):
         logger.info(
             "Filtered Whisper hallucination (%.1fs, short=%s, backend=%s)",
             audio_duration_s, is_short, stt_backend,
