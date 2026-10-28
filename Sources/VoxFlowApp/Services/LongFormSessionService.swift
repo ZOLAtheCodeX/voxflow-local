@@ -14,8 +14,10 @@ final class SystemClock: SessionClock {
 /// Long-form dictation session lifecycle (Cockpit Layer 0).
 ///
 /// State machine: ``idle`` → ``recording(startedAt:)`` → ``reviewing``.
-/// Pause tolerance: silence ≥ ``paragraphBreakSilence`` (4 s) between
-/// chunks inserts a soft paragraph break ("\n\n") into the transcript.
+/// Pause tolerance: paragraph breaks come from measured pauses passed in by
+/// the capture coordinator (not wall-clock time between appends). A pause
+/// ≥ ``paragraphBreakPause`` (2 s) before a chunk inserts a soft paragraph
+/// break ("\n\n"); shorter pauses join with ``ChunkJoiner``.
 /// Auto-save: every 5 s during recording + on stop. Recovery picks the
 /// most-recently-updated session JSON on disk.
 @MainActor
@@ -33,10 +35,9 @@ final class LongFormSessionService: ObservableObject {
     let clock: SessionClock
     private let autoSaveDirectory: URL
     private let log = Logger(subsystem: "local.voxflow.app", category: "LongFormSessionService")
-    private var lastChunkAt: Date?
     private var autoSaveTask: Task<Void, Never>?
 
-    private static let paragraphBreakSilence: TimeInterval = 4.0
+    static let paragraphBreakPause: TimeInterval = 2.0
     private static let autoSaveIntervalNs: UInt64 = 5_000_000_000
 
     init(autoSaveDirectory: URL, clock: SessionClock = SystemClock()) {
@@ -62,7 +63,6 @@ final class LongFormSessionService: ObservableObject {
         let session = LongFormSession(targetApp: targetApp)
         currentSession = session
         state = .recording(startedAt: clock.currentTime())
-        lastChunkAt = nil
         autoSaveTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: Self.autoSaveIntervalNs)
@@ -77,19 +77,45 @@ final class LongFormSessionService: ObservableObject {
         log.info("session \(session.id.uuidString) started")
     }
 
-    func appendChunk(_ chunk: String) {
-        guard case .recording = state else { return }
-        let now = clock.currentTime()
-        if let last = lastChunkAt,
-           now.timeIntervalSince(last) >= Self.paragraphBreakSilence,
-           let session = currentSession,
-           !session.transcript.isEmpty,
-           !session.transcript.hasSuffix("\n\n") {
-            currentSession?.transcript += "\n\n"
+    /// Append a transcribed chunk. `pauseBefore` is the measured quiet before
+    /// the chunk's first speech; `sessionID` binds the append to the session
+    /// that produced it so a stale chunk can never land in a later one.
+    func appendChunk(_ chunk: String, pauseBefore: TimeInterval, sessionID: UUID) {
+        guard case .recording = state,
+              let session = currentSession,
+              session.id == sessionID else { return }
+        // A transcript cleared to whitespace counts as empty, so the chunk
+        // does not follow a leading blank paragraph.
+        if session.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            currentSession?.transcript = chunk
+        } else if pauseBefore >= Self.paragraphBreakPause {
+            currentSession?.transcript = Self.trimmingTrailingWhitespace(session.transcript) + "\n\n" + chunk
+        } else {
+            currentSession?.transcript = ChunkJoiner.join(session.transcript, chunk)
         }
-        currentSession?.transcript += chunk
-        currentSession?.updatedAt = now
-        lastChunkAt = now
+        currentSession?.updatedAt = clock.currentTime()
+    }
+
+    /// Append the visible "[recording interrupted — reason]" marker on its own
+    /// paragraph. Same guards as `appendChunk`.
+    func appendInterruptionMarker(_ reason: String, sessionID: UUID) {
+        guard case .recording = state,
+              let session = currentSession,
+              session.id == sessionID else { return }
+        let trimmed = Self.trimmingTrailingWhitespace(session.transcript)
+        let separator = trimmed.isEmpty ? "" : "\n\n"
+        currentSession?.transcript = trimmed + separator + "[recording interrupted — \(reason)]"
+        currentSession?.updatedAt = clock.currentTime()
+    }
+
+    private static func trimmingTrailingWhitespace(_ text: String) -> String {
+        var end = text.endIndex
+        while end > text.startIndex {
+            let prev = text.index(before: end)
+            guard text[prev].isWhitespace || text[prev].isNewline else { break }
+            end = prev
+        }
+        return String(text[..<end])
     }
 
     /// Directly overwrite the current session's transcript — used by undo.
@@ -123,7 +149,6 @@ final class LongFormSessionService: ObservableObject {
         autoSaveTask = nil
         currentSession = nil
         state = .idle
-        lastChunkAt = nil
     }
 
     // MARK: - Persistence

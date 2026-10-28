@@ -28,6 +28,77 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertFalse(state.cockpitVisible)
     }
 
+    /// Counts drain calls; each one ends the recording into review.
+    @MainActor
+    private final class DrainCounter {
+        var count = 0
+    }
+
+    private func countDrains(on coord: CockpitCoordinator, session: LongFormSessionService) -> DrainCounter {
+        let counter = DrainCounter()
+        coord.drainRecording = {
+            counter.count += 1
+            session.stop()
+            return true
+        }
+        return counter
+    }
+
+    /// Closing the cockpit used to leave the microphone running behind the
+    /// hidden window. It now drains, and the session stays for review.
+    func test_close_during_recording_drains_and_keeps_the_session() async {
+        let (state, coord, sessionService, _) = makeCoordinator()
+        coord.open()
+        sessionService.start()
+        sessionService.appendTestChunk("keep me")
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.close()
+
+        guard await yieldUntil({ drains.count >= 1 }, "close never drained the recording") else { return }
+        XCTAssertEqual(drains.count, 1)
+        XCTAssertFalse(state.cockpitVisible)
+        XCTAssertEqual(sessionService.state, .reviewing)
+        XCTAssertEqual(sessionService.currentSession?.transcript, "keep me")
+    }
+
+    func test_close_while_reviewing_does_not_drain() async {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        sessionService.start()
+        sessionService.appendTestChunk("already reviewed")
+        sessionService.stop()
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.close()
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(drains.count, 0)
+        XCTAssertEqual(sessionService.state, .reviewing)
+    }
+
+    /// The window's own close button bypasses ``close()``; its disappearance
+    /// drains the same way.
+    func test_window_close_during_recording_drains() async {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        sessionService.start()
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.windowDidClose()
+
+        guard await yieldUntil({ drains.count >= 1 }, "window close never drained the recording") else { return }
+        XCTAssertEqual(sessionService.state, .reviewing)
+    }
+
+    func test_window_close_while_idle_does_not_drain() async {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        let drains = countDrains(on: coord, session: sessionService)
+
+        coord.windowDidClose()
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(drains.count, 0)
+    }
+
     func test_open_fires_onCockpitOpened() {
         let (_, coord, _, _) = makeCoordinator()
         var fired = 0
@@ -45,6 +116,22 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertEqual(fired, 0)
     }
 
+    // MARK: - Recording target
+
+    func test_recordingTarget_uses_provider() {
+        let (_, coord, _, _) = makeCoordinator()
+        let snapshot = ExternalAppIdentity(
+            pid: 5, bundleID: "com.apple.Notes", name: "Notes",
+            launchDate: Date(timeIntervalSince1970: 1_800_000_000)).targetSnapshot
+        coord.recordingTargetProvider = { snapshot }
+        XCTAssertEqual(coord.recordingTarget(), snapshot)
+    }
+
+    func test_recordingTarget_without_provider_is_nil() {
+        let (_, coord, _, _) = makeCoordinator()
+        XCTAssertNil(coord.recordingTarget())
+    }
+
     // MARK: - applyAction
 
     func test_applyAction_increments_invocation_count() async throws {
@@ -56,7 +143,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_applyAction_records_history_on_session() async throws {
         let (_, coord, sessionService, _) = makeCoordinator()
         sessionService.start()
-        sessionService.appendChunk("raw transcript")
+        sessionService.appendTestChunk("raw transcript")
         sessionService.stop()
         _ = try await coord.applyAction(.memo, to: "raw transcript")
         XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 1)
@@ -65,7 +152,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_applyAction_skips_history_when_guardrail_triggered() async throws {
         let (_, coord, sessionService, _) = makeCoordinatorWithGuardrailBackend()
         sessionService.start()
-        sessionService.appendChunk("raw transcript")
+        sessionService.appendTestChunk("raw transcript")
         sessionService.stop()
         _ = try await coord.applyAction(.memo, to: "raw transcript")
         // Guardrail trips must not record an AppliedAction — the session JSON
@@ -77,7 +164,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_applyAction_skips_history_when_output_unchanged() async throws {
         let (_, coord, sessionService, _) = makeCoordinatorWithEchoBackend()
         sessionService.start()
-        sessionService.appendChunk("identical transcript")
+        sessionService.appendTestChunk("identical transcript")
         sessionService.stop()
         _ = try await coord.applyAction(.memo, to: "identical transcript")
         XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 0)
@@ -145,7 +232,7 @@ final class CockpitCoordinatorTests: XCTestCase {
     func test_handleVoiceUtterance_triggers_action_during_review() async throws {
         let (state, coord, sessionService, _) = makeCoordinator()
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
         try await coord.handleVoiceUtterance("memo")
         XCTAssertEqual(state.chipInvocationCounts[.memo], 1)
@@ -160,7 +247,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
 
         try await coord.handleVoiceUtterance("signoff")
@@ -181,7 +268,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
 
         try await coord.handleVoiceUtterance("cancel")
@@ -200,7 +287,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
 
         try await coord.handleVoiceUtterance("agenda")
@@ -219,7 +306,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let (_, coord, sessionService, _) = makeCoordinator(
             backend: StubSmartActionBackend(), snippetStore: snippetStore)
         sessionService.start()
-        sessionService.appendChunk("source text")
+        sessionService.appendTestChunk("source text")
         sessionService.stop()
         let before = try XCTUnwrap(sessionService.currentSession?.transcript)
 
@@ -272,7 +359,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         )
         coord.open()
         sessionService.start()
-        sessionService.appendChunk("the transcript that must survive")
+        sessionService.appendTestChunk("the transcript that must survive")
         sessionService.stop()
 
         await coord.insertIntoTarget()
@@ -282,6 +369,203 @@ final class CockpitCoordinatorTests: XCTestCase {
                        "the transcript that must survive")
         XCTAssertTrue(state.statusLine.contains("Insert failed"),
                       "got: \(state.statusLine)")
+    }
+
+    // MARK: - Insert while recording (drain first)
+
+    /// Records inserted texts and reports success via `.simulatedPaste`, the
+    /// only method for which `TextInsertionCoordinator` skips the pasteboard.
+    private final class RecordingInsertService: TextInserting {
+        private(set) var texts: [String] = []
+        private(set) var targets: [NSRunningApplication?] = []
+        func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
+            texts.append(text)
+            targets.append(targetApp)
+            return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: false, errorCode: nil)
+        }
+    }
+
+    /// Holds every drain that enters, so a test can count the entries and
+    /// release all of them, including on a failure path, instead of
+    /// orphaning a waiter and hanging the suite.
+    @MainActor
+    private final class DrainGate {
+        private(set) var entries = 0
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        var heldCount: Int { waiters.count }
+
+        func hold() async {
+            entries += 1
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func releaseAll() {
+            let pending = waiters
+            waiters = []
+            pending.forEach { $0.resume() }
+        }
+    }
+
+    private func makeInsertFixture(
+        state: AppState = AppState()
+    ) -> (CockpitCoordinator, LongFormSessionService, RecordingInsertService) {
+        let sessionDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("voxflow-cockpit-test-\(UUID().uuidString)")
+        let sessionService = LongFormSessionService(autoSaveDirectory: sessionDir)
+        let auditURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")
+        let inserter = RecordingInsertService()
+        let insertion = TextInsertionCoordinator(
+            state: state, insertService: inserter,
+            audit: InsertionAuditLog(fileURL: auditURL))
+        let coord = CockpitCoordinator(
+            state: state,
+            sessionService: sessionService,
+            actionService: SmartActionService(backend: StubSmartActionBackend()),
+            textInsertionCoordinator: insertion,
+            snippetStore: nil
+        )
+        return (coord, sessionService, inserter)
+    }
+
+    func test_insert_during_recording_drains_then_inserts_complete_transcript() async {
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start()
+        sessionService.appendTestChunk("first part")
+        coord.drainRecording = {
+            sessionService.appendTestChunk("tail words")
+            sessionService.stop()
+            return true
+        }
+
+        await coord.insertIntoTarget()
+
+        XCTAssertEqual(inserter.texts, ["first part tail words"])
+        XCTAssertEqual(sessionService.state, .idle, "success resets the session")
+    }
+
+    /// A live, identifiable app to use as a frozen-target fixture. The test
+    /// host process itself is not an NSRunningApplication (it is a CLI tool),
+    /// so read-only pick a running app (Finder when it runs, see the shared
+    /// ``liveAppFixture(requiringLaunchDate:)``). Nothing is sent to it: the
+    /// inserter is a fake.
+    private func liveAppFixture() throws -> (app: NSRunningApplication, bundleID: String) {
+        let app = try VoxFlowAppTests.liveAppFixture()
+        guard let bundleID = app.bundleIdentifier else {
+            throw XCTSkip("no identifiable running app available")
+        }
+        return (app, bundleID)
+    }
+
+    private func snapshot(of app: NSRunningApplication, bundleID: String) -> FocusTargetSnapshot {
+        FocusTargetSnapshot(
+            hasFocusedTextInput: false,
+            hasInsertionCursor: false,
+            appName: app.localizedName,
+            bundleID: bundleID,
+            role: nil,
+            processIdentifier: app.processIdentifier,
+            launchDate: app.launchDate)
+    }
+
+    /// The pid is live but the frozen bundle ID is not the app's, as with a
+    /// recycled pid. A PID-only reconstruction would hand the live process to
+    /// the inserter; the verified resolver must refuse it.
+    func test_insert_with_mismatched_target_identity_passes_no_target() async throws {
+        let (app, bundleID) = try liveAppFixture()
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start(targetApp: snapshot(of: app, bundleID: bundleID + ".not-this-app"))
+        sessionService.appendTestChunk("verify me")
+        sessionService.stop()
+
+        await coord.insertIntoTarget()
+
+        XCTAssertEqual(inserter.texts, ["verify me"])
+        XCTAssertEqual(inserter.targets.count, 1)
+        XCTAssertNil(inserter.targets[0], "a pid whose bundle does not match must not be targeted")
+    }
+
+    func test_insert_with_matching_target_identity_passes_the_app() async throws {
+        let (app, bundleID) = try liveAppFixture()
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start(targetApp: snapshot(of: app, bundleID: bundleID))
+        sessionService.appendTestChunk("verified")
+        sessionService.stop()
+
+        await coord.insertIntoTarget()
+
+        XCTAssertEqual(inserter.targets.count, 1)
+        XCTAssertEqual(inserter.targets[0]?.processIdentifier, app.processIdentifier)
+    }
+
+    func test_insert_during_recording_without_drain_inserts_nothing() async {
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start()
+        sessionService.appendTestChunk("partial")
+
+        await coord.insertIntoTarget()
+
+        XCTAssertTrue(inserter.texts.isEmpty)
+        guard case .recording = sessionService.state else {
+            return XCTFail("session must still be recording, got \(sessionService.state)")
+        }
+    }
+
+    func test_concurrent_inserts_during_recording_insert_once() async {
+        let (coord, sessionService, inserter) = makeInsertFixture()
+        sessionService.start()
+        sessionService.appendTestChunk("only once")
+        let gate = DrainGate()
+        coord.drainRecording = {
+            await gate.hold()
+            sessionService.stop()
+            return true
+        }
+
+        let first = Task { await coord.insertIntoTarget() }
+        guard await yieldUntil({ gate.heldCount >= 1 }, "drain never suspended") else {
+            gate.releaseAll(); await first.value; return
+        }
+        // The second press either returns at the guard or, without it, enters
+        // a second drain. Wait for whichever happens; both are bounded.
+        let secondDone = DoneFlag()
+        let second = Task {
+            await coord.insertIntoTarget()
+            secondDone.isDone = true
+        }
+        _ = await yieldUntil(
+            { secondDone.isDone || gate.entries >= 2 }, "second press neither returned nor drained")
+        gate.releaseAll()
+        await first.value
+        await second.value
+
+        XCTAssertEqual(gate.entries, 1, "a second ⌘↩ while draining must not drain again")
+        XCTAssertEqual(inserter.texts, ["only once"])
+    }
+
+    /// The drain ended through the interruption path: the session is in
+    /// review with its marker, but nothing was drained cleanly, so ⌘↩ must
+    /// not insert it and must leave the status line alone.
+    func test_insert_after_interrupted_drain_inserts_nothing_and_keeps_review() async throws {
+        let state = AppState()
+        let (coord, sessionService, inserter) = makeInsertFixture(state: state)
+        sessionService.start()
+        sessionService.appendTestChunk("before the change")
+        let id = try XCTUnwrap(sessionService.currentSession?.id)
+        coord.drainRecording = {
+            sessionService.appendInterruptionMarker("audio device changed or capture stopped", sessionID: id)
+            sessionService.stop()
+            return false
+        }
+        state.statusLine = "status before the insert"
+
+        await coord.insertIntoTarget()
+
+        XCTAssertTrue(inserter.texts.isEmpty, "an interrupted drain must not insert")
+        XCTAssertEqual(sessionService.state, .reviewing)
+        XCTAssertEqual(sessionService.currentSession?.transcript,
+                       "before the change\n\n[recording interrupted — audio device changed or capture stopped]")
+        XCTAssertEqual(state.statusLine, "status before the insert")
     }
 
     private func makeCoordinator() -> (AppState, CockpitCoordinator, LongFormSessionService, SmartActionService) {
@@ -353,6 +637,87 @@ final class CockpitCoordinatorTests: XCTestCase {
             XCTFail("expected throw")
         } catch {}
         XCTAssertNil(state.smartActionInFlight)
+    }
+
+    // MARK: - Smart actions during recording
+
+    /// A chip tapped while recording used to transform the partial transcript
+    /// and then overwrite every chunk appended during the backend await. It
+    /// now drains first and acts on the whole drained transcript.
+    func test_applyAction_during_recording_drains_then_acts_on_full_transcript() async throws {
+        let backend = TranscriptRecordingSmartActionBackend()
+        let (_, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("first part")
+        coord.drainRecording = {
+            sessionService.appendTestChunk("tail words")
+            sessionService.stop()
+            return true
+        }
+
+        let result = try await coord.applyAction(.memo, to: "first part")
+
+        let received = await backend.received
+        XCTAssertEqual(received, ["first part tail words"])
+        XCTAssertNil(result.error)
+        XCTAssertEqual(sessionService.state, .reviewing)
+        XCTAssertEqual(sessionService.currentSession?.transcript, "# transformed\n\nfirst part tail words")
+        XCTAssertEqual(sessionService.currentSession?.appliedActions.first?.beforeText, "first part tail words")
+    }
+
+    func test_applyAction_after_interrupted_drain_does_not_call_backend() async throws {
+        let backend = TranscriptRecordingSmartActionBackend()
+        let (state, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("before the change")
+        coord.drainRecording = {
+            sessionService.stop()
+            return false
+        }
+
+        let result = try await coord.applyAction(.memo, to: "before the change")
+
+        let received = await backend.received
+        XCTAssertTrue(received.isEmpty, "an interrupted drain leaves nothing to transform")
+        XCTAssertNil(result.error, "no banner: the transcript already shows the interruption marker")
+        XCTAssertEqual(sessionService.currentSession?.transcript, "before the change")
+        XCTAssertEqual(state.chipInvocationCounts[.memo, default: 0], 0)
+        XCTAssertNil(state.smartActionInFlight)
+    }
+
+    func test_applyAction_during_recording_without_drain_does_not_call_backend() async throws {
+        let backend = TranscriptRecordingSmartActionBackend()
+        let (_, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("partial")
+
+        let result = try await coord.applyAction(.memo, to: "partial")
+
+        let received = await backend.received
+        XCTAssertTrue(received.isEmpty)
+        XCTAssertNil(result.error, "a refused drain is a quiet no-op, not \"another action is running\"")
+        XCTAssertEqual(sessionService.currentSession?.transcript, "partial")
+    }
+
+    /// The user inserts (or cancels) session A and starts session B while an
+    /// action on A is in flight. A's output must not land in B.
+    func test_applyAction_does_not_overwrite_a_session_that_changed_during_the_action() async throws {
+        let backend = GatedSmartActionBackend()
+        let (_, coord, sessionService, _) = makeCoordinator(backend: backend)
+        sessionService.start()
+        sessionService.appendTestChunk("session A text")
+        sessionService.stop()
+
+        let action = Task { try await coord.applyAction(.memo, to: "session A text") }
+        await backend.waitUntilCalled()
+        sessionService.reset()
+        sessionService.start()
+        sessionService.appendTestChunk("session B words")
+        backend.release()
+        _ = try await action.value
+
+        XCTAssertEqual(sessionService.currentSession?.transcript, "session B words")
+        XCTAssertEqual(sessionService.currentSession?.appliedActions.count, 0)
     }
 
     func test_smartActionErrorMessage_in_flight() {
@@ -486,6 +851,17 @@ private final class GatedSmartActionBackend: SmartActionBackend, @unchecked Send
             }
         }
         return SmartActionResult(actionId: action, output: "# transformed\n\n\(transcript)", guardrailTriggered: false, error: nil)
+    }
+}
+
+/// Records every transcript it is asked to transform.
+private actor TranscriptRecordingSmartActionBackend: SmartActionBackend {
+    private(set) var received: [String] = []
+
+    func performSmartAction(_ action: SmartActionId, transcript: String) async throws -> SmartActionResult {
+        received.append(transcript)
+        return SmartActionResult(
+            actionId: action, output: "# transformed\n\n\(transcript)", guardrailTriggered: false, error: nil)
     }
 }
 

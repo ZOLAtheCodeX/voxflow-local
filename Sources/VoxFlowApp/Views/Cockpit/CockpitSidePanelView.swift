@@ -28,14 +28,22 @@ struct CockpitSidePanelView: View {
         .background(.thinMaterial)
     }
 
+    /// The session's frozen target; with no session yet, the app the next
+    /// recording will freeze.
+    private var targetName: String? {
+        if let session = sessionService.currentSession {
+            return session.targetApp?.appName
+        }
+        return state.lastExternalApp?.name
+    }
+
     private var targetSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             sectionTitle("Target")
             HStack(spacing: VF.spacingSmall) {
                 Image(systemName: "arrow.right.circle.fill")
                     .foregroundStyle(VF.colorInfo)
-                if let target = sessionService.currentSession?.targetApp,
-                   let name = target.appName {
+                if let name = targetName {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(name).font(VF.labelFont)
                         Text("append at cursor")

@@ -28,9 +28,9 @@ final class ChainStore: ObservableObject {
             .appendingPathComponent("chains.json")
     }
 
-    /// Seed chains. Deliberately contain NO `.capture` step — they must be
-    /// useful applied to the text already captured in the cockpit, since the
-    /// executor seeds from the current transcript (no live mid-chain recording).
+    /// Seed chains. Deliberately contain NO `.capture` step: the executor's
+    /// working text starts as the current transcript, so they act on the text
+    /// already captured in the cockpit (no live mid-chain recording).
     static let seedChains: [(name: String, steps: [ChainStep])] = [
         ("Memo", [.action(actionId: .memo), .insert(targetHint: nil)]),
         ("Action items", [.action(actionId: .items), .insert(targetHint: nil)]),

@@ -14,6 +14,10 @@ protocol AudioCapturing: AnyObject {
     /// cockpit's quiet-boundary flush uses this to avoid cutting mid-word;
     /// nil fails open to the timer-cadence cut.
     func tailRMSEnergy(seconds: Double) -> Double?
+    /// The audio buffered before a capture was invalidated by a device change,
+    /// returned once. `stopCapture()` throws `deviceChanged` for such a
+    /// capture and never returns its PCM, so callers salvage it here.
+    func takeInvalidatedAudio() -> CapturedAudio?
 }
 
 extension AudioCapturing {
@@ -21,6 +25,8 @@ extension AudioCapturing {
     func startCapture() throws { try startCapture(onCaptureLive: nil) }
     /// Default: tail energy unknown — quiet-boundary flush fails open.
     func tailRMSEnergy(seconds: Double) -> Double? { nil }
+    /// Default: nothing to salvage.
+    func takeInvalidatedAudio() -> CapturedAudio? { nil }
 }
 
 /// One-shot transcription of a captured clip. `WhisperKitSTTService` conforms as-is.

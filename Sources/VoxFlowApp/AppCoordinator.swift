@@ -180,9 +180,9 @@ final class AppCoordinator: ObservableObject {
         textInsertion: textInsertion,
         currentTranscript: { [weak self] in self?.cockpitSessionService.currentSession?.transcript },
         frozenTarget: { [weak self] in
-            self?.cockpitSessionService.currentSession?.targetApp?.processIdentifier
-                .flatMap { NSRunningApplication(processIdentifier: $0) }
+            ExternalAppTracker.liveRunningApp(for: self?.cockpitSessionService.currentSession?.targetApp)
         },
+        currentSessionID: { [weak self] in self?.cockpitSessionService.currentSession?.id },
         performAppStep: { [weak self] step in
             self?.performChainAppStep(step) ?? false
         })
@@ -255,6 +255,7 @@ final class AppCoordinator: ObservableObject {
         }
         self.settings = settingsCoordinator
         startFocusMonitoring()
+        startExternalAppTracking()
         // Adopt mode: backendManager (a stored property) already published its
         // generated launch token, so this load, running afterwards, wins.
         if Self.explicitAdoptRequested(ProcessInfo.processInfo.environment),
@@ -298,7 +299,16 @@ final class AppCoordinator: ObservableObject {
         // Stale-backend hardening (2026-06-12): an open cockpit makes
         // backendShouldRun true (smart actions need the backend); spawn +
         // warmup-poll it through the existing machinery.
-        cockpit.onCockpitOpened = { [weak self] in self?.scheduleRuntimeWarmupIfNeeded() }
+        cockpit.onCockpitOpened = { [weak self] in
+            // Seed before the cockpit window takes focus, so a cockpit opened
+            // without any app activation since launch still has a target.
+            self?.recordExternalApp(NSWorkspace.shared.frontmostApplication)
+            self?.scheduleRuntimeWarmupIfNeeded()
+        }
+        cockpit.recordingTargetProvider = { [weak self] in
+            self?.externalAppTracker.currentVerified(lookup: ExternalAppTracker.liveLookup)?.targetSnapshot
+        }
+        cockpit.drainRecording = { [weak self] in await self?.cockpitCapture.stopRecording() ?? false }
 
         // R5.6: cockpit review can trigger protocols (gated inside the
         // coordinator on state.protocolCommandsEnabled + strict grammar).
@@ -420,7 +430,19 @@ final class AppCoordinator: ObservableObject {
         isRunningChain = true
         defer { isRunningChain = false }
 
-        let result = await chainExecutor.run(chain)
+        // A chain acts on one reviewed session, so a live recording drains
+        // first. A drain that ended in an interruption leaves nothing cleanly
+        // reviewed to act on: the chain stops before its first step and is
+        // reported through the same failure branch.
+        let result: ChainExecutor.ChainRunResult
+        if case .recording = cockpitSessionService.state,
+           await cockpitCapture.stopRecording() == false {
+            result = ChainExecutor.ChainRunResult(
+                completedSteps: 0, finalText: "", failedStepIndex: 0,
+                error: .sessionChanged, clipboardFallback: false)
+        } else {
+            result = await chainExecutor.run(chain)
+        }
         if result.error == nil {
             state.statusLine = "Chain '\(chain.name)' complete"
         } else {
@@ -1661,6 +1683,8 @@ final class AppCoordinator: ObservableObject {
 
     private var windowOpenHandler: ((String) -> Void)?
     private var windowNotificationTokens: [NSObjectProtocol] = []
+    private var externalAppTracker = ExternalAppTracker()
+    private var workspaceActivationObserver: NSObjectProtocol?
 
     /// Bridges the window-open notifications (⌥⌘V hotkey, menu-panel
     /// buttons, voice commands, protocol `.openWindow` steps) to SwiftUI's
@@ -2333,6 +2357,57 @@ final class AppCoordinator: ObservableObject {
     /// Called from AppDelegate.applicationWillTerminate to cleanly stop the backend.
     func shutdownBackend() {
         backendManager.stop()
+    }
+
+    /// Tracks the last activated non-VoxFlow app so the cockpit can freeze it
+    /// at ⌘R. Reading `frontmostApplication` here (launch) and at cockpit open
+    /// is allowed; it is never read at insert time.
+    private func startExternalAppTracking() {
+        recordExternalApp(NSWorkspace.shared.frontmostApplication)
+        // The token is retained for the app's lifetime (AppCoordinator is a
+        // singleton), like the window-open observers.
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            // Extract Sendable facts before hopping onto the main actor.
+            let pid = app?.processIdentifier
+            let bundleID = app?.bundleIdentifier
+            let name = app?.localizedName
+            let launchDate = app?.launchDate
+            let isRegularApp = app?.activationPolicy == .regular
+            MainActor.assumeIsolated {
+                guard let pid else { return }
+                self?.recordExternalApp(
+                    pid: pid, bundleID: bundleID, name: name, launchDate: launchDate,
+                    isRegularApp: isRegularApp)
+            }
+        }
+    }
+
+    private func recordExternalApp(_ app: NSRunningApplication?) {
+        guard let app else { return }
+        recordExternalApp(
+            pid: app.processIdentifier,
+            bundleID: app.bundleIdentifier,
+            name: app.localizedName,
+            launchDate: app.launchDate,
+            isRegularApp: app.activationPolicy == .regular)
+    }
+
+    private func recordExternalApp(
+        pid: Int32, bundleID: String?, name: String?, launchDate: Date?, isRegularApp: Bool
+    ) {
+        externalAppTracker.record(
+            pid: pid, bundleID: bundleID, name: name, launchDate: launchDate,
+            isRegularApp: isRegularApp, ownPID: ProcessInfo.processInfo.processIdentifier)
+        // Every app activation lands here; publish only a real change so the
+        // side panel does not re-render on each one.
+        if state.lastExternalApp != externalAppTracker.current {
+            state.lastExternalApp = externalAppTracker.current
+        }
     }
 
     private func startFocusMonitoring() {

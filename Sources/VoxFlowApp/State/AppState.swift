@@ -12,6 +12,8 @@ final class AppState: ObservableObject {
     @Published var lastInsertResult: InsertResult?
     @Published var targetingMode: TargetingMode = .anyApp
     @Published var focusTarget: FocusTargetSnapshot = .unavailable
+    /// The last non-VoxFlow app the user activated; the cockpit's next target.
+    @Published var lastExternalApp: ExternalAppIdentity?
     @Published var onboardingPhase: OnboardingPhase = .notStarted
     @Published var calibrationItems: [CalibrationItem] = []
     @Published var activeCalibrationIndex: Int = 0

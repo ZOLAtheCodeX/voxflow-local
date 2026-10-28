@@ -135,6 +135,11 @@ final class AudioCaptureService: AudioCapturing {
         // run after startCapture resets this state — the tap closure carries the
         // generation it was installed under and `ingest` drops mismatches.
         var generation: UInt64 = 0
+        // Audio buffered when a device change invalidated the capture. The
+        // buffer itself is wiped by the next startCapture, and stopCapture
+        // throws instead of returning it, so it is parked here for
+        // `takeInvalidatedAudio()` (cockpit salvage). Cleared by startCapture.
+        var invalidatedAudio: CapturedAudio?
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -163,6 +168,43 @@ final class AudioCaptureService: AudioCapturing {
             state.bufferLimitReached = true
         }
         return isFirstBuffer ? state.onCaptureLive : nil
+    }
+
+    /// Device-change step, called under the state lock: retires the
+    /// generation (a late tap block must not append to the dead capture),
+    /// drops the live handler, and parks the buffered audio for
+    /// `takeInvalidatedAudio(state:)`. Nothing buffered parks nothing.
+    static func invalidate(state: inout State) {
+        state.generation &+= 1
+        state.onCaptureLive = nil
+        state.invalidatedAudio = state.pcmBuffer.isEmpty ? nil : CapturedAudio(
+            pcm: state.pcmBuffer,
+            sampleRate: targetSampleRate,
+            bufferLimitReached: state.bufferLimitReached)
+    }
+
+    /// Returns the parked audio once, under the state lock.
+    static func takeInvalidatedAudio(state: inout State) -> CapturedAudio? {
+        defer { state.invalidatedAudio = nil }
+        return state.invalidatedAudio
+    }
+
+    /// Start step, called under the state lock: clears the previous capture
+    /// and returns the new generation. The parked audio is dropped BEFORE the
+    /// buffer is emptied: it shares the buffer's storage, so emptying first
+    /// would copy up to `maxBufferBytes` just to keep the old bytes alive.
+    static func resetForCapture(
+        state: inout State, onCaptureLive: (@Sendable () -> Void)?
+    ) -> UInt64 {
+        state.invalidatedAudio = nil
+        state.pcmBuffer.removeAll(keepingCapacity: true)
+        state.bufferLimitReached = false
+        state.captureStartedAt = nil
+        state.firstBufferLatencyMs = nil
+        state.lastBufferAt = nil
+        state.onCaptureLive = onCaptureLive
+        state.generation &+= 1
+        return state.generation
     }
 
     private var isCapturing = false
@@ -241,11 +283,14 @@ final class AudioCaptureService: AudioCapturing {
         engine.stop()
         isCapturing = false
         deviceChangedDuringCapture = true
-        state.withLock {
-            $0.generation &+= 1
-            $0.onCaptureLive = nil
-        }
+        state.withLock { Self.invalidate(state: &$0) }
         logger.warning("Audio device configuration changed mid-capture — capture invalidated")
+    }
+
+    /// Returns, once, the audio buffered before a device change invalidated
+    /// the capture (see `handleConfigurationChange`).
+    func takeInvalidatedAudio() -> CapturedAudio? {
+        state.withLock { Self.takeInvalidatedAudio(state: &$0) }
     }
 
     var bufferLimitReached: Bool {
@@ -286,14 +331,7 @@ final class AudioCaptureService: AudioCapturing {
     func startCapture(onCaptureLive: (@Sendable () -> Void)?) throws {
         deviceChangedDuringCapture = false
         let captureGeneration: UInt64 = state.withLock {
-            $0.pcmBuffer.removeAll(keepingCapacity: true)
-            $0.bufferLimitReached = false
-            $0.captureStartedAt = nil
-            $0.firstBufferLatencyMs = nil
-            $0.lastBufferAt = nil
-            $0.onCaptureLive = onCaptureLive
-            $0.generation &+= 1
-            return $0.generation
+            Self.resetForCapture(state: &$0, onCaptureLive: onCaptureLive)
         }
 
         let inputNode = engine.inputNode
