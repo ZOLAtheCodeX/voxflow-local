@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="${ROOT_DIR}/dist/VoxFlow.app"
+APP_DIR="${ROOT_DIR}/dist.noindex/VoxFlow.app"
 APP_BIN="${APP_DIR}/Contents/MacOS/VoxFlowLocal"
 RUNTIME_DIR="${ROOT_DIR}/.runtime"
 APP_LOG="${RUNTIME_DIR}/app-direct.log"

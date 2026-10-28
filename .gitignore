@@ -10,6 +10,7 @@ DerivedData/
 .runtime/
 /models/
 dist/
+dist.noindex/
 __pycache__/
 backend/tests/reports/
 backend/tests/fixtures/golden_clips/*.tmp.aiff

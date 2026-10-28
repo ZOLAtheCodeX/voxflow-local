@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST_DIR="${ROOT_DIR}/dist"
+DIST_DIR="${ROOT_DIR}/dist.noindex"
+LEGACY_APP_DIR="${ROOT_DIR}/dist/VoxFlow.app"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 APP_DIR="${DIST_DIR}/VoxFlow.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -64,13 +66,18 @@ done
 PRODUCT_BIN="${ROOT_DIR}/.build/${BUILD_CONFIGURATION}/VoxFlowLocal"
 
 mkdir -p "${DIST_DIR}"
-# Spotlight exclusion: the staging bundle dist/VoxFlow.app lives under
-# ~/Documents, which Spotlight indexes by default — so without this marker it
-# appears as a SECOND "VoxFlow" in Spotlight next to the installed copy, and
-# LaunchServices can resolve `open -b local.voxflow.app` / voxflow:// deep links
-# to the stale staging bundle. `.metadata_never_index` de-indexes the whole
-# dist/ tree. (.gitignore is unrelated to Spotlight; this is the actual fix.)
-touch "${DIST_DIR}/.metadata_never_index"
+# Spotlight exclusion: the staging bundle lives under ~/Documents, which
+# Spotlight indexes, so it showed up as a second "VoxFlow" next to the
+# installed copy and LaunchServices could resolve `open -b local.voxflow.app` /
+# voxflow:// deep links to it. Spotlight skips any directory whose name ends in
+# `.noindex` (the convention Xcode uses for build intermediates), so staging
+# lives in dist.noindex/. SUPERSEDED: the earlier dist/.metadata_never_index
+# marker, which macOS honors only at a volume root, not on a folder.
+if [[ -d "${LEGACY_APP_DIR}" ]]; then
+  "${LSREGISTER}" -u "${LEGACY_APP_DIR}" >/dev/null 2>&1 || true
+  echo "[bundle] an old staging bundle remains at ${LEGACY_APP_DIR}; it is unregistered,"
+  echo "[bundle] but Spotlight still lists it until you delete ${ROOT_DIR}/dist"
+fi
 mkdir -p "${MODULE_CACHE_DIR}"
 mkdir -p "${ICON_TMP_DIR}"
 

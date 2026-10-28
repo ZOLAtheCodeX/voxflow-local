@@ -35,6 +35,12 @@ All notable changes to VoxFlow Local are documented here. The format follows
 - A smart action tapped while recording no longer drops the words dictated
   while it runs: the recording stops first and the action works on the whole
   transcript.
+- Building the app no longer adds another "VoxFlow" to Spotlight and the app
+  launcher: the staging bundle now lives in `dist.noindex/`, which Spotlight
+  skips, and installing unregisters it so only `~/Applications/VoxFlow.app`
+  answers `open -b local.voxflow.app` and `voxflow://` links. The old
+  `dist/.metadata_never_index` marker never worked on a folder. Delete any old
+  `dist/` folder by hand.
 - Gemma polish and smart actions no longer spend seconds on hidden
   "thinking": Ollama chat requests now send `think: false`. Measured on
   gemma4:e2b-mlx (M1 Pro 16 GB): a warm 30-word polish took 6.0 s with
