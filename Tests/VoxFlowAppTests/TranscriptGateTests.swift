@@ -86,4 +86,35 @@ final class TranscriptGateTests: XCTestCase {
             .accepted
         )
     }
+
+    // MARK: - Non-speech annotations (2026-10-27 cockpit acceptance run)
+
+    func testAnnotationOnlyTextIsRejectedAsHallucinationNotEmpty() {
+        for text in ["[ [ [BLANK_AUDIO]", "(water rushing)", "[POP]"] {
+            let admission = TranscriptGate.admit(text: text, confidence: 0.95, audioDurationSeconds: 6)
+            XCTAssertEqual(admission.verdict, .rejected(reason: .hallucinationFilter), text)
+            XCTAssertEqual(admission.text, "", text)
+        }
+    }
+
+    func testAnnotationsAreStrippedFromAcceptedSpeech() {
+        let admission = TranscriptGate.admit(
+            text: "[Silence] Fourth check, closing the cockpit must stop.",
+            confidence: 0.95, audioDurationSeconds: 6)
+        XCTAssertEqual(admission.verdict, .accepted)
+        XCTAssertEqual(admission.text, "Fourth check, closing the cockpit must stop.")
+    }
+
+    func testRulesRunOnTheCleanedText() {
+        // A lone word left after stripping is judged as a lone word.
+        let admission = TranscriptGate.admit(
+            text: "[BLANK_AUDIO] um", confidence: 0.05, audioDurationSeconds: 6)
+        XCTAssertEqual(admission.verdict, .rejected(reason: .lowConfidence))
+    }
+
+    func testEvaluateMatchesAdmitVerdict() {
+        XCTAssertEqual(
+            TranscriptGate.evaluate(text: "(water rushing)", confidence: 0.45, audioDurationSeconds: 6),
+            .rejected(reason: .hallucinationFilter))
+    }
 }

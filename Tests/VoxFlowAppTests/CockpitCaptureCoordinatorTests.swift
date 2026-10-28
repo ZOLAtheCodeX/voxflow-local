@@ -193,6 +193,22 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         await coord.stopRecording()
     }
 
+    /// 2026-10-27 acceptance run: Whisper's non-speech annotations reached the
+    /// transcript ("[Silence] Fourth check", "[ [ [BLANK_AUDIO]").
+    func test_non_speech_annotations_never_reach_the_transcript() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber()
+        transcriber.texts = ["[Silence] Fourth check, closing the cockpit.", "[ [ [BLANK_AUDIO]", "(water rushing)"]
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+        await coord.periodicFlush()
+        XCTAssertEqual(session.currentSession?.transcript, "Fourth check, closing the cockpit.")
+        await coord.stopRecording()
+    }
+
     func test_flushNow_appends_transcribed_text_and_restarts_capture() async {
         let capture = FakeCapture(nextAudio: makeAudio(silent: false))
         let transcriber = FakeTranscriber(); transcriber.nextText = "hello world"

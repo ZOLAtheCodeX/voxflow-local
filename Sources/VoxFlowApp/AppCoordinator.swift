@@ -1064,11 +1064,15 @@ final class AppCoordinator: ObservableObject {
         // Single ingress gate: empty/placeholder, hallucination filter, and the
         // low-confidence rules live in TranscriptGate so every transcript path
         // (quick dictation, cockpit chunks, command lane) applies them identically.
-        if case .rejected(let reason) = TranscriptGate.evaluate(
+        // The gate also strips Whisper's non-speech annotations; everything
+        // after it uses `acceptedText`, while the receipt keeps the raw decode.
+        let admission = TranscriptGate.admit(
             text: rawText,
             confidence: transcription.confidenceEstimate,
             audioDurationSeconds: audioDurationSec
-        ) {
+        )
+        let acceptedText = admission.text
+        if case .rejected(let reason) = admission.verdict {
             let rms = capturedAudio.rmsEnergy
             log.info("TranscriptGate rejected transcript (\(reason.rawValue), confidence=\(String(format: "%.2f", transcription.confidenceEstimate)), duration=\(String(format: "%.1f", audioDurationSec))s, rms=\(String(format: "%.4f", rms))) — discarding")
             // Retain the capture BEFORE it goes out of scope: the WAV is both
@@ -1120,12 +1124,12 @@ final class AppCoordinator: ObservableObject {
         }
 
         if state.onboardingPhase == .calibrating {
-            onboarding.handleCalibrationResult(rawText: rawText)
+            onboarding.handleCalibrationResult(rawText: acceptedText)
             return
         }
 
         if commandLane {
-            executeCommandLane(rawText: rawText)
+            executeCommandLane(rawText: acceptedText)
             return
         }
 
@@ -1180,7 +1184,7 @@ final class AppCoordinator: ObservableObject {
         // so Settings edits take effect immediately; reserved/action-word
         // precedence is guaranteed by resolveSnippet.
         if let snippet = VoiceCommandRouter.resolveSnippet(
-            rawText, snippets: cockpitSnippets.snippets, context: .quickOnly) {
+            acceptedText, snippets: cockpitSnippets.snippets, context: .quickOnly) {
             let appLabel = state.focusTarget.appName ?? "app"
             // Final cancellation gate: a snippet is built after STT, so a cancel
             // (or superseding capture) between transcription and this insert must
@@ -1203,7 +1207,7 @@ final class AppCoordinator: ObservableObject {
             return
         }
 
-        try await processWorkflow(sessionID: sessionID, rawText: rawText, trace: trace)
+        try await processWorkflow(sessionID: sessionID, rawText: acceptedText, trace: trace)
 
         // Capture-quality warnings, appended AFTER the workflow set its own
         // status so the insert/review message stays first and the user learns

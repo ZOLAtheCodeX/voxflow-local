@@ -345,11 +345,12 @@ final class CockpitCaptureCoordinator {
             // bypassed the confidence rules entirely, so every 5 s flush of
             // ambient noise was a ghost-text opportunity (audit cause #5).
             let durationSeconds = audio.durationSeconds
-            if case .rejected(let reason) = TranscriptGate.evaluate(
+            let admission = TranscriptGate.admit(
                 text: text,
                 confidence: response.confidenceEstimate,
                 audioDurationSeconds: durationSeconds
-            ) {
+            )
+            if case .rejected(let reason) = admission.verdict {
                 if reason != .empty {
                     log.info("TranscriptGate rejected cockpit chunk (\(reason.rawValue))")
                     audit?.recordRejection(
@@ -363,7 +364,7 @@ final class CockpitCaptureCoordinator {
                 settleWithoutText()
                 return
             }
-            let corrected = dictionary?.apply(to: text) ?? text
+            let corrected = dictionary?.apply(to: admission.text) ?? admission.text
             if let id {
                 // Stale work is rejected by the session's id guard, and must
                 // leave the newer recording's counter alone.

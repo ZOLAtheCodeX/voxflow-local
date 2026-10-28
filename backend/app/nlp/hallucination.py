@@ -59,6 +59,68 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 _ENCLOSURES = (("[", "]"), ("(", ")"), ("*", "*"))
 
+# Words Whisper writes inside a sound annotation such as "(water rushing)" or
+# "*typing*". A parenthetical or asterisk group is stripped only when EVERY word
+# is in this set, so a dictated aside that merely mentions one survives.
+# Mirrors soundAnnotationWords in HallucinationFilter.swift.
+_SOUND_ANNOTATION_WORDS = frozenset({
+    "ambient", "applause", "background", "barking", "beep", "beeping", "beeps",
+    "birds", "blank_audio", "blowing", "breathing", "buzzing", "chirping", "chuckles",
+    "chuckling", "clack", "clacking", "clapping", "click", "clicking", "clicks",
+    "cough", "coughing", "coughs", "crowd", "door", "engine", "footsteps", "gasps",
+    "humming", "inaudible", "keyboard", "laughing", "laughs", "laughter", "mumbling",
+    "music", "noise", "noises", "phone", "playing", "pop", "rain", "ringing",
+    "running", "rushing", "sighs", "silence", "sniffs", "sound", "sounds", "static",
+    "thunder", "traffic", "typing", "water", "whispering", "wind",
+})
+
+_SQUARE_GROUP_RE = re.compile(r"\[[^\[\]]*\]")
+_ANNOTATION_GROUP_RES = (re.compile(r"\(([^()]*)\)"), re.compile(r"\*([^*]*)\*"))
+_SPACE_RUN_RE = re.compile(r"\s+")
+_SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
+
+
+def _is_sound_annotation(inner: str) -> bool:
+    words = [w for w in re.split(r"[ -]", inner.lower()) if w]
+    return 1 <= len(words) <= 4 and all(w in _SOUND_ANNOTATION_WORDS for w in words)
+
+
+def strip_non_speech_annotations(text: str) -> str:
+    """Remove Whisper's non-speech annotations so they never reach a transcript.
+
+    Strips every square-bracket group ("[BLANK_AUDIO]", "[Silence]"), stray
+    square brackets ("[ [" runs), and parenthetical or asterisk groups made only
+    of sound words. Dictated speech never contains square brackets. Text with
+    nothing to strip is returned trimmed and otherwise untouched. Mirrors
+    HallucinationFilter.stripNonSpeechAnnotations; the shared contract is
+    Tests/Fixtures/annotation_strip_parity.json.
+    """
+    result = text
+    removed = False
+    while True:
+        result, count = _SQUARE_GROUP_RE.subn(" ", result)
+        if not count:
+            break
+        removed = True
+
+    def _drop(match: re.Match[str]) -> str:
+        nonlocal removed
+        if not _is_sound_annotation(match.group(1)):
+            return match.group(0)
+        removed = True
+        return " "
+
+    for pattern in _ANNOTATION_GROUP_RES:
+        result = pattern.sub(_drop, result)
+    if "[" in result or "]" in result:
+        result = result.replace("[", "").replace("]", "")
+        removed = True
+    if not removed:
+        return text.strip()
+    result = _SPACE_RUN_RE.sub(" ", result)
+    result = _SPACE_BEFORE_PUNCT_RE.sub(r"\1", result)
+    return result.strip()
+
 
 def is_whisper_hallucination(text: str, short_audio: bool = True) -> bool:
     """Detect common Whisper hallucination patterns.

@@ -512,3 +512,30 @@ class TestHallucinationParity:
                     f"expected {case['expected']}, got {got} — {case.get('note', '')}"
                 )
         assert not failures, "Parity contract violations:\n" + "\n".join(failures)
+
+
+# ── TestAnnotationStripParity ────────────────────────────────────────
+
+class TestAnnotationStripParity:
+    """Behavioral parity with HallucinationFilter.stripNonSpeechAnnotations.
+
+    Both implementations consume Tests/Fixtures/annotation_strip_parity.json and
+    must map every text to its expected value.
+    """
+
+    def test_fixture_cases_hold(self):
+        import json
+
+        from nlp.hallucination import strip_non_speech_annotations
+
+        project_root = Path(__file__).resolve().parent.parent.parent
+        fixture = project_root / "Tests" / "Fixtures" / "annotation_strip_parity.json"
+        assert fixture.exists(), f"Strip fixture not found at {fixture}"
+        cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
+        assert len(cases) >= 15, "Fixture unexpectedly small, wrong file?"
+        failures = [
+            f"{case['text']!r}: expected {case['expected']!r}, got {got!r} ({case.get('note', '')})"
+            for case in cases
+            if (got := strip_non_speech_annotations(case["text"])) != case["expected"]
+        ]
+        assert not failures, "Strip contract violations:\n" + "\n".join(failures)

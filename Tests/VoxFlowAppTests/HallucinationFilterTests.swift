@@ -172,4 +172,35 @@ final class HallucinationFilterTests: XCTestCase {
         }
         XCTAssertTrue(failures.isEmpty, "Parity contract violations:\n" + failures.joined(separator: "\n"))
     }
+
+    // MARK: - Non-speech annotation stripping (shared contract with backend)
+
+    /// Both this sanitizer and backend/app/nlp/hallucination.py must map every
+    /// case in Tests/Fixtures/annotation_strip_parity.json to its expected text.
+    func testAnnotationStripParityFixtureCasesHold() throws {
+        struct StripCase: Decodable {
+            let text: String
+            let expected: String
+            let note: String?
+        }
+        struct StripFixture: Decodable {
+            let cases: [StripCase]
+        }
+
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // Tests/VoxFlowAppTests
+            .deletingLastPathComponent()  // Tests
+            .appendingPathComponent("Fixtures/annotation_strip_parity.json")
+        let fixture = try JSONDecoder().decode(StripFixture.self, from: Data(contentsOf: fixtureURL))
+        XCTAssertGreaterThanOrEqual(fixture.cases.count, 15, "Fixture unexpectedly small, wrong file?")
+
+        var failures: [String] = []
+        for c in fixture.cases {
+            let got = HallucinationFilter.stripNonSpeechAnnotations(c.text)
+            if got != c.expected {
+                failures.append("'\(c.text)': expected '\(c.expected)', got '\(got)' (\(c.note ?? ""))")
+            }
+        }
+        XCTAssertTrue(failures.isEmpty, "Strip contract violations:\n" + failures.joined(separator: "\n"))
+    }
 }
