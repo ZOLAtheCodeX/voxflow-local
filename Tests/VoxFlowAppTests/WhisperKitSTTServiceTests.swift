@@ -114,6 +114,45 @@ final class WhisperKitSTTServiceTests: XCTestCase {
         XCTAssertEqual(retry.logProbThreshold, primary.logProbThreshold)
     }
 
+    // MARK: - Prompt-free retry after temperature fallback (2026-10-27 probe)
+
+    /// The vocabulary prompt's failure signature: on a chunk where speech is
+    /// followed by quiet, the prompted greedy decode skips the speech, scores
+    /// under logProbThreshold, and WhisperKit falls back to higher
+    /// temperatures that return junk. A decode that used fallback is retried
+    /// without the prompt; a clean greedy decode is not.
+    func testFallbackOnAPromptedDecodeTriggersThePromptFreeRetry() {
+        XCTAssertTrue(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: [0.4]))
+        XCTAssertTrue(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: [0, 0.6]))
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: [0, 0]))
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: false, segmentTemperatures: [0.6]))
+        XCTAssertFalse(WhisperKitSTTService.shouldRetryWithoutPrompt(promptUsed: true, segmentTemperatures: []))
+    }
+
+    func testUnpromptedDecodeWinsWhenThePromptedOneHasNoSpeech() {
+        // Probe n4_s8_speech4_noise3: prompted "(" at lp -0.88 vs unprompted speech at lp -0.37.
+        let prompted = WhisperKitSTTService.decodeQuality(text: "(", avgLogprobs: [-0.88])
+        let unprompted = WhisperKitSTTService.decodeQuality(
+            text: "with an owner and a review date for each one. Second, the vendor", avgLogprobs: [-0.37, -0.34])
+        XCTAssertFalse(prompted.hasSpeechText)
+        XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: unprompted))
+    }
+
+    func testHigherLogProbabilityWinsWhenBothHaveSpeech() {
+        // Probe n6_s3_speech4_noise3: prompted "The vendor is" at lp -0.81.
+        let truncated = WhisperKitSTTService.decodeQuality(text: "The vendor is", avgLogprobs: [-0.81])
+        let full = WhisperKitSTTService.decodeQuality(
+            text: "with an owner and a review date for each one. Second, the vendor", avgLogprobs: [-0.40, -0.65])
+        XCTAssertTrue(WhisperKitSTTService.prefersUnprompted(prompted: truncated, unprompted: full))
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: full, unprompted: truncated))
+    }
+
+    func testPromptedDecodeIsKeptWhenTheUnpromptedOneHasNoSpeech() {
+        let prompted = WhisperKitSTTService.decodeQuality(text: "Draft the HIPAA notice.", avgLogprobs: [-0.9])
+        let unprompted = WhisperKitSTTService.decodeQuality(text: "[BLANK_AUDIO]", avgLogprobs: [-0.2])
+        XCTAssertFalse(WhisperKitSTTService.prefersUnprompted(prompted: prompted, unprompted: unprompted))
+    }
+
     // MARK: - Untranscribed speech tail (partial decode detection)
 
     /// Session 29 review: an early-EOT decode (transcript covers only the

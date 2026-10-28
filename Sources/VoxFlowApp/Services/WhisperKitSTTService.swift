@@ -44,6 +44,43 @@ final class WhisperKitSTTService: ChunkTranscribing {
     /// speech at rms ~0.016 peaks well under 0.15), so the captures most
     /// likely to empty were the ones the retry refused (session 29 review).
     /// A decode that already produced segments is never retried.
+    /// The vocabulary prompt's failure signature (2026-10-27 decode probe): on
+    /// a chunk where speech is followed by quiet, the prompted greedy decode
+    /// skips the speech ("The vendor is"), scores under logProbThreshold, and
+    /// WhisperKit's temperature fallback then returns junk ("(", "[", "") that
+    /// the gate rejects, so the words are lost. Any fallback on a prompted
+    /// decode earns one prompt-free retry; a clean greedy decode does not.
+    nonisolated static func shouldRetryWithoutPrompt(promptUsed: Bool, segmentTemperatures: [Float]) -> Bool {
+        promptUsed && segmentTemperatures.contains { $0 > 0 }
+    }
+
+    /// What the prompt-free retry is judged on: whether real words survive
+    /// annotation stripping, then the mean segment log-probability.
+    struct DecodeQuality: Equatable {
+        let hasSpeechText: Bool
+        let meanAvgLogprob: Double?
+    }
+
+    nonisolated static func decodeQuality(text: String, avgLogprobs: [Float]) -> DecodeQuality {
+        let hasSpeech = HallucinationFilter.stripNonSpeechAnnotations(text).contains(where: \.isLetter)
+        let mean = avgLogprobs.isEmpty
+            ? nil : avgLogprobs.reduce(0.0) { $0 + Double($1) } / Double(avgLogprobs.count)
+        return DecodeQuality(hasSpeechText: hasSpeech, meanAvgLogprob: mean)
+    }
+
+    /// Real words beat none; otherwise the higher mean log-probability wins,
+    /// and a tie keeps the prompted decode (it carries the spelling bias).
+    nonisolated static func prefersUnprompted(prompted: DecodeQuality, unprompted: DecodeQuality) -> Bool {
+        if prompted.hasSpeechText != unprompted.hasSpeechText { return unprompted.hasSpeechText }
+        return (unprompted.meanAvgLogprob ?? -.infinity) > (prompted.meanAvgLogprob ?? -.infinity)
+    }
+
+    private static func decodeQuality(_ results: [TranscriptionResult]) -> DecodeQuality {
+        decodeQuality(
+            text: results.map(\.text).joined(separator: " "),
+            avgLogprobs: results.flatMap(\.segments).map(\.avgLogprob))
+    }
+
     nonisolated static func shouldRetryEmptyDecode(
         segmentCount: Int, rmsEnergy: Double, silenceFloor: Double = CapturedAudio.silenceFloor
     ) -> Bool {
@@ -178,12 +215,27 @@ final class WhisperKitSTTService: ChunkTranscribing {
         // attempt on the audio already in memory (no re-recording for the
         // user) — with VARIED options, since a deterministic failure would
         // reproduce under an identical replay.
+        var promptUsed = decodeOptions.promptTokens != nil
         if Self.shouldRetryEmptyDecode(
             segmentCount: results.flatMap(\.segments).count, rmsEnergy: rawRMS) {
             try Task.checkCancellation()
             log.info("WhisperKit returned 0 segments on audio with rms \(String(format: "%.4f", rawRMS)) — retrying decode once with varied options")
             results = try await pipe.transcribe(
                 audioArray: floatSamples, decodeOptions: Self.retryDecodeOptions(from: decodeOptions))
+            promptUsed = false
+        }
+        // A prompted decode that needed temperature fallback gets one
+        // prompt-free attempt; the better of the two is kept.
+        if Self.shouldRetryWithoutPrompt(
+            promptUsed: promptUsed, segmentTemperatures: results.flatMap(\.segments).map(\.temperature)) {
+            try Task.checkCancellation()
+            log.info("Prompted decode needed temperature fallback; retrying once without the vocabulary prompt")
+            let unprompted = try await pipe.transcribe(
+                audioArray: floatSamples, decodeOptions: Self.retryDecodeOptions(from: decodeOptions))
+            if Self.prefersUnprompted(
+                prompted: Self.decodeQuality(results), unprompted: Self.decodeQuality(unprompted)) {
+                results = unprompted
+            }
         }
         let inferenceLatencyMs = inferenceStarted.elapsedMilliseconds()
 
