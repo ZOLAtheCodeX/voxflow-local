@@ -76,6 +76,8 @@ def is_whisper_hallucination(text: str, short_audio: bool = True) -> bool:
     for open_char, close_char in _ENCLOSURES:
         if len(stripped) >= 2 and stripped.startswith(open_char) and stripped.endswith(close_char):
             inner = stripped[1:-1].strip().lower()
+            if inner == "blank_audio":
+                return True
             if any(cue in inner for cue in _NOISE_CUES):
                 return True
 

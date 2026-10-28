@@ -32,6 +32,24 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertNotNil(obj?["ts"])
     }
 
+    func testComputerActionReceiptDoesNotClaimTextInsertionOrRetainClipboard() throws {
+        let log = InsertionAuditLog(fileURL: tempURL)
+        log.recordComputerAction(id: "paste_clipboard", outcome: "keyPosted", targetApp: "TextEdit", durationMs: 24)
+        let obj = try JSONSerialization.jsonObject(with: Data(contentsOf: tempURL)) as? [String: Any]
+        XCTAssertEqual(obj?["event"] as? String, "computer_action")
+        XCTAssertEqual(obj?["outcome"] as? String, "keyPosted")
+        XCTAssertEqual(obj?["action_ms"] as? Int, 24)
+        XCTAssertNil(obj?["text"])
+        XCTAssertNil(obj?["submission"])
+        let receipt = try JSONDecoder().decode(CaptureReceipt.self, from: Data(contentsOf: tempURL))
+        let row = CaptureReceiptRowModel(receipt: receipt)
+        XCTAssertEqual(receipt.event, .computerAction)
+        XCTAssertEqual(row.chips, ["Computer action", "Shortcut sent"])
+        XCTAssertEqual(row.snippet, "paste_clipboard")
+        XCTAssertEqual(row.detail, "24 ms")
+        XCTAssertFalse(row.isReject)
+    }
+
     /// Tail-loss forensics (session 29): successful inserts carried no audio
     /// stats, so a transcript covering only the head of a 12 s dictation was
     /// indistinguishable from a complete one. Inserts now carry the same

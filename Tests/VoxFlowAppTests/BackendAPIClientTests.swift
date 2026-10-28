@@ -3,6 +3,11 @@ import XCTest
 
 class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    /// The one path the running test exercises. Anything else is a stray from a
+    /// task that outlived an earlier test (AppCoordinator.shared's readiness
+    /// poller keeps calling /v1/ready through the global session) and is failed
+    /// quietly instead of tripping this test's handler assertions.
+    nonisolated(unsafe) static var expectedPath: String?
 
     override class func canInit(with request: URLRequest) -> Bool {
         return true
@@ -13,6 +18,10 @@ class MockURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
+        if let expected = MockURLProtocol.expectedPath, request.url?.path != expected {
+            client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
+            return
+        }
         guard let handler = MockURLProtocol.requestHandler else {
             // A stray/leaked request (an async backend call outliving its test,
             // routed through the shared global BackendAPIClient.session after
@@ -56,6 +65,7 @@ final class BackendAPIClientTests: XCTestCase {
 
     override func tearDown() {
         MockURLProtocol.requestHandler = nil
+        MockURLProtocol.expectedPath = nil
         BackendAPIClient.session = originalSession
         BackendAPIClient.baseURL = originalBaseURL
         super.tearDown()
@@ -64,6 +74,7 @@ final class BackendAPIClientTests: XCTestCase {
     func testHealth_Success() async throws {
         // Arrange
         let expectedDictionary = ["status": "ok"]
+        MockURLProtocol.expectedPath = "/v1/health"
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/v1/health")
             XCTAssertEqual(request.httpMethod, "GET")
@@ -95,6 +106,7 @@ final class BackendAPIClientTests: XCTestCase {
             "fallback_depth": 0
         }
         """
+        MockURLProtocol.expectedPath = "/v1/cleanup"
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/v1/cleanup")
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
@@ -117,6 +129,7 @@ final class BackendAPIClientTests: XCTestCase {
         let body = """
         {"output_text": "x", "mode_applied": "light", "guardrail_triggered": false}
         """
+        MockURLProtocol.expectedPath = "/v1/cleanup"
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, Data(body.utf8))
@@ -142,6 +155,7 @@ final class BackendAPIClientTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
+        MockURLProtocol.expectedPath = "/v1/transcribe"
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/v1/transcribe")
             XCTAssertEqual(request.httpMethod, "POST")
@@ -174,6 +188,7 @@ final class BackendAPIClientTests: XCTestCase {
         {"error": "Internal Server Error"}
         """.data(using: .utf8)!
 
+        MockURLProtocol.expectedPath = "/v1/health"
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
             return (response, mockResponse)
@@ -197,6 +212,7 @@ final class BackendAPIClientTests: XCTestCase {
         {"detail": "Invalid session ID"}
         """.data(using: .utf8)!
 
+        MockURLProtocol.expectedPath = "/v1/health"
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!
             return (response, mockResponse)

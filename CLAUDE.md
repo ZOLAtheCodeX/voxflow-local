@@ -137,12 +137,46 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 
 ## Testing
 
+Vocabulary and spoken skills: `docs/vocabulary-and-skills.md` documents the
+portable version-1 schemas. `DictionaryStore` compiles corrections on mutation;
+matching prefers longer spoken forms and never cascades replacements. Existing
+dictionary arrays remain readable; `prioritized` is an optional field. Do not
+overwrite unreadable configuration or publish in-memory changes before an
+atomic save succeeds.
+
+`SkillProfileStore` caches an immutable matcher. Quick Dictation snapshots it
+alongside the target app at capture start; accepted skill utterances bypass
+vocabulary substitutions and prose cleanup. Use `.verbatim` insertion for exact
+commands. Automatic Enter is opt-in with Off / Voice Action Prompts only /
+ordinary dictation only / both scopes; freeze the choice and AX window/field at
+capture start. Post Return only after successful insertion and final target,
+focus, cancellation, and secure-input checks. Record submission separately. Keep profiles explicitly selected, bound
+to allowed app bundle IDs, and separate from cockpit commands and snippets.
+Commands reject newlines/control characters. Successful changes to the effective
+active skill profile revoke captured permissions and pending Enter through the
+coordinator subscription. Retain the captured matcher so cancellation cannot fall
+through to prose. Revoked insertion failures must not become recovery clipboard
+copies. Unit tests use insertion fakes and the shared subscription seam.
+
+Built-in computer actions use `computer_actions.json` and a standalone isolated
+Python preparer, then `ComputerActionService` and the signed native bridge. Keep
+Swift/Python operation allowlists aligned. Only complete registered phrases
+match. The name prefix is required by default and can be made optional in Settings.
+Freeze prefix choice and action permissions at capture start; revoke pending actions
+on mode/toggle/prefix changes. Recheck after preparation; no model/server loading, arbitrary
+shell execution, automatic retries, or implicit Enter in this path. Tests inject
+`ComputerActionPreparing` and `ComputerActionPerforming` fakes. Preserve the
+separate `computer_action` audit event and its dispatch-versus-opened outcome.
+
 ```bash
-swift test                                              # ~689 Swift tests
-./.venv/bin/python -m pytest backend/tests              # ~551 Python tests (+26 model/live-Ollama skipped)
+swift test                                              # Swift unit and integration suite
+./.venv/bin/python -m pytest backend/tests              # Python suite; model/live checks may skip
 ./scripts/test_all.sh                                   # full suite
 ./scripts/test_all.sh --skip-runtime-checks             # skip regression-clip runtime checks
 VOXFLOW_OLLAMA_GOLDEN=1 pytest backend/tests/test_polish_golden.py  # live Ollama acceptance
+VOXFLOW_WHISPERKIT_GOLDEN=1 swift test --filter WhisperKitShortCaptureIntegrationTests
+VOXFLOW_DICTIONARY_BENCHMARK=1 swift test --filter DictionaryPerformanceTests
+VOXFLOW_STT_BENCHMARK=1 swift test --filter WhisperKitPerformanceTests
 ```
 
 Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish golden set: `backend/tests/golden_polish_set.json`.

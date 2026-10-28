@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "name": "Claude Code example",
+      "applications": ["com.apple.Terminal", "com.microsoft.VSCode"],
+      "skills": [
+        {"name": "research", "aliases": ["deep research"], "command": "/research"}
+      ]
+    },
+    {
+      "name": "Codex example",
+      "applications": ["com.apple.Terminal", "com.microsoft.VSCode"],
+      "skills": [
+        {"name": "research", "aliases": ["deep research"], "command": "$research"}
+      ]
+    }
+  ]
+}

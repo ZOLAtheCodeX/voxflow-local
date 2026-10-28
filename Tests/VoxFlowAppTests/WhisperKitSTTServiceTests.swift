@@ -80,6 +80,21 @@ final class WhisperKitSTTServiceTests: XCTestCase {
         XCTAssertEqual(options.logProbThreshold, -1.0)
     }
 
+    func testAcceptedShortCapturesReachTheDecoderWithoutChangingLongClipTailGuard() {
+        for duration in [0.3, 0.48, 0.94, 0.999, 1.0] {
+            let options = WhisperKitSTTService.makeDecodeOptions(
+                promptTokens: [1, 2], audioDurationSeconds: duration)
+            XCTAssertEqual(options.windowClipTime, 0, "duration=\(duration)")
+            XCTAssertEqual(WhisperKitSTTService.retryDecodeOptions(from: options).windowClipTime, 0)
+            XCTAssertEqual(options.noSpeechThreshold, 0.6)
+        }
+        for duration in [1.001, 2.3, 30, 0, -.infinity, .nan] {
+            XCTAssertEqual(WhisperKitSTTService.makeDecodeOptions(
+                promptTokens: nil, audioDurationSeconds: duration).windowClipTime, 1)
+        }
+        XCTAssertEqual(WhisperKitSTTService.makeDecodeOptions(promptTokens: nil).windowClipTime, 1)
+    }
+
     /// The retry must VARY the decode, not replay it byte-identically: a
     /// deterministic decode failure (gappy PCM) reproduces under identical
     /// options, so the second attempt drops the vocabulary prompt (a known

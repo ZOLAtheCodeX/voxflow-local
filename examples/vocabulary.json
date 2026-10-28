@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {"written": "Acme", "prioritized": true},
+    {"spoken": "ack me", "written": "Acme", "prioritized": true},
+    {"spoken": "iso forty two thousand one", "written": "ISO 42001"}
+  ]
+}

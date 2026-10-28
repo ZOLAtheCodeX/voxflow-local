@@ -35,6 +35,33 @@ provider yourself.
   in the macOS Keychain; every insertion writes an audit receipt to
   `~/Library/Logs/VoxFlow/insertions.jsonl`.
 
+### Bring your vocabulary and CLI skills
+
+In **Settings → Dictation Tools**, add or edit preferred spellings, import a
+plain-text term list or versioned JSON, and export your vocabulary for another
+installation. Pin terms to prioritize the bounded recognition glossary;
+corrections use the full dictionary.
+
+**Voice Action Prompts** map spoken names to exact commands. Create a skill
+profile for your terminal or editor and select it from the VoxFlow menu. For
+example, “use the research skill” can insert your configured `/research` or
+`$research` invocation verbatim. Profiles support portable JSON and a phrase preview.
+
+**Voice action controls** let you choose Off, Custom prompts only, Built-in
+computer actions only, or All, with a checklist for individual actions. Say
+“Voxflow, open Finder”, “Voxflow, copy that”, or “Voxflow, undo that”. Set
+**Command phrases → With or without ‘Voxflow’** to say “open Finder”, “copy that”,
+or “undo” directly. Twelve built-ins cover common apps and shortcuts; their action stage needs no language
+model. Built-ins remain disabled until selected in the mode menu.
+
+Automatic Enter starts Off. In **Settings → Dictation Tools → Automatic Enter**,
+choose Voice Action Prompts only, ordinary dictation only, or both to submit
+automatically after insertion. The receiving application determines what Enter does.
+
+See the [setup guide](docs/vocabulary-and-skills.md) and
+[generic example files](examples/) for formats, conflict handling, CLI syntax,
+and application selection.
+
 ### Audit receipts and what they keep
 
 The receipt log exists to make a phantom insertion attributable after the
