@@ -193,6 +193,60 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         await coord.stopRecording()
     }
 
+    // MARK: - Rejected chunks with speech keep their audio
+
+    private func makeRetainingCoordinator(
+        audio: CapturedAudio, text: String, confidence: Double
+    ) -> (CockpitCaptureCoordinator, LongFormSessionService, URL, URL) {
+        let capture = FakeCapture(nextAudio: audio)
+        let transcriber = FakeTranscriber()
+        transcriber.texts = [text]
+        transcriber.confidences = [confidence]
+        let wavDir = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-wav-\(UUID().uuidString)")
+        let auditURL = FileManager.default.temporaryDirectory.appendingPathComponent("cockpit-audit-\(UUID().uuidString).jsonl")
+        let session = LongFormSessionService(autoSaveDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coord = CockpitCaptureCoordinator(
+            capture: capture, transcriber: transcriber, session: session,
+            audit: InsertionAuditLog(fileURL: auditURL),
+            rejectedAudio: RejectedAudioStore(directory: wavDir, maxClips: 8, enabled: true))
+        return (coord, session, wavDir, auditURL)
+    }
+
+    private func clips(in dir: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasSuffix(".wav") }
+    }
+
+    func test_gate_rejected_chunk_with_speech_is_kept_as_a_clip() async throws {
+        let (coord, _, wavDir, auditURL) = makeRetainingCoordinator(
+            audio: makeTone([(seconds: 5.0, rms: 0.08)]), text: "um", confidence: 0.05)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        XCTAssertEqual(clips(in: wavDir).filter { $0.contains("low_confidence") }.count, 1)
+        let receipt = try String(contentsOf: auditURL, encoding: .utf8)
+        XCTAssertTrue(receipt.contains("low_confidence") && receipt.contains("audio_file"), receipt)
+        await coord.stopRecording()
+    }
+
+    func test_empty_decode_of_speech_is_kept_as_a_clip_with_a_receipt() async throws {
+        let (coord, _, wavDir, auditURL) = makeRetainingCoordinator(
+            audio: makeTone([(seconds: 5.0, rms: 0.08)]), text: "", confidence: 0)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        XCTAssertEqual(clips(in: wavDir).filter { $0.contains("empty") }.count, 1)
+        let receipt = try String(contentsOf: auditURL, encoding: .utf8)
+        XCTAssertTrue(receipt.contains("\"empty\""), receipt)
+        await coord.stopRecording()
+    }
+
+    func test_gate_rejected_noise_chunk_is_not_kept() async {
+        let (coord, _, wavDir, _) = makeRetainingCoordinator(
+            audio: makeTone([(seconds: 5.0, rms: 0.005)]), text: "(water rushing)", confidence: 0.45)
+        coord.startRecording(targetApp: nil)
+        await coord.periodicFlush()
+        XCTAssertTrue(clips(in: wavDir).isEmpty, "room noise must not fill the clip ring")
+        await coord.stopRecording()
+    }
+
     /// 2026-10-27 acceptance run: Whisper's non-speech annotations reached the
     /// transcript ("[Silence] Fourth check", "[ [ [BLANK_AUDIO]").
     func test_non_speech_annotations_never_reach_the_transcript() async {

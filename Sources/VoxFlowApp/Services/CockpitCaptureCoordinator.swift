@@ -351,14 +351,21 @@ final class CockpitCaptureCoordinator {
                 audioDurationSeconds: durationSeconds
             )
             if case .rejected(let reason) = admission.verdict {
-                if reason != .empty {
+                // A rejected chunk with measurable speech may be lost words
+                // (the 2026-10-27 acceptance run lost the opening this way),
+                // so its audio is kept for recovery. Pure noise (no quiet
+                // threshold) is not, so room noise cannot flood the clip ring.
+                let retained = threshold == nil ? nil : rejectedAudio?.store(
+                    pcm: audio.pcm, sampleRate: audio.sampleRate, reason: reason.rawValue)
+                if reason != .empty || retained != nil {
                     log.info("TranscriptGate rejected cockpit chunk (\(reason.rawValue))")
                     audit?.recordRejection(
                         text: text,
                         reason: reason.rawValue,
                         confidence: response.confidenceEstimate,
                         durationSeconds: durationSeconds,
-                        source: "cockpit_chunk"
+                        source: "cockpit_chunk",
+                        audioFile: retained?.path
                     )
                 }
                 settleWithoutText()
