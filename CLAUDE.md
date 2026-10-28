@@ -62,7 +62,7 @@ swift build && swift run VoxFlowLocal      # frontend (requires backend running)
 
 - Swift 6.2 strict concurrency, macOS 14+ deployment target
 - Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.10.0, transformers 5.5.0
-- Health: `curl http://127.0.0.1:8765/v1/health` · Readiness: `curl http://127.0.0.1:8765/v1/ready`
+- Health: `curl http://127.0.0.1:8765/v1/health` · Readiness (token read from the file and passed on stdin, so it never appears in argv): `printf 'X-VoxFlow-Token: %s\n' "$(cat ~/Library/Application\ Support/VoxFlow/backend.token)" | curl -H @- http://127.0.0.1:8765/v1/ready`
 
 ### Ollama (text polish)
 
@@ -81,7 +81,9 @@ If Ollama is unreachable, polish silently falls back to `apply_tone(light_cleanu
 | Variable | Purpose | Default |
 |---|---|---|
 | `VOXFLOW_MODELS_DIR` | Pre-downloaded model cache | `./models` |
-| `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself). | `http://127.0.0.1:8765` |
+| `VOXFLOW_BACKEND_URL` | Backend host/port — resolved once by `BackendEndpoint` and shared by the API client, stale-listener checks, AND the spawned uvicorn (via `VOXFLOW_BACKEND_HOST`/`VOXFLOW_BACKEND_PORT`), so a custom port works end-to-end. Managed spawn binds loopback only; a non-loopback host is refused (run the backend yourself), and a non-loopback manual backend is unsupported: it now rejects requests (loopback `Host` only). | `http://127.0.0.1:8765` |
+| `VOXFLOW_API_TOKEN` | Per-launch backend token (`X-VoxFlow-Token`), 64 lowercase hex. The app generates one and passes it to the managed backend; a manually run backend generates its own when unset. Scripts fall back to it when no token file exists | generated per launch |
+| `VOXFLOW_TOKEN_DIR` | Directory of the `backend.token` mirror file (mode 0600) that `doctor.sh` and `check_runtime_readiness.sh` read | `~/Library/Application Support/VoxFlow` |
 | `VOXFLOW_STT_BACKEND` | `whisper` / `whisperKit` / `openai` | `whisperKit` |
 | `VOXFLOW_WHISPER_MODEL` | Whisper model id | `openai/whisper-small` |
 | `VOXFLOW_STT_ALLOW_FALLBACK` | Opt-in: let a dead local Whisper fall back to cloud OpenAI STT (sends raw, un-redactable audio). Fail-closed when unset | unset (off) |
@@ -224,7 +226,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Have the cockpit voice router fire actions while the session is `.recording` — voice keywords only resolve in `.reviewing`. Multi-word utterances must remain `.none` for Layer 0.
 - Bypass `BackendAPISmartActionAdapter` to call `/v1/smart_action` directly from views — go through `CockpitCoordinator.applyAction` so MRU + undo stay correct.
 - Insert dictation text without a final `try Task.checkCancellation()` first — every auto-insert path (raw, `autoInsertOrReview`, the snippet path) must gate on it so a cancelled/superseded capture never inserts stale text. Cancellation propagates as `CancellationError`/`URLError.cancelled` and is handled quietly by `handleCaptureError` (`AppCoordinator.isUserCancellation`); genuine backend/STT failures still fall back/insert.
-- SIGTERM a process by port or PID file without confirming identity — `terminateForeignListenerAsync` and `killStaleBackend` must gate on `BackendProcessManager.isVoxFlowBackendCommand(...)` (via the `BackendProcessRunning.commandLine` seam: managed `backend/app/server.py` or dev `uvicorn server:app`). Unknown/reused PIDs are refused + logged, never killed. The PID file also records the spawning session's instance stamp (`pid\nstamp`); `killStaleBackend` additionally refuses when a live `/v1/health` stamp contradicts the recorded one (probe failure falls back to the cmdline gate — the stamp check only ever reduces kills). Stamp-probe defaults are XCTest-inert like `defaultRunner()`.
+- SIGTERM a process by port or PID file without confirming identity — `terminateForeignListenerAsync`, `killStaleBackend`, and `ensureBackendPortAvailable` must gate on `BackendProcessManager.isVoxFlowBackendCommand(...)` (via the `BackendProcessRunning.commandLine` seam: managed `backend/app/server.py` or dev `uvicorn server:app`). Unknown/reused PIDs are refused + logged, never killed. The PID file also records the spawning session's instance stamp (`pid\nstamp`); `killStaleBackend` checks the command line, plus the recorded stamp against the in-process `spawnedSessionStamp` (it refuses when this session has spawned and the file records a different session's stamp; no `/v1/health` probe).
 - Lower cleanup consent `max_uses` below 2 (it is the light+polish review flow) or drop the payload/choice bindings — `ConsentStore.resolve(expected_text:, allow_raw:)` must reject reusing a token for a different payload AND reject flipping the raw/redacted choice locked by the first use, both checked BEFORE consuming a use.
 - Classify `openai_compat` locality from the raw `base_url` — use the resolved URL (`spec.base_url or _OPENAI_COMPAT_DEFAULT_URL`); a no-`base_url` provider is LOCAL (matches the localhost server the backend actually calls), so it isn't mislabeled cloud and over-redacted.
 - Guard `AudioGain.normalize` at the *speech* floor (0.02) — valid weak speech occurs below it (live empties at rms ~0.016); only skip boosting below `silenceFloor` (0.003). The boost applies to the decoder's float copy only; the stored PCM / audit RMS stay the TRUE input level.

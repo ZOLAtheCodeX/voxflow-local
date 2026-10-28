@@ -11,6 +11,9 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
     var listeners: [pid_t] = []
     var queriedPorts: [Int] = []
     var commandLines: [pid_t: String] = [:]
+    /// Optional per-PID command lines consumed in order, one per query; once a
+    /// PID's sequence is empty the static `commandLines` entry applies again.
+    var commandLineSequences: [pid_t: [String?]] = [:]
     var queriedCommandLinePIDs: [pid_t] = []
     var pidFile: pid_t?
     var pidFileStamp: String?
@@ -18,13 +21,37 @@ final class BackendProcessRunnerFake: BackendProcessRunning, @unchecked Sendable
     func run(_ process: Process) throws { ranProcesses.append(process) }
     func listeningPIDs(onPort port: Int) -> [pid_t] { queriedPorts.append(port); return listeners }
     func terminate(_ pids: [pid_t], signal: Int32) { terminations.append((pids, signal)) }
-    func commandLine(forPID pid: pid_t) -> String? { queriedCommandLinePIDs.append(pid); return commandLines[pid] }
+    func commandLine(forPID pid: pid_t) -> String? {
+        queriedCommandLinePIDs.append(pid)
+        if var sequence = commandLineSequences[pid], !sequence.isEmpty {
+            let next = sequence.removeFirst()
+            commandLineSequences[pid] = sequence
+            return next
+        }
+        return commandLines[pid]
+    }
     func writePIDFile(_ pid: pid_t, stamp: String) { pidFile = pid; pidFileStamp = stamp }
     func readPIDFile() -> pid_t? { pidFile }
     func removePIDFile() { pidFile = nil; pidFileStamp = nil }
 }
 
 final class BackendProcessManagerTests: XCTestCase {
+
+    // BackendAuthToken is process-global and every BackendProcessManager publishes
+    // into it; keep these tests from leaking a token into other test classes.
+    private var savedAuthToken: String?
+    private var savedAuthStamp: String?
+
+    override func setUp() {
+        super.setUp()
+        savedAuthToken = BackendAuthToken.current()
+        savedAuthStamp = BackendAuthToken.expectedStamp()
+    }
+
+    override func tearDown() {
+        BackendAuthToken.set(savedAuthToken, expectedStamp: savedAuthStamp)
+        super.tearDown()
+    }
 
     /// Wait for terminateForeignListenerAsync's serial-workQueue dispatch to land.
     private func waitForTermination(_ fake: BackendProcessRunnerFake, timeout: TimeInterval = 2) {
@@ -533,6 +560,105 @@ extension BackendProcessManagerTests {
             // loopback) would leave the client talking TLS to a plaintext socket.
             // Refuse it — https is valid only for a manually-run backend.
             XCTAssertEqual(runner.ranProcesses.count, 0, "managed spawn must refuse an https URL")
+        }
+    }
+
+    func testManagerPublishesWellFormedLaunchToken() {
+        let manager = BackendProcessManager(runner: BackendProcessRunnerFake())
+        XCTAssertTrue(BackendAuthToken.isWellFormed(manager.apiToken))
+        XCTAssertEqual(BackendAuthToken.current(), manager.apiToken)
+    }
+
+    func testManagerPublishesItsInstanceStampAsTheExpectedListenerStamp() {
+        let manager = BackendProcessManager(runner: BackendProcessRunnerFake())
+        XCTAssertEqual(BackendAuthToken.expectedStamp(), manager.instanceStamp)
+    }
+
+    func testEachManagerGetsDistinctToken() {
+        XCTAssertNotEqual(BackendProcessManager(runner: BackendProcessRunnerFake()).apiToken,
+                          BackendProcessManager(runner: BackendProcessRunnerFake()).apiToken)
+    }
+
+    func testSpawnEnvironmentCarriesLaunchTokenAcrossRestart() {
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:9000") { runner, manager in
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            manager.restart(configuration: Self.portParityTestConfig())
+            waitForRunCount(runner, 2)
+            XCTAssertEqual(runner.ranProcesses.map { $0.environment?["VOXFLOW_API_TOKEN"] },
+                           [manager.apiToken, manager.apiToken])
+        }
+    }
+
+    func testSpawnEnvironmentForwardsTokenDirOverride() {
+        let previous = ProcessInfo.processInfo.environment["VOXFLOW_TOKEN_DIR"]
+        defer {
+            if let previous { setenv("VOXFLOW_TOKEN_DIR", previous, 1) } else { unsetenv("VOXFLOW_TOKEN_DIR") }
+        }
+        setenv("VOXFLOW_TOKEN_DIR", "/tmp/voxflow-token-dir-test", 1)
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:9000") { runner, manager in
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertEqual(runner.ranProcesses.first?.environment?["VOXFLOW_TOKEN_DIR"],
+                           "/tmp/voxflow-token-dir-test",
+                           "the app and the backend must agree on the token file directory")
+        }
+    }
+
+    func testSpawnEnvironmentOmitsTokenDirWhenUnsetOrEmpty() {
+        let previous = ProcessInfo.processInfo.environment["VOXFLOW_TOKEN_DIR"]
+        defer {
+            if let previous { setenv("VOXFLOW_TOKEN_DIR", previous, 1) } else { unsetenv("VOXFLOW_TOKEN_DIR") }
+        }
+        for value in [nil, ""] as [String?] {
+            if let value { setenv("VOXFLOW_TOKEN_DIR", value, 1) } else { unsetenv("VOXFLOW_TOKEN_DIR") }
+            withSpawnEnvironment(backendURL: "http://127.0.0.1:9000") { runner, manager in
+                manager.startIfNeeded(configuration: Self.portParityTestConfig())
+                XCTAssertEqual(runner.ranProcesses.count, 1)
+                XCTAssertNil(runner.ranProcesses.first?.environment?["VOXFLOW_TOKEN_DIR"])
+            }
+        }
+    }
+
+    func testOwnedListenerPIDsRequireVoxFlowCommand() {
+        let chrome = { (_: pid_t) in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" }
+        let backend = { (_: pid_t) in "/usr/bin/python3 /x/backend/app/server.py" }
+        XCTAssertEqual(BackendProcessManager.ownedListenerPIDs([5555, 6666], ownPID: 5555, commandLine: chrome), [])
+        XCTAssertEqual(BackendProcessManager.ownedListenerPIDs([5555, 6666], ownPID: 5555, commandLine: backend), [5555])
+        XCTAssertEqual(BackendProcessManager.ownedListenerPIDs([5555], ownPID: 5555, commandLine: { _ in nil }), [])
+    }
+
+    func testPortReapingRefusesReusedPIDFileEntry() {
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:8765") { runner, manager in
+            runner.listeners = [5555]
+            runner.pidFile = 5555
+            runner.commandLines[5555] = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertTrue(runner.terminations.isEmpty, "a reused PID-file PID must never be signalled")
+        }
+    }
+
+    func testSigkillReGateRefusesPIDThatStopsLookingLikeBackend() {
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:8765") { runner, manager in
+            runner.listeners = [5555]
+            runner.pidFile = 5555
+            // Confirmed as a backend at the SIGTERM gate, then the PID is reused
+            // by something else before the SIGKILL re-check.
+            runner.commandLineSequences[5555] = [
+                "/usr/bin/python3 /x/backend/app/server.py",
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            ]
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertEqual(runner.terminations.map(\.signal), [SIGTERM], "SIGKILL must be re-gated on identity")
+        }
+    }
+
+    func testSigkillFollowsSigtermForConfirmedBackend() {
+        withSpawnEnvironment(backendURL: "http://127.0.0.1:8765") { runner, manager in
+            runner.listeners = [5555]
+            runner.pidFile = 5555
+            runner.commandLines[5555] = "/usr/bin/python3 /x/backend/app/server.py"
+            manager.startIfNeeded(configuration: Self.portParityTestConfig())
+            XCTAssertEqual(runner.terminations.map(\.signal), [SIGTERM, SIGKILL])
+            XCTAssertEqual(runner.terminations.map(\.pids), [[5555], [5555]])
         }
     }
 }

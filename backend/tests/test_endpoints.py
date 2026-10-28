@@ -24,14 +24,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import httpx
 import server
 
+from api_clients import async_api_client
 from server import _rate_limit_timestamps, app
 
 
 @pytest.fixture()
 async def client():
     """Create a fresh async httpx client against the FastAPI app."""
-    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+    async with async_api_client(app) as c:
         yield c
 
 
@@ -219,21 +219,43 @@ class TestTranscribe:
 
 class TestRateLimiting:
     @pytest.mark.anyio
-    async def test_exceeding_limit_returns_429(self, client: httpx.AsyncClient):
-        # Fill up 120 requests
+    async def test_health_is_never_rate_limited(self, client: httpx.AsyncClient):
+        # The app's per-request identity probe depends on /v1/health always
+        # answering, so no volume of local callers may starve it.
+        for _ in range(130):
+            assert (await client.get("/v1/health")).status_code == 200
+        assert len(_rate_limit_timestamps) == 0
+
+    @pytest.mark.anyio
+    async def test_health_traffic_cannot_starve_authenticated_budget(
+        self, client: httpx.AsyncClient
+    ):
         for _ in range(120):
             await client.get("/v1/health")
+        assert (await client.get("/v1/health")).status_code == 200
+        assert (await client.get("/v1/ready")).status_code == 200
 
-        # 121st should be rate limited
-        resp = await client.get("/v1/health")
-        assert resp.status_code == 429
-
-
-# ── CORS ─────────────────────────────────────────────────────────────
-
-class TestCORS:
     @pytest.mark.anyio
-    async def test_cors_headers_for_localhost(self, client: httpx.AsyncClient):
+    async def test_authenticated_bucket_still_limits(self, client: httpx.AsyncClient):
+        for _ in range(120):
+            assert (await client.get("/v1/ready")).status_code == 200
+        assert (await client.get("/v1/ready")).status_code == 429
+
+    @pytest.mark.anyio
+    async def test_rejected_requests_never_count(self, client: httpx.AsyncClient):
+        for _ in range(130):
+            r = await client.get(
+                "/v1/ready", headers={"X-VoxFlow-Token": "cd" * 32}
+            )
+            assert r.status_code == 401
+        assert sum(len(v) for v in _rate_limit_timestamps.values()) == 0
+
+
+# ── Browser requests ─────────────────────────────────────────────────
+
+class TestBrowserRequestsRejected:
+    @pytest.mark.anyio
+    async def test_origin_preflight_is_403(self, client: httpx.AsyncClient):
         resp = await client.options(
             "/v1/health",
             headers={
@@ -241,10 +263,7 @@ class TestCORS:
                 "Access-Control-Request-Method": "GET",
             },
         )
-        # CORS preflight should include allow-origin
-        assert "access-control-allow-origin" in resp.headers
-        # Security hardening: credentials should NOT be allowed
-        assert resp.headers.get("access-control-allow-credentials") is None
+        assert resp.status_code == 403
 
 
 # ── Transcribe Chunking ──────────────────────────────────────────────
