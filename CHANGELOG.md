@@ -13,6 +13,13 @@ All notable changes to VoxFlow Local are documented here. The format follows
   token from `~/Library/Application Support/VoxFlow/backend.token`.
 
 ### Fixed
+- Dictation no longer drops words when your dictionary terms bias recognition:
+  a decode that went wrong is retried once without the glossary, which had
+  made Whisper skip speech at the end of a pause.
+- Whisper's sound labels (`[BLANK_AUDIO]`, `[Silence]`, `(water rushing)`) no
+  longer end up in your text, and room noise alone is never inserted.
+- Cockpit chunks that were rejected but contained speech now keep their
+  audio in the rejected-audio folder, so nothing is lost without a trace.
 - Cockpit dictation no longer loses its last words when you stop: stopping
   drains the tail, a double stop is safe, and Cmd+Return while still recording
   inserts everything that was said.
