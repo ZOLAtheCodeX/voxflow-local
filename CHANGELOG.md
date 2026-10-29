@@ -6,6 +6,16 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4] — 2026-10-29
+
+A trust and correctness release: the local backend answers only the VoxFlow
+app, the cockpit no longer loses words when you stop, insert, close or run
+an action mid-recording, and a root-caused Whisper decode fault no longer
+drops speech after a pause or puts sound labels in your text. Vocabulary
+gained priorities, import and export; spoken skill profiles, built-in voice
+actions and automatic Enter arrived, the last two off by default; and Gemma
+polish is about 20 times faster with hidden reasoning off.
+
 ### Security
 - The local backend now accepts only the VoxFlow app (via a per-launch
   token) and refuses browser-originated, wrong-host, and non-JSON requests,
@@ -13,6 +23,11 @@ All notable changes to VoxFlow Local are documented here. The format follows
   token from `~/Library/Application Support/VoxFlow/backend.token`.
 
 ### Fixed
+- Short dictations no longer disappear because of WhisperKit's one-second
+  window padding: short clips now decode and pass the same transcript gates.
+- Insertion stays on the process, window and field you dictated into instead
+  of consulting Accessibility elements outside the captured target.
+- A release-app crash from menu updates made off the main thread is fixed.
 - Dictation no longer drops words when your dictionary terms bias recognition:
   a decode that went wrong is retried once without the glossary, which had
   made Whisper skip speech at the end of a pause.
@@ -57,6 +72,22 @@ All notable changes to VoxFlow Local are documented here. The format follows
   them (they use no local RAM).
 
 ### Added
+- Vocabulary editing with recognition priorities, text and JSON import with
+  a conflict preview, export, and atomic saves. Correcting against 1,000
+  entries dropped from 9.98 ms to 0.89 ms median (correction only, not STT).
+- Spoken skill profiles map spoken names and aliases to exact CLI commands,
+  restricted to the apps you allow. See `docs/vocabulary-and-skills.md`.
+- Voice Action Prompts can run twelve registered computer actions (app opens
+  and editing shortcuts), each with its own switch, and can require the
+  "Voxflow" prefix or accept complete commands without it. Defaults: custom
+  prompts only, prefix required.
+- Optional automatic Enter after insertion: Off (default), Voice Action
+  Prompts only, ordinary dictation only, or both. Direct computer actions
+  never press Enter.
+- Insert receipts can keep a digest or only a character count instead of the
+  dictated text (`defaults write local.voxflow.app VoxFlow.auditTextRetention
+  digest`, or `none`). The default stays `full`, and rejections follow the
+  same setting.
 - Insert receipts carry `stt_ms`, `cleanup_ms`, `insert_ms`, `total_ms`
   (from hotkey release) and `insert_method`, so field latency is finally
   observable per capture.
