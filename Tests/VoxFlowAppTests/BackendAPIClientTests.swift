@@ -91,6 +91,26 @@ final class BackendAPIClientTests: XCTestCase {
         super.tearDown()
     }
 
+    /// A cold local model took 60 s inside Ollama on 2026-10-30 and the
+    /// backend gives local smart actions at least 90 s, so the shared
+    /// session's 120 s resource limit would cut off a cold load followed by
+    /// a cloud fallback.
+    func testSmartActionConfigurationRaisesBothTimeoutsAndKeepsTheBaseProtocols() {
+        let base = URLSessionConfiguration.ephemeral
+        base.protocolClasses = [MockURLProtocol.self]
+        base.timeoutIntervalForRequest = 120
+        base.timeoutIntervalForResource = 120
+
+        let config = BackendAPIClient.smartActionConfiguration(from: base)
+
+        XCTAssertEqual(BackendAPIClient.smartActionTimeout, 180)
+        XCTAssertEqual(config.timeoutIntervalForRequest, 180)
+        XCTAssertEqual(config.timeoutIntervalForResource, 180)
+        XCTAssertTrue(config.protocolClasses?.contains(where: { $0 == MockURLProtocol.self }) ?? false,
+                      "test stubs must carry over to the smart-action session")
+        XCTAssertEqual(base.timeoutIntervalForResource, 120, "the shared session keeps its own limit")
+    }
+
     func testHealth_Success() async throws {
         // Arrange
         let expectedDictionary = ["status": "ok"]
