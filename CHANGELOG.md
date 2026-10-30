@@ -6,6 +6,25 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- transformers bumped 5.5.0 → 5.17.0, closing CVE-2026-9856 (path traversal
+  in tokenizer and processor `save_pretrained`) and CVE-2026-80047 (custom
+  generation code written to disk before the trust check). Neither is
+  reachable as configured: VoxFlow never calls `save_pretrained`, never passes
+  `custom_generate` or `trust_remote_code`, and keeps Hugging Face Hub access
+  offline. 5.17.0 is the first release with the CVE-2026-80047 fix; the
+  advisory's "<= 5.8.1" range is wrong, so 5.10.x would have cleared the
+  alert while still writing the file before consent.
+- torch bumped 2.10.0 → 2.14.1 and torchaudio 2.10.0 → 2.11.1, closing
+  CVE-2025-3000 (memory corruption in `torch.jit.script`). Not reachable:
+  VoxFlow never scripts code, and its only TorchScript load is Silero VAD's
+  bundled model. The advisory names 2.13.0 as patched, but the upstream
+  reproducer still crashes there; 2.14.0 is the first fixed release.
+  torchaudio moves because every earlier release pins torch exactly.
+- Validated against the real-model STT regression suite, three runs per pin
+  set: 14/14 clips on every run with identical transcripts, p50 median
+  708 ms vs the old pins' 704 ms.
+
 ## [0.1.4] — 2026-10-29
 
 A trust and correctness release: the local backend answers only the VoxFlow

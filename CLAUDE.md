@@ -65,7 +65,7 @@ swift build && swift run VoxFlowLocal      # frontend (requires backend running)
 ```
 
 - Swift 6.2 strict concurrency, macOS 14+ deployment target
-- Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.10.0, transformers 5.5.0
+- Python 3.11+; key deps: fastapi 0.116.1, uvicorn 0.35.0, torch 2.14.1, transformers 5.17.0
 - Health: `curl http://127.0.0.1:8765/v1/health` · Readiness (token read from the file and passed on stdin, so it never appears in argv): `printf 'X-VoxFlow-Token: %s\n' "$(cat ~/Library/Application\ Support/VoxFlow/backend.token)" | curl -H @- http://127.0.0.1:8765/v1/ready`
 
 ### Ollama (text polish)
