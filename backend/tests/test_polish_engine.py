@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -429,6 +430,124 @@ class TestWedgedProviderCircuitBreaker:
         for _ in range(4):
             engine.run("dictation to polish while ollama is down", "neutral")
         assert len(fast_dead.received) == 4, "fast failures must keep probing"
+
+
+class _TimeoutRecordingBackend:
+    """Records the per-request timeout the engine passes."""
+
+    name = "ollama"
+
+    def __init__(self, response: str = "Memo: the summary of the meeting we expected to receive.") -> None:
+        self.response = response
+        self.timeouts: list[float | None] = []
+
+    def polish(self, text, tone, system_prompt=None, model=None, timeout=None):
+        self.timeouts.append(timeout)
+        return self.response
+
+
+class _BurnsItsTimeoutBackend:
+    """Spends exactly the timeout it is given (fake clock), then answers."""
+
+    name = "ollama"
+
+    def __init__(self, clock: _FakeClock, response: str) -> None:
+        self.clock = clock
+        self.response = response
+
+    def polish(self, text, tone, system_prompt=None, model=None, timeout=None):
+        self.clock.now += timeout
+        return self.response
+
+
+class TestSmartActionColdLoadBudget:
+    """The first smart action after Ollama unloads the model pays the cold
+    load: about 35 s on gemma4:e2b-mlx (measured 2026-10-28), past the 30 s
+    provider timeout, so the action failed and only a warm retry worked.
+    Smart actions on LOCAL providers run in review with no capture live and
+    get at least 75 s; cloud providers pay no cold load and keep their own
+    timeout, and polish sits on the dictation hot path and keeps the
+    provider's 30 s."""
+
+    def test_smart_action_gets_the_cold_load_budget(self):
+        backend = _TimeoutRecordingBackend()
+        engine = PolishEngine(chain=[(_spec("ollama"), backend)])
+        engine.run("notes from the meeting today", "neutral", system_prompt="Write a memo.")
+        assert backend.timeouts == [75.0]
+
+    def test_cloud_entries_keep_their_timeout_for_smart_actions(self):
+        backend = _TimeoutRecordingBackend()
+        engine = PolishEngine(chain=[(_spec("anthropic", cloud=True), backend)])
+        engine.run("notes from the meeting today", "neutral", system_prompt="Write a memo.")
+        assert backend.timeouts == [30.0]
+
+    def test_a_wedged_local_entry_leaves_room_for_the_cloud_fallback(self):
+        """The app gives the whole smart-action request 120 s
+        (BackendAPIClient). A local entry that burns its full budget plus a
+        cloud entry that answers at the end of its own must still fit."""
+        clock = _FakeClock()
+        start = clock.now
+        local = _BurnsItsTimeoutBackend(clock, response="")
+        cloud = _BurnsItsTimeoutBackend(clock, response="Memo: the summary of the meeting.")
+        engine = PolishEngine(chain=[(_spec("ollama"), local), (_spec("anthropic", cloud=True), cloud)], clock=clock)
+        out = engine.run("notes from the meeting today", "neutral", system_prompt="Write a memo.")
+        assert out.served_by == "anthropic"
+        assert clock.now - start < 120.0
+
+    def test_polish_keeps_the_provider_timeout(self):
+        backend = _TimeoutRecordingBackend("This is the polished sentence we expected to receive.")
+        engine = PolishEngine(chain=[(_spec("ollama"), backend)])
+        engine.run("uh this is the polished sentence we expected to receive", "neutral")
+        assert backend.timeouts == [30.0]
+
+    def test_a_longer_provider_timeout_is_kept_for_smart_actions(self):
+        backend = _TimeoutRecordingBackend()
+        spec = dataclasses.replace(_spec("ollama"), timeout=150.0)
+        engine = PolishEngine(chain=[(spec, backend)])
+        engine.run("notes from the meeting today", "neutral", system_prompt="Write a memo.")
+        assert backend.timeouts == [150.0]
+
+    def test_slow_smart_actions_inside_the_budget_do_not_trip_the_breaker(self):
+        """Measured against the 30 s budget, two 35 s empty results looked
+        wedged and skipped the provider for two minutes."""
+        clock = _FakeClock()
+        slow = _WedgedBackend(clock, burn_seconds=35.0)
+        engine = PolishEngine(chain=[(_spec("ollama"), slow)], clock=clock)
+        for _ in range(3):
+            engine.run("notes from the meeting today", "neutral", system_prompt="Write a memo.")
+        assert slow.calls == 3, "35 s is a cold load, not a wedge, against a 75 s budget"
+
+    def test_a_wedge_still_trips_the_breaker_for_smart_actions(self):
+        clock = _FakeClock()
+        wedged = _WedgedBackend(clock, burn_seconds=75.0)
+        engine = PolishEngine(chain=[(_spec("ollama"), wedged)], clock=clock)
+        for _ in range(3):
+            out = engine.run("notes from the meeting today", "neutral", system_prompt="Write a memo.")
+        assert wedged.calls == 2
+        assert out.degraded_reason == "provider_wedged"
+
+
+    def test_legacy_backends_are_measured_against_their_own_timeout(self):
+        """A backend without the per-request timeout parameter runs on its own
+        30 s, so that is the budget the breaker must measure against."""
+        clock = _FakeClock()
+
+        class _LegacyWedgedBackend:
+            name = "ollama"
+
+            def __init__(self):
+                self.calls = 0
+
+            def polish(self, text, tone, system_prompt=None):
+                self.calls += 1
+                clock.now += 30.0
+                return ""
+
+        legacy = _LegacyWedgedBackend()
+        engine = PolishEngine(chain=[(_spec("ollama"), legacy)], clock=clock)
+        for _ in range(3):
+            engine.run("notes from the meeting today", "neutral", system_prompt="Write a memo.")
+        assert legacy.calls == 2
 
 
 class _MustNotBeCalledBackend:

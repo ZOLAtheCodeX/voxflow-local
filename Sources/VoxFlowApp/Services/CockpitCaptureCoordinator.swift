@@ -1,6 +1,28 @@
 import Foundation
 import os
 
+/// What ⌘R did. The cockpit shows ``userMessage`` when there is one, so ⌘R
+/// never does nothing without saying why.
+enum CockpitRecordOutcome: Equatable {
+    case started
+    /// A recording is live or a stop is draining; the recording pill shows it.
+    case busy
+    /// The session is in review: it has to be inserted or discarded first.
+    case reviewInProgress
+    case failed(reason: String)
+
+    var userMessage: String? {
+        switch self {
+        case .started, .busy:
+            return nil
+        case .reviewInProgress:
+            return "Still reviewing. Insert with ⌘↩, or Discard to start a new recording."
+        case .failed(let reason):
+            return "Couldn't start recording: \(reason)"
+        }
+    }
+}
+
 /// Cockpit Layer 0 — live long-form capture loop.
 ///
 /// Owns a *dedicated* `AudioCapturing` instance (never shared with the palette
@@ -121,8 +143,10 @@ final class CockpitCaptureCoordinator {
         self.onCaptureLive = onCaptureLive
     }
 
-    func startRecording(targetApp: FocusTargetSnapshot?) {
-        guard stopTask == nil, case .idle = session.state else { return }
+    @discardableResult
+    func startRecording(targetApp: FocusTargetSnapshot?) -> CockpitRecordOutcome {
+        if stopTask == nil, case .reviewing = session.state { return .reviewInProgress }
+        guard stopTask == nil, case .idle = session.state else { return .busy }
         carryPCM = Data()
         consecutiveTranscriptionFailures = 0
         pendingPause = 0
@@ -137,7 +161,7 @@ final class CockpitCaptureCoordinator {
             log.error("startCapture failed: \(error.localizedDescription)")
             recordingSessionID = nil
             session.reset()
-            return
+            return .failed(reason: error.localizedDescription)
         }
         captureRunning = true
         loopTask = Task { [weak self] in
@@ -147,6 +171,7 @@ final class CockpitCaptureCoordinator {
                 await self.periodicFlush()
             }
         }
+        return .started
     }
 
     /// Single-flight: a second call while a stop is draining awaits the same

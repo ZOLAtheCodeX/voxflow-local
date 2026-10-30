@@ -60,6 +60,21 @@ actor SmartActionService {
         return (last.0, last.beforeText)
     }
 
+    /// Pops the last applied action only while `transcript` is still the text
+    /// that action produced, and returns ``(actionId, beforeText)``. Anything
+    /// else means the transcript moved on (a manual edit, a Discard or an
+    /// insert, a new session), so every older entry is stale too and the
+    /// stack is cleared: undo must never replace words the action did not
+    /// write.
+    func popLast(producing transcript: String) -> (SmartActionId, String)? {
+        guard let last = history.last else { return nil }
+        guard last.afterText == transcript else {
+            history.removeAll()
+            return nil
+        }
+        return popLast()
+    }
+
     /// Number of actions currently in the undo stack — exposed for the UI's
     /// ``⌘Z`` enable/disable state.
     func historyCount() -> Int { history.count }

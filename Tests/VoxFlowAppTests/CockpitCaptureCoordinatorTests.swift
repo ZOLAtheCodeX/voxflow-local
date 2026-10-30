@@ -193,6 +193,55 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
         await coord.stopRecording()
     }
 
+    // MARK: - ⌘R outcome (v0.1.5: ⌘R is never ignored silently)
+
+    func test_startRecording_from_idle_reports_started() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: FakeTranscriber(), session: makeSession())
+        XCTAssertEqual(coord.startRecording(targetApp: nil), .started)
+        await coord.stopRecording()
+    }
+
+    /// Closing the cockpit while recording keeps the transcript for review,
+    /// so the next ⌘R often lands in review. It used to do nothing at all.
+    func test_startRecording_in_review_reports_review_and_starts_nothing() async {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false))
+        let transcriber = FakeTranscriber(); transcriber.nextText = "kept words"
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: transcriber, session: session)
+        coord.startRecording(targetApp: nil)
+        await coord.stopRecording()
+        XCTAssertEqual(session.state, .reviewing)
+        let transcript = session.currentSession?.transcript
+        let startsBefore = capture.startCount
+
+        XCTAssertEqual(coord.startRecording(targetApp: nil), .reviewInProgress)
+
+        XCTAssertEqual(capture.startCount, startsBefore, "review must not open the microphone")
+        XCTAssertEqual(session.state, .reviewing)
+        XCTAssertEqual(session.currentSession?.transcript, transcript)
+    }
+
+    func test_startRecording_reports_failure_when_capture_will_not_start() {
+        let capture = FakeCapture(nextAudio: makeAudio(silent: false)); capture.failNextStart = true
+        let session = makeSession()
+        let coord = CockpitCaptureCoordinator(capture: capture, transcriber: FakeTranscriber(), session: session)
+
+        guard case .failed = coord.startRecording(targetApp: nil) else {
+            return XCTFail("a capture that will not start must be reported")
+        }
+        XCTAssertEqual(session.state, .idle)
+    }
+
+    func test_record_outcome_messages() {
+        XCTAssertNil(CockpitRecordOutcome.started.userMessage)
+        XCTAssertNil(CockpitRecordOutcome.busy.userMessage, "the recording pill already says so")
+        XCTAssertEqual(CockpitRecordOutcome.reviewInProgress.userMessage,
+                       "Still reviewing. Insert with ⌘↩, or Discard to start a new recording.")
+        XCTAssertEqual(CockpitRecordOutcome.failed(reason: "no input device").userMessage,
+                       "Couldn't start recording: no input device")
+    }
+
     // MARK: - Rejected chunks with speech keep their audio
 
     private func makeRetainingCoordinator(
@@ -677,7 +726,7 @@ final class CockpitCaptureCoordinatorTests: XCTestCase {
 
         session.reset()
         let startsBefore = capture.startCount
-        coord.startRecording(targetApp: nil)
+        XCTAssertEqual(coord.startRecording(targetApp: nil), .busy)
         XCTAssertEqual(capture.startCount, startsBefore, "a stop in progress must fence off a new start")
         XCTAssertEqual(session.state, .idle)
 

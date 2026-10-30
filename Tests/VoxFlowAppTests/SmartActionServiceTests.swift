@@ -97,6 +97,33 @@ final class SmartActionServiceTests: XCTestCase {
         XCTAssertEqual(popped?.1, "original")
     }
 
+    /// v0.1.5 review: the undo stack outlived the session it came from, so
+    /// ⌘Z after a Discard or an insert replaced the next session's words.
+    func test_popLast_producing_refuses_and_clears_when_the_transcript_moved_on() async throws {
+        let stub = StubSmartActionBackend(response: SmartActionResult(
+            actionId: .memo, output: "polished", guardrailTriggered: false, error: nil))
+        let service = SmartActionService(backend: stub)
+        _ = try await service.apply(.memo, to: "original")
+
+        let popped = await service.popLast(producing: "a different session's words")
+
+        XCTAssertNil(popped)
+        let count = await service.historyCount()
+        XCTAssertEqual(count, 0, "a stale top entry makes every older entry stale too")
+    }
+
+    func test_popLast_producing_returns_before_text_while_the_transcript_matches() async throws {
+        let stub = StubSmartActionBackend(response: SmartActionResult(
+            actionId: .memo, output: "polished", guardrailTriggered: false, error: nil))
+        let service = SmartActionService(backend: stub)
+        _ = try await service.apply(.memo, to: "original")
+
+        let popped = await service.popLast(producing: "polished")
+
+        XCTAssertEqual(popped?.0, .memo)
+        XCTAssertEqual(popped?.1, "original")
+    }
+
     func test_popLast_returns_nil_when_empty() async {
         let stub = StubSmartActionBackend(response: SmartActionResult(
             actionId: .memo,
