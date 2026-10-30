@@ -2381,6 +2381,12 @@ final class AppCoordinator: ObservableObject {
         backendManager.stop()
     }
 
+    /// Called from AppDelegate.applicationWillTerminate so a pending dictation
+    /// paste never leaves its text on the clipboard after quit.
+    func restoreTemporaryClipboard() {
+        insertService.restorePendingClipboard()
+    }
+
     /// Tracks the last activated non-VoxFlow app so the cockpit can freeze it
     /// at ⌘R. Reading `frontmostApplication` here (launch) and at cockpit open
     /// is allowed; it is never read at insert time.

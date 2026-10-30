@@ -61,6 +61,17 @@ extension TextInserting {
 @MainActor
 final class AccessibilityInsertService: TextInserting {
     private let systemWide = AXUIElementCreateSystemWide()
+    private let temporaryPasteboard: TemporaryPasteboard
+
+    init(temporaryPasteboard: TemporaryPasteboard = TemporaryPasteboard()) {
+        self.temporaryPasteboard = temporaryPasteboard
+    }
+
+    /// Puts the user's clipboard back now if a dictation paste is still
+    /// pending. For app quit.
+    func restorePendingClipboard() {
+        temporaryPasteboard.restorePendingNow()
+    }
 
     /// What we last inserted, for boundary-aware spacing when AX can't read the
     /// field (Electron/web/terminals). Overwritten on every successful insert;
@@ -203,7 +214,7 @@ final class AccessibilityInsertService: TextInserting {
     }
 
     /// No suspension between the final focus/cancellation checks and Return.
-    /// A paste has already waited for the client to consume its clipboard text.
+    /// Only a submitting paste waits (in ``simulatePaste``) for the client to consume its clipboard text.
     private func submitIfRequested(_ policy: TextInsertionPolicy, targetApp: NSRunningApplication,
                                    expectedFocus: AXUIElement?) -> InsertResult.Submission {
         guard policy.submits else { return .notRequested }
@@ -294,23 +305,12 @@ final class AccessibilityInsertService: TextInserting {
     private func simulatePaste(text: String, targetApp: NSRunningApplication? = nil,
                                policy: TextInsertionPolicy = .prose) async -> (posted: Bool, focus: AXUIElement?) {
         guard let targetApp, !targetApp.isTerminated, !Task.isCancelled else { return (false, nil) }
-        let pasteboard = NSPasteboard.general
-
-        // Save the user's current clipboard so we can restore it after pasting
-        let previousContents = pasteboard.string(forType: .string)
-
-        pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else { return (false, nil) }
-        // Snapshot the pasteboard generation after OUR write. If the user
-        // copies something during the paste window below, changeCount moves
-        // past this value and we must NOT clobber their new clipboard with
-        // the stale save (audit S4).
-        let ourChangeCount = pasteboard.changeCount
+        guard let lease = temporaryPasteboard.place(text) else { return (false, nil) }
+        // Exactly one release per path: the explicit one right after Cmd+V,
+        // or this backstop (undispatched, restores now) for every early return.
+        var released = false
         defer {
-            if let previous = previousContents, pasteboard.changeCount == ourChangeCount {
-                pasteboard.clearContents()
-                pasteboard.setString(previous, forType: .string)
-            }
+            if !released { temporaryPasteboard.release(lease, dispatched: false) }
         }
 
         // Re-activate the target app — focus may have shifted during transcription.
@@ -331,14 +331,22 @@ final class AccessibilityInsertService: TextInserting {
               !policy.gatesOnFocusIdentity
                 || policy.capturedFocus?.matchesForInsertion(targetPID: targetApp.processIdentifier) != false else { return (false, nil) }
         let focus = policy.submits ? copyOwnedFocusedElement(targetPID: targetApp.processIdentifier) : nil
+        // The user (or another paste) may have changed the clipboard during the
+        // waits above. Pasting now would insert content the receipt claims is
+        // the dictation. No suspension point between this check and Cmd+V.
+        guard temporaryPasteboard.stillOwns(lease) else { return (false, nil) }
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
 
-        // Restore the user's previous clipboard after a brief delay
-        // so the target app has time to process the paste event
-        do {
-            try await Task.sleep(nanoseconds: 300_000_000) // 300ms
-        } catch {
-            // Even if cancelled, we fall through to restore
+        // A dispatched paste keeps the dictation on the clipboard for the
+        // consume delay and is restored by TemporaryPasteboard in a task this
+        // insert's cancellation cannot shorten. Released here, not at exit, so
+        // a submitting insert's wait below does not delay the restore.
+        temporaryPasteboard.release(lease, dispatched: pasted)
+        released = true
+
+        // Only a submitting paste waits, so Return follows a consumed paste.
+        if policy.submits && pasted {
+            try? await Task.sleep(for: TemporaryPasteboard.consumeDelay)
         }
 
         return (pasted, focus)
