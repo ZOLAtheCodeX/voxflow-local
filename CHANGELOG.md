@@ -6,6 +6,15 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-10-30
+
+A follow-up release that closes the two known issues of v0.1.4: Cmd+R in
+the cockpit's review state now says what to do instead of doing nothing,
+review gains a Discard button, and the first smart action after Gemma
+unloads no longer times out. Smart-action undo can no longer replace words
+from a manual edit or a later session, and transformers and torch move
+past three CVEs whose advisories named the wrong patched versions.
+
 ### Fixed
 - Cmd+R in the cockpit is never ignored silently. In review it now says
   "Still reviewing. Insert with ⌘↩, or Discard to start a new recording.",
