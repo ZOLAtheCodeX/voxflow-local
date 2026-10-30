@@ -260,6 +260,11 @@ final class CockpitCoordinatorTests: XCTestCase {
 
     // MARK: - Discard (v0.1.5)
 
+    func test_discarded_notice_states_the_seven_day_retention() {
+        XCTAssertEqual(CockpitCoordinator.discardedNotice,
+                       "Transcript discarded. A copy stays in VoxFlow's sessions folder for 7 days.")
+    }
+
     func test_discardTranscript_leaves_review_for_idle() {
         let (_, coord, sessionService, _) = makeCoordinator()
         sessionService.start()

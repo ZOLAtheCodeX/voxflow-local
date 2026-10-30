@@ -289,6 +289,19 @@ final class LongFormSessionServiceTests: XCTestCase {
                        "discard must leave the latest transcript on disk")
     }
 
+    func test_discarded_session_file_is_swept_after_seven_days() {
+        let dir = tempDir()
+        let service = LongFormSessionService(autoSaveDirectory: dir)
+        service.start(); service.appendTestChunk("discard me"); service.stop()
+        let file = dir.appendingPathComponent("\(service.currentSession!.id.uuidString).json")
+        XCTAssertTrue(service.discard())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "discard keeps the file")
+        let now = Date()
+        try? FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-8 * 86_400)], ofItemAtPath: file.path)
+        _ = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "the sweep removes a discarded file after 7 days")
+    }
+
     /// Discarding mid-recording would leave the microphone running behind an
     /// idle session. Recording ends with ⌘. first.
     func test_discard_is_refused_while_recording() {

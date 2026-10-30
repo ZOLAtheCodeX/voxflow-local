@@ -48,8 +48,8 @@ fix in place (B) and synthetic Unicode typing (C).
   machine holds 11 such files (2026-10-27 to 2026-10-30, about 44 KB of full
   transcripts).
 - `LongFormSessionService.reset()` is the single point where a session ends
-  on purpose: ⌘↩ insert success, Notion append success, the voice "cancel"
-  command, and a failed capture start. After `reset()` the autosave loop
+  on purpose: ⌘↩ insert success, Notion append success, and a failed capture
+  start. After `reset()` the autosave loop
   cannot recreate the file, because `save()` returns early when
   `currentSession` is nil.
 - The other stored surfaces are already bounded: `insertions.jsonl` rotates at
@@ -260,6 +260,12 @@ clipboard no longer ours and leaves the recovery copy in place, as today.
 - Failures are logged through the service's `Logger` and never throw or block.
 - A session still in review when the app quits stays on disk. That orphan,
   kept for up to 7 days, is the manual recovery window.
+
+Revision 2026-10-30, after merging master's v0.1.5: `discard()` (the Discard
+button and the spoken "cancel") keeps the session file as a mis-click safety
+net, because Discard has no confirmation sheet; the orphan sweep removes it
+after 7 days. The user chose this over deleting on discard.
+
 - First launch after install on the user's machine: no file is older than
   7 days, so nothing is deleted; the 11 current files age out between about
   2026-11-03 and 2026-11-06.

@@ -20,11 +20,13 @@ final class SystemClock: SessionClock {
 /// break ("\n\n"); shorter pauses join with ``ChunkJoiner``.
 /// Auto-save: every 5 s during recording + on stop. Recovery picks the
 /// most-recently-updated session JSON on disk.
-/// Retention: the session file holds the full plaintext transcript, so
-/// ``reset()`` (insert, Notion append, cancel) deletes it permanently with
-/// `FileManager.removeItem` (never the Trash, which would keep a copy), and
-/// ``init(autoSaveDirectory:clock:orphanRetention:)`` sweeps orphaned
-/// session files older than ``orphanRetention`` (7 days).
+/// Retention: the session file holds the full plaintext transcript.
+/// ``reset()`` (the session was consumed or never usable: insert, Notion
+/// append, failed capture start) deletes it permanently with
+/// `FileManager.removeItem` (never the Trash, which would keep a copy).
+/// ``discard()`` keeps it as a mis-click safety net, and
+/// ``init(autoSaveDirectory:clock:orphanRetention:)`` sweeps session files
+/// older than ``orphanRetention`` (7 days), discarded ones included.
 @MainActor
 final class LongFormSessionService: ObservableObject {
     @Published private(set) var state: LongFormState = .idle
@@ -157,25 +159,36 @@ final class LongFormSessionService: ObservableObject {
         log.info("session stopped at \(self.currentSession?.transcript.count ?? 0) chars")
     }
 
+    /// Ends the session because it was consumed or never usable (insert
+    /// success, Notion append success, failed capture start) and deletes its
+    /// file.
     func reset() {
+        if let id = clearState() { removeSessionFile(id: id) }
+    }
+
+    /// Leaves review without inserting. Discard has no confirmation sheet, so
+    /// the session file stays on disk as the mis-click safety net; the orphan
+    /// sweep removes it once it is older than ``orphanRetention``. The session
+    /// is saved once more first, in case the last save failed. Refused outside
+    /// review: discarding a live recording would leave the microphone running
+    /// behind an idle session.
+    @discardableResult
+    func discard() -> Bool {
+        guard case .reviewing = state else { return false }
+        save()
+        _ = clearState()
+        return true
+    }
+
+    /// Cancels the autosave task and returns to idle. Returns the id of the
+    /// session that ended, if any.
+    private func clearState() -> UUID? {
         autoSaveTask?.cancel()
         autoSaveTask = nil
         let endedID = currentSession?.id
         currentSession = nil
         state = .idle
-        if let endedID { removeSessionFile(id: endedID) }
-    }
-
-    /// Leaves review without inserting. The session file stays on disk
-    /// (sessions are never deleted) and is saved once more first, in case
-    /// the last save failed. Refused outside review: discarding a live
-    /// recording would leave the microphone running behind an idle session.
-    @discardableResult
-    func discard() -> Bool {
-        guard case .reviewing = state else { return false }
-        save()
-        reset()
-        return true
+        return endedID
     }
 
     // MARK: - Persistence
