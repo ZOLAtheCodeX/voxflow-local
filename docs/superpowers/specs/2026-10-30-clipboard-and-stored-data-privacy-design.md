@@ -190,8 +190,11 @@ count after our write, the lease id, and the pending restore task if any.
   `shutdownBackend()`), so quitting never leaves dictated text on the
   clipboard.
 
-`AppCoordinator` owns the single `TemporaryPasteboard` and passes it to
-`AccessibilityInsertService(temporaryPasteboard:)`.
+`AccessibilityInsertService` owns the single `TemporaryPasteboard`, injected
+through `init(temporaryPasteboard: TemporaryPasteboard = TemporaryPasteboard())`,
+and exposes `restorePendingClipboard()`, which
+`AppCoordinator.restoreTemporaryClipboard()` forwards to. (`AppCoordinator`
+holds exactly one `AccessibilityInsertService`, so there is one owner.)
 
 ### 3. The paste flow in `AccessibilityInsertService.simulatePaste`
 
