@@ -89,7 +89,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
 
         XCTAssertFalse(state.displayText.isEmpty)
         XCTAssertEqual(recorder.copies, [state.displayText])
-        XCTAssertEqual(state.statusLine, "Copied to clipboard")
+        XCTAssertEqual(state.statusLine, "Insert failed. Copied to clipboard.")
     }
 
     @MainActor

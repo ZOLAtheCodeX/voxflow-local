@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
+import os
 
 struct TextInsertionPolicy: Sendable, Equatable {
     let isVerbatim: Bool
@@ -90,6 +91,7 @@ final class AccessibilityInsertService: TextInserting {
 
     /// Marks CGEvents VoxFlow posts itself so the invalidation monitor can
     /// tell them apart from real user input. "VOXF" in ASCII.
+    private static let log = Logger(subsystem: "local.voxflow.app", category: "AccessibilityInsertService")
     private static let syntheticEventTag: Int64 = 0x564F_5846
 
     // No deinit removing the monitor: the service is app-lifetime (a `let` on
@@ -334,7 +336,10 @@ final class AccessibilityInsertService: TextInserting {
         // The user (or another paste) may have changed the clipboard during the
         // waits above. Pasting now would insert content the receipt claims is
         // the dictation. No suspension point between this check and Cmd+V.
-        guard temporaryPasteboard.stillOwns(lease) else { return (false, nil) }
+        guard temporaryPasteboard.stillOwns(lease) else {
+            Self.log.notice("paste withheld: clipboard changed or superseded before Cmd+V")
+            return (false, nil)
+        }
         let pasted = simulateKeyPress(virtualKey: 0x09, flags: .maskCommand)
 
         // A dispatched paste keeps the dictation on the clipboard for the

@@ -50,9 +50,12 @@ protocol PasteboardAccess: AnyObject {
 /// default).
 ///
 /// Ownership rule: only `TemporaryPasteboard` may call `writeTemporary` and
-/// `restore`. Everything else that writes the general pasteboard for the user
-/// goes through `SystemClipboard.copy`. Keeping one owner means a restore can
-/// never clobber a copy the user made after the temporary write.
+/// `restore`. `TextInsertionCoordinator`'s deliberate copies go through
+/// `SystemClipboard.copy`. The view-level Copy buttons (cockpit Cmd+C, the
+/// assistant handoff card, the palette Recent tab) still write `.general`
+/// directly; routing them through `SystemClipboard.copy` is a listed
+/// follow-up. Keeping one owner of the temporary write means a restore can
+/// never clobber a copy the user made after it.
 @MainActor
 final class SystemPasteboard: PasteboardAccess {
     private static let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")

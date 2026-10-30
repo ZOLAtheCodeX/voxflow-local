@@ -60,12 +60,15 @@ final class TemporaryPasteboard {
         let clock = ContinuousClock()
         let start = clock.now
         let original: PasteboardSnapshot
+        let inherited: Bool
         if let record, pasteboard.changeCount == record.ownedChangeCount {
             // The clipboard still holds our previous dictation, so the user's
             // content is the original we already hold, not what is there now.
             original = record.original
+            inherited = true
         } else {
             original = pasteboard.snapshot()
+            inherited = false
         }
         let snapshotElapsed = start.duration(to: clock.now)
         record?.restoreTask?.cancel()
@@ -85,11 +88,20 @@ final class TemporaryPasteboard {
             leaseID: leaseID,
             restoreTask: nil
         )
-        let milliseconds = snapshotElapsed.components.seconds * 1000
-            + snapshotElapsed.components.attoseconds / 1_000_000_000_000_000
-        Self.log.info(
-            "Temporary paste placed: \(original.items.count) items, \(original.byteCount) bytes saved, snapshot \(milliseconds) ms"
-        )
+        // .notice, not .info: info is never persisted, and this line is the
+        // forensic trail for a clipboard report. Counts and sizes only, never
+        // content.
+        if inherited {
+            Self.log.notice(
+                "Temporary paste placed: inherited=true, \(original.items.count) items, \(original.byteCount) bytes held from the earlier paste"
+            )
+        } else {
+            let milliseconds = snapshotElapsed.components.seconds * 1000
+                + snapshotElapsed.components.attoseconds / 1_000_000_000_000_000
+            Self.log.notice(
+                "Temporary paste placed: inherited=false, \(original.items.count) items, \(original.byteCount) bytes saved, snapshot \(milliseconds) ms"
+            )
+        }
         return Lease(id: leaseID, ownedChangeCount: ownedChangeCount)
     }
 

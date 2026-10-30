@@ -246,7 +246,7 @@ final class LongFormSessionServiceTests: XCTestCase {
         XCTAssertTrue(files.filter { $0.hasSuffix(".json") }.isEmpty)
     }
 
-    func test_init_sweeps_only_old_uuid_named_json_files() {
+    func test_sweep_removes_only_old_uuid_named_json_files() {
         let dir = tempDir()
         let now = Date()
         let old = dir.appendingPathComponent("\(UUID().uuidString).json")
@@ -257,12 +257,29 @@ final class LongFormSessionServiceTests: XCTestCase {
         touch(fresh, modified: now.addingTimeInterval(-6 * 86_400))
         [foreignJSON, foreignOther].forEach { touch($0, modified: now.addingTimeInterval(-30 * 86_400)) }
 
-        _ = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+        let service = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+        service.sweepOrphans()
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: foreignJSON.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: foreignOther.path))
+    }
+
+    /// The sweep is explicit: construction must not delete files, so a test
+    /// (or any caller) that builds the service on a real folder cannot lose
+    /// data. Production calls `sweepOrphans()` from `AppCoordinator`.
+    func test_init_does_not_sweep() {
+        let dir = tempDir()
+        let now = Date()
+        let old = dir.appendingPathComponent("\(UUID().uuidString).json")
+        touch(old, modified: now.addingTimeInterval(-8 * 86_400))
+
+        let service = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: old.path), "init must not delete anything")
+        service.sweepOrphans()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
     }
 
     func test_orphan_retention_is_seven_days() {
@@ -298,7 +315,7 @@ final class LongFormSessionServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "discard keeps the file")
         let now = Date()
         try? FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-8 * 86_400)], ofItemAtPath: file.path)
-        _ = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+        LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now)).sweepOrphans()
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "the sweep removes a discarded file after 7 days")
     }
 

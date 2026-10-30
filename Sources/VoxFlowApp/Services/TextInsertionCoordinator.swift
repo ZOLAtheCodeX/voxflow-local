@@ -117,8 +117,10 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             state.sessionState = .idle
         } else {
             state.failedInsertCount += 1
+            // Copy directly: copyCurrentText() would overwrite this status line
+            // with "Copied to clipboard" and hide that the insert failed.
+            if !state.displayText.isEmpty { copyToClipboard(state.displayText) }
             state.statusLine = "Insert failed. Copied to clipboard."
-            copyCurrentText()
             state.sessionState = .review
         }
     }

@@ -470,8 +470,7 @@ final class CockpitCoordinatorTests: XCTestCase {
 
     // MARK: - Insert while recording (drain first)
 
-    /// Records inserted texts and reports success via `.simulatedPaste`, the
-    /// only method for which `TextInsertionCoordinator` skips the pasteboard.
+    /// Records inserted texts and reports success via `.simulatedPaste`.
     private final class RecordingInsertService: TextInserting {
         private(set) var texts: [String] = []
         private(set) var targets: [NSRunningApplication?] = []

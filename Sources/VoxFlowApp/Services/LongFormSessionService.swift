@@ -24,9 +24,11 @@ final class SystemClock: SessionClock {
 /// ``reset()`` (the session was consumed or never usable: insert, Notion
 /// append, failed capture start) deletes it permanently with
 /// `FileManager.removeItem` (never the Trash, which would keep a copy).
-/// ``discard()`` keeps it as a mis-click safety net, and
-/// ``init(autoSaveDirectory:clock:orphanRetention:)`` sweeps session files
-/// older than ``orphanRetention`` (7 days), discarded ones included.
+/// ``discard()`` keeps it as a mis-click safety net, and ``sweepOrphans()``
+/// removes session files older than ``orphanRetention`` (7 days), discarded
+/// ones included. The sweep is explicit: ``init(autoSaveDirectory:clock:orphanRetention:)``
+/// has no file-deleting side effects, and `AppCoordinator` calls
+/// ``sweepOrphans()`` at launch and hourly.
 @MainActor
 final class LongFormSessionService: ObservableObject {
     @Published private(set) var state: LongFormState = .idle
@@ -41,12 +43,13 @@ final class LongFormSessionService: ObservableObject {
 
     let clock: SessionClock
     private let autoSaveDirectory: URL
+    private let retention: TimeInterval
     private let log = Logger(subsystem: "local.voxflow.app", category: "LongFormSessionService")
     private var autoSaveTask: Task<Void, Never>?
 
     static let paragraphBreakPause: TimeInterval = 2.0
-    /// How long an orphaned session file (crash, force quit) survives before
-    /// the launch sweep removes it.
+    /// How long an orphaned session file (crash, force quit, discard)
+    /// survives before ``sweepOrphans()`` removes it.
     static let orphanRetention: TimeInterval = 7 * 24 * 60 * 60
     private static let autoSaveIntervalNs: UInt64 = 5_000_000_000
 
@@ -57,11 +60,11 @@ final class LongFormSessionService: ObservableObject {
     ) {
         self.autoSaveDirectory = autoSaveDirectory
         self.clock = clock
+        self.retention = orphanRetention
         try? FileManager.default.createDirectory(
             at: autoSaveDirectory,
             withIntermediateDirectories: true
         )
-        sweepOrphans(olderThan: orphanRetention)
     }
 
     // MARK: - Lifecycle
@@ -227,10 +230,10 @@ final class LongFormSessionService: ObservableObject {
         }
     }
 
-    /// Remove `<uuid>.json` files not modified within `retention`. Files that
-    /// are not UUID-named JSON are never touched. A listing failure is logged
-    /// and the sweep skipped.
-    private func sweepOrphans(olderThan retention: TimeInterval) {
+    /// Remove `<uuid>.json` files not modified within ``orphanRetention``.
+    /// Files that are not UUID-named JSON are never touched. A listing
+    /// failure is logged and the sweep skipped. Never called from `init`.
+    func sweepOrphans() {
         let fm = FileManager.default
         let urls: [URL]
         do {

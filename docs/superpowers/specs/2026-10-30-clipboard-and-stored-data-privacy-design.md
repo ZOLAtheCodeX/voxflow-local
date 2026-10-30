@@ -47,11 +47,11 @@ fix in place (B) and synthetic Unicode typing (C).
   production caller, so nothing ever reads these files back. The user's
   machine holds 11 such files (2026-10-27 to 2026-10-30, about 44 KB of full
   transcripts).
-- `LongFormSessionService.reset()` is the single point where a session ends
-  on purpose: ⌘↩ insert success, Notion append success, and a failed capture
-  start. After `reset()` the autosave loop
-  cannot recreate the file, because `save()` returns early when
-  `currentSession` is nil.
+- `LongFormSessionService.reset()` is where a consumed session ends: ⌘↩
+  insert success, Notion append success, and a failed capture start.
+  `discard()` (master v0.1.5) also ends a session but keeps the file. After
+  either, the autosave loop cannot recreate or rewrite the file, because
+  `save()` returns early when `currentSession` is nil.
 - The other stored surfaces are already bounded: `insertions.jsonl` rotates at
   ~1 MB with one backup (text retention configurable through
   `VoxFlow.auditTextRetention`), and the rejected-audio ring keeps 8 clips.
@@ -249,26 +249,32 @@ clipboard no longer ours and leaves the recovery copy in place, as today.
   `<autoSaveDirectory>/<id>.json`. A missing file (a session reset before
   its first save) is not an error.
 - `init` gains `orphanRetention: TimeInterval = LongFormSessionService.orphanRetention`
-  (`static let orphanRetention: TimeInterval = 7 * 24 * 60 * 60`). After
-  creating the directory, it sweeps every file whose extension is `json` and
-  whose base name parses as a `UUID`, removing those whose content
+  (`static let orphanRetention: TimeInterval = 7 * 24 * 60 * 60`). The sweep
+  is an explicit `sweepOrphans()`: it removes every file whose extension is
+  `json` and whose base name parses as a `UUID`, when its content
   modification date is earlier than `clock.currentTime() - orphanRetention`.
   It does not decode files, so corrupt ones age out too. Other files in the
-  directory are never touched.
+  directory are never touched. Production runs it at launch and hourly from
+  `AppCoordinator`, never under XCTest; `init` has no file-deleting side
+  effects (it only creates the directory).
 - Removal uses `FileManager.removeItem`, not the Trash: a Trash copy would keep
   the plaintext this change exists to remove.
 - Failures are logged through the service's `Logger` and never throw or block.
 - A session still in review when the app quits stays on disk. That orphan,
   kept for up to 7 days, is the manual recovery window.
+- First launch after install on the user's machine: no file is older than
+  7 days, so nothing is deleted; the 11 current files age out between about
+  2026-11-03 and 2026-11-06.
 
 Revision 2026-10-30, after merging master's v0.1.5: `discard()` (the Discard
 button and the spoken "cancel") keeps the session file as a mis-click safety
 net, because Discard has no confirmation sheet; the orphan sweep removes it
-after 7 days. The user chose this over deleting on discard.
-
-- First launch after install on the user's machine: no file is older than
-  7 days, so nothing is deleted; the 11 current files age out between about
-  2026-11-03 and 2026-11-06.
+after 7 days. The user chose this over deleting on discard. Final review: the sweep moved
+out of `init` into an explicit `sweepOrphans()` that `AppCoordinator` runs at
+launch and hourly. The review found that a launch-only sweep let a discarded file outlive the
+"7 days" the UI promises in a menu-bar app that runs for weeks, and that
+tests reached the real sessions folder through `AppCoordinator.shared`
+(its init builds the cockpit service on `~/Library/Application Support`).
 
 ### 6. Documentation
 
