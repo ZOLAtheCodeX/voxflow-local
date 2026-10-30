@@ -246,7 +246,7 @@ final class CockpitCoordinator: ObservableObject {
             guard let transcript = sessionService.currentSession?.transcript else { return }
             _ = try await applyAction(id, to: transcript)
         case .undo: await undoLastAction()
-        case .cancel: sessionService.reset()
+        case .cancel: discardTranscript()
         case .insert: await insertIntoTarget()
         case .copy: copyToClipboard()
         }
@@ -318,6 +318,16 @@ final class CockpitCoordinator: ObservableObject {
         }
         state.cockpitVisible = false
         sessionService.reset()
+    }
+
+    /// Shown after Discard, so a mis-click says where the words went.
+    static let discardedNotice = "Transcript discarded. A copy stays in VoxFlow's sessions folder."
+
+    /// The visible way out of review (the Discard button, and the spoken
+    /// "cancel"). The session file stays on disk.
+    @discardableResult
+    func discardTranscript() -> Bool {
+        sessionService.discard()
     }
 
     func copyToClipboard() {

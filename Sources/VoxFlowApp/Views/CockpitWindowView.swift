@@ -135,7 +135,9 @@ struct CockpitWindowView: View {
 
     private var mainPane: some View {
         VStack(spacing: 0) {
-            CockpitTopBarView(state: state, sessionService: sessionService)
+            CockpitTopBarView(state: state, sessionService: sessionService, onDiscard: {
+                    if coordinator.discardTranscript() { lastError = CockpitCoordinator.discardedNotice }
+                })
                 .padding(.horizontal, VF.spacingLarge)
                 .padding(.vertical, VF.spacingMedium)
                 .background(.thinMaterial)
@@ -206,7 +208,8 @@ struct CockpitWindowView: View {
             isTextEditingActive: isTextEditingActive()
         ) {
         case .record:
-            cockpitCapture.startRecording(targetApp: coordinator.recordingTarget())
+            let outcome = cockpitCapture.startRecording(targetApp: coordinator.recordingTarget())
+            if let message = outcome.userMessage { lastError = message }
             return nil
         case .stop:
             Task { await cockpitCapture.stopRecording() }

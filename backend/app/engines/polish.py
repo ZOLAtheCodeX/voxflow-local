@@ -79,6 +79,15 @@ class PolishEngine:
     _POLISH_PRESSURE_SKIP_LEVEL = 2
     _SMART_ACTION_PRESSURE_SKIP_LEVEL = 4
 
+    # Smart actions run in review with no capture live, and the first one
+    # after Ollama unloads the model pays the cold load: about 35 s on
+    # gemma4:e2b-mlx (measured 2026-10-28), past the 30 s provider timeout,
+    # so the action failed and only a warm retry worked. Their per-request
+    # budget is at least this (the app's own request allows 120 s); the wedge
+    # breaker measures against the same budget. Polish keeps the provider's
+    # timeout because it sits on the dictation hot path.
+    _SMART_ACTION_MIN_TIMEOUT_S = 90.0
+
     def __init__(
         self,
         backend: TextLLMBackend | None = None,
@@ -222,6 +231,7 @@ class PolishEngine:
             else:
                 send_text = text
 
+            timeout = self._request_timeout(spec, backend, smart_action=system_prompt is not None)
             started = self._clock()
             try:
                 candidate = backend.polish(
@@ -229,7 +239,7 @@ class PolishEngine:
                     tone,
                     system_prompt=system_prompt,
                     model=spec.model if spec else None,
-                    timeout=spec.timeout if spec else None,
+                    timeout=timeout,
                 )
             except TypeError:
                 # Legacy backend without the per-request override params.
@@ -246,7 +256,7 @@ class PolishEngine:
                 candidate = ""
 
             if not candidate:
-                self._record_empty_result(depth, spec, backend, elapsed=self._clock() - started)
+                self._record_empty_result(depth, spec, backend, elapsed=self._clock() - started, budget=timeout)
                 continue  # availability failure -> next provider
             self._record_success(depth)
 
@@ -287,11 +297,11 @@ class PolishEngine:
         backend: TextLLMBackend,
         *,
         elapsed: float,
+        budget: float,
     ) -> None:
         """Classify an empty polish result: timeout-shaped (burned most of the
-        provider's timeout budget → wedge evidence) vs fast (connection
+        request's timeout budget → wedge evidence) vs fast (connection
         refused → the chain already handles it cheaply, no breaker needed)."""
-        budget = (spec.timeout if spec and spec.timeout else None) or getattr(backend, "timeout", 30.0)
         if elapsed < budget * self._WEDGE_TIMEOUT_FRACTION:
             return
         with self._lock:
@@ -309,6 +319,18 @@ class PolishEngine:
                     failures,
                     self._WEDGE_COOLDOWN_S,
                 )
+
+    def _request_timeout(
+        self,
+        spec: ProviderSpec | None,
+        backend: TextLLMBackend,
+        *,
+        smart_action: bool,
+    ) -> float:
+        """Per-request timeout: the provider's own, raised to the cold-load
+        floor for smart actions."""
+        configured = (spec.timeout if spec and spec.timeout else None) or getattr(backend, "timeout", 30.0)
+        return max(configured, self._SMART_ACTION_MIN_TIMEOUT_S) if smart_action else configured
 
     def _record_success(self, depth: int) -> None:
         with self._lock:

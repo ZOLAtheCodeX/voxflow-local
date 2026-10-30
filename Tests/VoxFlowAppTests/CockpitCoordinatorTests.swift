@@ -258,6 +258,20 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertTrue(transcript.contains("source text"))
     }
 
+    // MARK: - Discard (v0.1.5)
+
+    func test_discardTranscript_leaves_review_for_idle() {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        sessionService.start()
+        sessionService.appendTestChunk("source text")
+        sessionService.stop()
+
+        XCTAssertTrue(coord.discardTranscript())
+
+        XCTAssertEqual(sessionService.state, .idle)
+        XCTAssertNil(sessionService.currentSession)
+    }
+
     func test_handleVoiceUtterance_reserved_word_does_not_expand_snippet() async throws {
         // A snippet keyword that collides with a reserved meta-word ("cancel")
         // must never expand — reserved/action-word precedence wins. "cancel"

@@ -4,10 +4,12 @@ import SwiftUI
 struct CockpitTopBarView: View {
     @ObservedObject var state: AppState
     @ObservedObject var sessionService: LongFormSessionService
+    var onDiscard: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: VF.spacingSmall) {
             recordingPill
+            discardButton
             inFlightPill
             modelPill
             persistenceWarningPill
@@ -40,6 +42,17 @@ struct CockpitTopBarView: View {
             .accessibilityLabel("Recording in progress")
         case .reviewing:
             pill("● review", tint: VF.colorInfo)
+        }
+    }
+
+    /// v0.1.5: review had no visible way out except ⌘↩ (insert) or the spoken
+    /// "cancel", so a cockpit reopened in review looked stuck.
+    @ViewBuilder private var discardButton: some View {
+        if case .reviewing = sessionService.state, let onDiscard {
+            Button("Discard", action: onDiscard)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Leave review without inserting. A copy stays in VoxFlow's sessions folder.")
         }
     }
 
