@@ -6,6 +6,24 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Privacy
+- A temporary paste now restores everything that was on the clipboard:
+  every item and every representation, and an empty clipboard stays empty.
+  The dictated text is marked transient and current-host-only while it
+  sits there, so clipboard managers and Universal Clipboard skip it
+  (issue #17).
+- A successful insert no longer overwrites the clipboard. The old
+  "clipboard bridge", which copied the text to the clipboard after a
+  direct insert, is removed.
+- Cancelling an insert can no longer restore the clipboard before the
+  target app has read the pasted text.
+- Cockpit session files are deleted when the session is consumed, by the
+  Cmd+Return insert or a Notion append. A discarded session's file is
+  kept for 7 days, and the Discard notice says "for 7 days". Session files
+  older than 7 days are swept at launch.
+- Paste inserts return about 300 ms sooner.
+- Tests no longer write the developer's clipboard.
+
 ### Fixed
 - Smart actions tolerate slower cold loads. A live check of v0.1.5 measured
   a cold gemma4:e2b-mlx smart action at 60 s inside Ollama under heavy swap,
