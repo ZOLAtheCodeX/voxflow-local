@@ -223,7 +223,64 @@ final class LongFormSessionServiceTests: XCTestCase {
         XCTAssertNil(service.recoverLatestSession())
     }
 
+    // MARK: - Retention (spec 3 decision 5)
+
+    func test_reset_deletes_the_session_file() {
+        let dir = tempDir()
+        let service = LongFormSessionService(autoSaveDirectory: dir)
+        service.start()
+        service.setTranscript("secret")   // setTranscript saves
+        let file = dir.appendingPathComponent("\(service.currentSession!.id.uuidString).json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        service.reset()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func test_reset_before_first_save_is_harmless() {
+        let dir = tempDir()
+        let service = LongFormSessionService(autoSaveDirectory: dir)
+        service.start()
+        service.reset()
+        XCTAssertEqual(service.state, .idle)
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        XCTAssertTrue(files.filter { $0.hasSuffix(".json") }.isEmpty)
+    }
+
+    func test_init_sweeps_only_old_uuid_named_json_files() {
+        let dir = tempDir()
+        let now = Date()
+        let old = dir.appendingPathComponent("\(UUID().uuidString).json")
+        let fresh = dir.appendingPathComponent("\(UUID().uuidString).json")
+        let foreignJSON = dir.appendingPathComponent("notes.json")
+        let foreignOther = dir.appendingPathComponent("\(UUID().uuidString).txt")
+        touch(old, modified: now.addingTimeInterval(-8 * 86_400))
+        touch(fresh, modified: now.addingTimeInterval(-6 * 86_400))
+        [foreignJSON, foreignOther].forEach { touch($0, modified: now.addingTimeInterval(-30 * 86_400)) }
+
+        _ = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: foreignJSON.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: foreignOther.path))
+    }
+
+    func test_orphan_retention_is_seven_days() {
+        XCTAssertEqual(LongFormSessionService.orphanRetention, 7 * 24 * 60 * 60)
+    }
+
     // MARK: - Helpers
+
+    private final class FixedClock: SessionClock {
+        let now: Date
+        init(now: Date) { self.now = now }
+        func currentTime() -> Date { now }
+    }
+
+    private func touch(_ url: URL, modified: Date) {
+        FileManager.default.createFile(atPath: url.path, contents: Data("{}".utf8))
+        try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+    }
 
     private func tempDir() -> URL {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())

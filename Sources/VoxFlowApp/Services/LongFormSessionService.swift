@@ -20,6 +20,11 @@ final class SystemClock: SessionClock {
 /// break ("\n\n"); shorter pauses join with ``ChunkJoiner``.
 /// Auto-save: every 5 s during recording + on stop. Recovery picks the
 /// most-recently-updated session JSON on disk.
+/// Retention: the session file holds the full plaintext transcript, so
+/// ``reset()`` (insert, Notion append, cancel) deletes it permanently with
+/// `FileManager.removeItem` (never the Trash, which would keep a copy), and
+/// ``init(autoSaveDirectory:clock:orphanRetention:)`` sweeps orphaned
+/// session files older than ``orphanRetention`` (7 days).
 @MainActor
 final class LongFormSessionService: ObservableObject {
     @Published private(set) var state: LongFormState = .idle
@@ -38,15 +43,23 @@ final class LongFormSessionService: ObservableObject {
     private var autoSaveTask: Task<Void, Never>?
 
     static let paragraphBreakPause: TimeInterval = 2.0
+    /// How long an orphaned session file (crash, force quit) survives before
+    /// the launch sweep removes it.
+    static let orphanRetention: TimeInterval = 7 * 24 * 60 * 60
     private static let autoSaveIntervalNs: UInt64 = 5_000_000_000
 
-    init(autoSaveDirectory: URL, clock: SessionClock = SystemClock()) {
+    init(
+        autoSaveDirectory: URL,
+        clock: SessionClock = SystemClock(),
+        orphanRetention: TimeInterval = LongFormSessionService.orphanRetention
+    ) {
         self.autoSaveDirectory = autoSaveDirectory
         self.clock = clock
         try? FileManager.default.createDirectory(
             at: autoSaveDirectory,
             withIntermediateDirectories: true
         )
+        sweepOrphans(olderThan: orphanRetention)
     }
 
     // MARK: - Lifecycle
@@ -147,8 +160,10 @@ final class LongFormSessionService: ObservableObject {
     func reset() {
         autoSaveTask?.cancel()
         autoSaveTask = nil
+        let endedID = currentSession?.id
         currentSession = nil
         state = .idle
+        if let endedID { removeSessionFile(id: endedID) }
     }
 
     // MARK: - Persistence
@@ -173,6 +188,47 @@ final class LongFormSessionService: ObservableObject {
             if consecutiveSaveFailures >= 2 { persistenceFailing = true }
             try? FileManager.default.createDirectory(
                 at: autoSaveDirectory, withIntermediateDirectories: true)
+        }
+    }
+
+    private func removeSessionFile(id: UUID) {
+        let url = autoSaveDirectory.appendingPathComponent("\(id.uuidString).json")
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            // Never saved (reset before the first save), nothing to remove.
+        } catch {
+            log.error("session file removal failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Remove `<uuid>.json` files not modified within `retention`. Files that
+    /// are not UUID-named JSON are never touched. A listing failure is logged
+    /// and the sweep skipped.
+    private func sweepOrphans(olderThan retention: TimeInterval) {
+        let fm = FileManager.default
+        let urls: [URL]
+        do {
+            urls = try fm.contentsOfDirectory(
+                at: autoSaveDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            log.error("orphan sweep skipped: \(error.localizedDescription)")
+            return
+        }
+        let cutoff = clock.currentTime().addingTimeInterval(-retention)
+        for url in urls where url.pathExtension == "json" {
+            guard UUID(uuidString: url.deletingPathExtension().lastPathComponent) != nil,
+                  let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                      .contentModificationDate,
+                  modified < cutoff else { continue }
+            do {
+                try fm.removeItem(at: url)
+            } catch {
+                log.error("orphan session removal failed: \(error.localizedDescription)")
+            }
         }
     }
 
