@@ -52,6 +52,18 @@ final class FakePasteboard: PasteboardAccess {
     }
 }
 
+/// Stands in for `SystemClipboard.copy` so no test writes the developer's real
+/// clipboard. `TextInsertionCoordinator` has no default writer, so forgetting to
+/// pass one is a compile error.
+@MainActor
+final class ClipboardRecorder {
+    private(set) var copies: [String] = []
+
+    func copy(_ text: String) {
+        copies.append(text)
+    }
+}
+
 /// A sleep the test resumes by hand, so restore-window tests never wait on
 /// real time.
 @MainActor

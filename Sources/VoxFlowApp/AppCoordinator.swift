@@ -118,7 +118,7 @@ final class AppCoordinator: ObservableObject {
     /// In-flight handoff, so a new run (or a dismiss) cancels the previous one
     /// instead of orphaning its child process.
     private var handoffTask: Task<Void, Never>?
-    private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService, audit: insertionAudit)
+    private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService, audit: insertionAudit, copyToClipboard: SystemClipboard.copy)
     private(set) lazy var benchmark: TranslationBenchmarkCoordinating = TranslationBenchmarkCoordinator(state: state, backendManager: backendManager, settings: settings)
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
     private(set) lazy var translationWorkflow: TranslationWorkflowCoordinating = TranslationWorkflowCoordinator(state: state)

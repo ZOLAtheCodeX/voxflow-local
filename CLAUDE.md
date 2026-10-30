@@ -12,7 +12,7 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
   Services/                     Extracted coordinators + macOS-interop services
     SettingsCoordinator.swift           Provider, STT, tone, insert behavior + persistence
     OnboardingCoordinator.swift         Calibration flow lifecycle
-    TextInsertionCoordinator.swift      Async AX insert + clipboard bridge + per-app stats
+    TextInsertionCoordinator.swift      Async AX insert + injected clipboard writer (failure/copy only) + per-app stats
     TranslationWorkflowCoordinator.swift / PromptWorkflowCoordinator.swift
     PrivacyConsentCoordinator.swift     Privacy preview + closure-based continuation
     AccessibilityInsertService.swift    @MainActor AX text insertion + async paste fallback
@@ -230,6 +230,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Push smart actions onto the cockpit undo stack when they fail the guardrail or return the transcript unchanged — `SmartActionService` filters those before recording history.
 - Mutate `LongFormSession.transcript` from outside `LongFormSessionService` — `currentSession` is `@Published private(set)`. Use `setTranscript(_:)` so the auto-save Task sees the change.
 - Construct real system-touching services in tests — use the seams: `TextInserting` for insertion, `BackendProcessRunning` + `BackendProcessRunnerFake` for process/port/PID-file. Two shipped incidents came from exactly this (ghost "hello" AX insertions; test-spawned uvicorn squatters on port 8765).
+- Construct `TextInsertionCoordinator` in tests with `SystemClipboard.copy`; pass a `ClipboardRecorder` (the writer has no default, and a successful insert never writes the clipboard; a test that writes `NSPasteboard.general` overwrites the developer's real clipboard).
 - Attach window-open notification listeners to a view — `.voxflowOpenCockpit`/`Dashboard`/`Setup` route through `AppCoordinator.installWindowOpenHandler` (app-lifetime); a view-bound `.onReceive` dies with its window and silently kills the ⌥⌘V hotkey.
 - Edit `providers.json` schema on one side only — `ProviderConfigStore.swift` (writer) and `provider_registry.py` (reader) must stay in sync; the Swift `testFileSchemaMatchesBackendContract` pins the snake_case schema.
 - Add a new `SmartActionId` to `AppModels.swift` without adding the matching system-prompt entry in `backend/app/smart_actions.py` — the engine will fall back to a generic prompt template and the action label/tooltip will look fine while the LLM output stays generic.

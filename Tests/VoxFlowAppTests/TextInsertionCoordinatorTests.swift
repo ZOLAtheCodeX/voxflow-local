@@ -21,7 +21,93 @@ private final class ScriptedInsertService: TextInserting {
     }
 }
 
+/// A fresh temp `.jsonl` path so a test never builds the real default audit log.
+private func tempAuditURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
+}
+
 final class TextInsertionCoordinatorTests: XCTestCase {
+    // MARK: - Clipboard: only deliberate copies write it
+
+    @MainActor
+    func testSuccessfulDirectInsertNeverWritesClipboard() async {
+        let recorder = ClipboardRecorder()
+        let service = ScriptedInsertService()
+        let sut = TextInsertionCoordinator(state: AppState(), insertService: service,
+            audit: InsertionAuditLog(fileURL: tempAuditURL()), copyToClipboard: recorder.copy)
+
+        let ok = await sut.insertText("hello", statusSuffix: "Inserted", targetApp: nil)
+
+        XCTAssertTrue(ok)
+        XCTAssertEqual(recorder.copies, [])
+    }
+
+    @MainActor
+    func testSuccessfulReviewInsertNeverWritesClipboard() async {
+        let recorder = ClipboardRecorder()
+        let state = AppState()
+        let sut = TextInsertionCoordinator(state: state, insertService: ScriptedInsertService(),
+            audit: InsertionAuditLog(fileURL: tempAuditURL()), copyToClipboard: recorder.copy)
+        state.transcriptCandidate = TranscriptCandidate(
+            rawText: "raw", lightText: "light", polishText: "polished", selectedMode: .polish)
+        state.selectedMode = .polish
+
+        await sut.insertCurrentText()
+
+        XCTAssertEqual(state.statusLine, "Inserted")
+        XCTAssertEqual(recorder.copies, [])
+    }
+
+    @MainActor
+    func testFailedAutoInsertCopiesOnceThroughWriter() async {
+        let recorder = ClipboardRecorder()
+        let service = ScriptedInsertService()
+        service.result = InsertResult(method: .failed, success: false, fallbackUsed: true, errorCode: "INSERT_FAILED")
+        let sut = TextInsertionCoordinator(state: AppState(), insertService: service,
+            audit: InsertionAuditLog(fileURL: tempAuditURL()), copyToClipboard: recorder.copy)
+
+        let ok = await sut.insertText("hello", statusSuffix: "Inserted", targetApp: nil)
+
+        XCTAssertFalse(ok)
+        XCTAssertEqual(recorder.copies, ["hello"])
+    }
+
+    @MainActor
+    func testFailedReviewInsertCopiesOnceThroughWriter() async {
+        let recorder = ClipboardRecorder()
+        let state = AppState()
+        let service = ScriptedInsertService()
+        service.result = InsertResult(method: .failed, success: false, fallbackUsed: true, errorCode: "INSERT_FAILED")
+        let sut = TextInsertionCoordinator(state: state, insertService: service,
+            audit: InsertionAuditLog(fileURL: tempAuditURL()), copyToClipboard: recorder.copy)
+        state.transcriptCandidate = TranscriptCandidate(
+            rawText: "raw", lightText: "light", polishText: "polished", selectedMode: .polish)
+        state.selectedMode = .polish
+
+        await sut.insertCurrentText()
+
+        XCTAssertFalse(state.displayText.isEmpty)
+        XCTAssertEqual(recorder.copies, [state.displayText])
+        XCTAssertEqual(state.statusLine, "Copied to clipboard")
+    }
+
+    @MainActor
+    func testCopyCurrentTextUsesWriter() {
+        let recorder = ClipboardRecorder()
+        let state = AppState()
+        let sut = TextInsertionCoordinator(state: state, insertService: ScriptedInsertService(),
+            audit: InsertionAuditLog(fileURL: tempAuditURL()), copyToClipboard: recorder.copy)
+        state.transcriptCandidate = TranscriptCandidate(
+            rawText: "draft", lightText: "draft", polishText: "draft", selectedMode: .raw)
+        state.selectedMode = .raw
+
+        sut.copyCurrentText()
+
+        XCTAssertEqual(recorder.copies, [state.displayText])
+        XCTAssertFalse(state.displayText.isEmpty)
+    }
+
     @MainActor
     func testSubmissionReceiptDistinguishesEnterPostedAndSkippedWithoutRetryingInsertion() async throws {
         for submission: InsertResult.Submission in [.enterPosted, .skipped] {
@@ -32,7 +118,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("submission-\(UUID()).jsonl")
             defer { try? FileManager.default.removeItem(at: file) }
             let coordinator = TextInsertionCoordinator(state: state, insertService: service,
-                audit: InsertionAuditLog(fileURL: file))
+                audit: InsertionAuditLog(fileURL: file), copyToClipboard: ClipboardRecorder().copy)
             let policy = TextInsertionPolicy.verbatim.withSubmission(true)
             let success = await coordinator.insertText("/research", statusSuffix: "Prompt inserted",
                 targetApp: nil, timing: nil, policy: policy)
@@ -59,7 +145,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("source-\(UUID()).jsonl")
         defer { try? FileManager.default.removeItem(at: file) }
         let coordinator = TextInsertionCoordinator(state: state, insertService: service,
-            audit: InsertionAuditLog(fileURL: file))
+            audit: InsertionAuditLog(fileURL: file), copyToClipboard: ClipboardRecorder().copy)
 
         _ = await coordinator.insertText("ls", statusSuffix: "Inserted (raw — Terminal)",
             targetApp: nil, timing: nil, policy: TextInsertionPolicy.prose.withSubmission(true))
@@ -80,7 +166,8 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         service.result = InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("insertion-\(UUID()).jsonl")
         defer { try? FileManager.default.removeItem(at: file) }
-        let coordinator = TextInsertionCoordinator(state: state, insertService: service, audit: InsertionAuditLog(fileURL: file))
+        let coordinator = TextInsertionCoordinator(state: state, insertService: service, audit: InsertionAuditLog(fileURL: file),
+            copyToClipboard: ClipboardRecorder().copy)
         let success = await coordinator.insertText("$research --local", statusSuffix: "Skill inserted",
             targetApp: nil, timing: InsertTimingContext(pipelineStartedAt: .now, sttMs: 123, cleanupMs: 0), policy: .verbatim)
         XCTAssertTrue(success)
@@ -96,7 +183,8 @@ final class TextInsertionCoordinatorTests: XCTestCase {
     func testCancelledSkillCaptureNeverCallsInsertion() async {
         let state = AppState()
         let service = ScriptedInsertService()
-        let coordinator = TextInsertionCoordinator(state: state, insertService: service)
+        let coordinator = TextInsertionCoordinator(state: state, insertService: service,
+            audit: InsertionAuditLog(fileURL: tempAuditURL()), copyToClipboard: ClipboardRecorder().copy)
         let task = Task { @MainActor in
             withUnsafeCurrentTask { $0?.cancel() }
             return await coordinator.insertText("/research", statusSuffix: "Skill inserted", targetApp: nil,
@@ -116,7 +204,8 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         let sut = TextInsertionCoordinator(
             state: state,
             insertService: insertService,
-            audit: InsertionAuditLog(fileURL: auditURL)
+            audit: InsertionAuditLog(fileURL: auditURL),
+            copyToClipboard: ClipboardRecorder().copy
         )
         return (sut, state)
     }
@@ -132,7 +221,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
             .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
         let sut = TextInsertionCoordinator(
             state: state, insertService: ScriptedInsertService(),
-            audit: InsertionAuditLog(fileURL: auditURL))
+            audit: InsertionAuditLog(fileURL: auditURL), copyToClipboard: ClipboardRecorder().copy)
 
         state.transcriptCandidate = TranscriptCandidate(
             rawText: "raw", lightText: "light", polishText: "polished",
@@ -160,7 +249,7 @@ final class TextInsertionCoordinatorTests: XCTestCase {
             .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
         let sut = TextInsertionCoordinator(
             state: state, insertService: ScriptedInsertService(),
-            audit: InsertionAuditLog(fileURL: auditURL))
+            audit: InsertionAuditLog(fileURL: auditURL), copyToClipboard: ClipboardRecorder().copy)
 
         state.transcriptCandidate = TranscriptCandidate(
             rawText: "raw", lightText: "light", polishText: "polish",
@@ -230,7 +319,8 @@ final class TextInsertionCoordinatorTests: XCTestCase {
         let sut = TextInsertionCoordinator(
             state: state,
             insertService: insertService,
-            audit: InsertionAuditLog(fileURL: auditURL)
+            audit: InsertionAuditLog(fileURL: auditURL),
+            copyToClipboard: ClipboardRecorder().copy
         )
         state.transcriptCandidate = TranscriptCandidate(
             rawText: "hello world", lightText: "Hello world.", polishText: "Hello, world.",
@@ -299,7 +389,8 @@ final class TextInsertionCoordinatorTests: XCTestCase {
             .appendingPathComponent("voxflow-test-audit-\(UUID().uuidString).jsonl")
         let service = ScriptedInsertService()
         service.result = InsertResult(method: .simulatedPaste, success: true, fallbackUsed: true, errorCode: nil)
-        let sut = TextInsertionCoordinator(state: state, insertService: service, audit: InsertionAuditLog(fileURL: auditURL))
+        let sut = TextInsertionCoordinator(state: state, insertService: service, audit: InsertionAuditLog(fileURL: auditURL),
+            copyToClipboard: ClipboardRecorder().copy)
         let timing = InsertTimingContext(pipelineStartedAt: .now, sttMs: 640, cleanupMs: 3)
 
         let ok = await sut.insertText("hello", statusSuffix: "Inserted (light)", targetApp: nil, timing: timing)

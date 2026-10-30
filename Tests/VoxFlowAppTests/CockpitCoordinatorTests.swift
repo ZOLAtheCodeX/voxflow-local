@@ -347,9 +347,10 @@ final class CockpitCoordinatorTests: XCTestCase {
         let sessionService = LongFormSessionService(autoSaveDirectory: sessionDir)
         let auditURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")
+        let recorder = ClipboardRecorder()
         let insertion = TextInsertionCoordinator(
             state: state, insertService: FailingInsertService(),
-            audit: InsertionAuditLog(fileURL: auditURL))
+            audit: InsertionAuditLog(fileURL: auditURL), copyToClipboard: recorder.copy)
         let coord = CockpitCoordinator(
             state: state,
             sessionService: sessionService,
@@ -369,6 +370,8 @@ final class CockpitCoordinatorTests: XCTestCase {
                        "the transcript that must survive")
         XCTAssertTrue(state.statusLine.contains("Insert failed"),
                       "got: \(state.statusLine)")
+        XCTAssertEqual(recorder.copies, ["the transcript that must survive"],
+                       "the transcript reaches the clipboard via insertText's failure fallback")
     }
 
     // MARK: - Insert while recording (drain first)
@@ -417,7 +420,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let inserter = RecordingInsertService()
         let insertion = TextInsertionCoordinator(
             state: state, insertService: inserter,
-            audit: InsertionAuditLog(fileURL: auditURL))
+            audit: InsertionAuditLog(fileURL: auditURL), copyToClipboard: ClipboardRecorder().copy)
         let coord = CockpitCoordinator(
             state: state,
             sessionService: sessionService,

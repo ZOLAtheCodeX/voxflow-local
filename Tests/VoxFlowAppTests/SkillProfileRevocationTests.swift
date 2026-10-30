@@ -193,7 +193,7 @@ final class SkillProfileRevocationTests: XCTestCase {
         var storeURL: URL { directory.appendingPathComponent("profiles.json") }
         var auditURL: URL { directory.appendingPathComponent("receipts.jsonl") }
         lazy var insertion = TextInsertionCoordinator(state: state, insertService: service,
-            audit: InsertionAuditLog(fileURL: auditURL), copyFailedInsertion: { [weak self] in self?.clipboardCopies.append($0) })
+            audit: InsertionAuditLog(fileURL: auditURL), copyToClipboard: { [weak self] in self?.clipboardCopies.append($0) })
 
         init() throws {
             let writes = writes
