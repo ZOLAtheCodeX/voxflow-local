@@ -223,6 +223,69 @@ final class LongFormSessionServiceTests: XCTestCase {
         XCTAssertNil(service.recoverLatestSession())
     }
 
+    // MARK: - Retention (spec 3 decision 5)
+
+    func test_reset_deletes_the_session_file() {
+        let dir = tempDir()
+        let service = LongFormSessionService(autoSaveDirectory: dir)
+        service.start()
+        service.setTranscript("secret")   // setTranscript saves
+        let file = dir.appendingPathComponent("\(service.currentSession!.id.uuidString).json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        service.reset()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func test_reset_before_first_save_is_harmless() {
+        let dir = tempDir()
+        let service = LongFormSessionService(autoSaveDirectory: dir)
+        service.start()
+        service.reset()
+        XCTAssertEqual(service.state, .idle)
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        XCTAssertTrue(files.filter { $0.hasSuffix(".json") }.isEmpty)
+    }
+
+    func test_sweep_removes_only_old_uuid_named_json_files() {
+        let dir = tempDir()
+        let now = Date()
+        let old = dir.appendingPathComponent("\(UUID().uuidString).json")
+        let fresh = dir.appendingPathComponent("\(UUID().uuidString).json")
+        let foreignJSON = dir.appendingPathComponent("notes.json")
+        let foreignOther = dir.appendingPathComponent("\(UUID().uuidString).txt")
+        touch(old, modified: now.addingTimeInterval(-8 * 86_400))
+        touch(fresh, modified: now.addingTimeInterval(-6 * 86_400))
+        [foreignJSON, foreignOther].forEach { touch($0, modified: now.addingTimeInterval(-30 * 86_400)) }
+
+        let service = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+        service.sweepOrphans()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: foreignJSON.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: foreignOther.path))
+    }
+
+    /// The sweep is explicit: construction must not delete files, so a test
+    /// (or any caller) that builds the service on a real folder cannot lose
+    /// data. Production calls `sweepOrphans()` from `AppCoordinator`.
+    func test_init_does_not_sweep() {
+        let dir = tempDir()
+        let now = Date()
+        let old = dir.appendingPathComponent("\(UUID().uuidString).json")
+        touch(old, modified: now.addingTimeInterval(-8 * 86_400))
+
+        let service = LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: old.path), "init must not delete anything")
+        service.sweepOrphans()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+    }
+
+    func test_orphan_retention_is_seven_days() {
+        XCTAssertEqual(LongFormSessionService.orphanRetention, 7 * 24 * 60 * 60)
+    }
+
     // MARK: - Discard (v0.1.5: a visible way out of review)
 
     /// Before v0.1.5 the only ways out of review were ⌘↩ (insert) and the
@@ -243,6 +306,19 @@ final class LongFormSessionServiceTests: XCTestCase {
                        "discard must leave the latest transcript on disk")
     }
 
+    func test_discarded_session_file_is_swept_after_seven_days() {
+        let dir = tempDir()
+        let service = LongFormSessionService(autoSaveDirectory: dir)
+        service.start(); service.appendTestChunk("discard me"); service.stop()
+        let file = dir.appendingPathComponent("\(service.currentSession!.id.uuidString).json")
+        XCTAssertTrue(service.discard())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "discard keeps the file")
+        let now = Date()
+        try? FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-8 * 86_400)], ofItemAtPath: file.path)
+        LongFormSessionService(autoSaveDirectory: dir, clock: FixedClock(now: now)).sweepOrphans()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "the sweep removes a discarded file after 7 days")
+    }
+
     /// Discarding mid-recording would leave the microphone running behind an
     /// idle session. Recording ends with ⌘. first.
     func test_discard_is_refused_while_recording() {
@@ -257,6 +333,17 @@ final class LongFormSessionServiceTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private final class FixedClock: SessionClock {
+        let now: Date
+        init(now: Date) { self.now = now }
+        func currentTime() -> Date { now }
+    }
+
+    private func touch(_ url: URL, modified: Date) {
+        FileManager.default.createFile(atPath: url.path, contents: Data("{}".utf8))
+        try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+    }
 
     private func tempDir() -> URL {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())

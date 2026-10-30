@@ -118,7 +118,7 @@ final class AppCoordinator: ObservableObject {
     /// In-flight handoff, so a new run (or a dismiss) cancels the previous one
     /// instead of orphaning its child process.
     private var handoffTask: Task<Void, Never>?
-    private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService, audit: insertionAudit)
+    private(set) lazy var textInsertion: TextInsertionCoordinating = TextInsertionCoordinator(state: state, insertService: insertService, audit: insertionAudit, copyToClipboard: SystemClipboard.copy)
     private(set) lazy var benchmark: TranslationBenchmarkCoordinating = TranslationBenchmarkCoordinator(state: state, backendManager: backendManager, settings: settings)
     private(set) lazy var privacy: PrivacyConsentCoordinating = PrivacyConsentCoordinator(state: state)
     private(set) lazy var translationWorkflow: TranslationWorkflowCoordinating = TranslationWorkflowCoordinator(state: state)
@@ -240,6 +240,8 @@ final class AppCoordinator: ObservableObject {
     /// 2 s of nothing means the device stopped, not that the user paused.
     private static let midCaptureStallTimeout: TimeInterval = 2.0
     private var warmupTask: Task<Void, Never>?
+    /// App-lifetime loop that re-sweeps orphaned cockpit session files.
+    private var orphanSweepTask: Task<Void, Never>?
     private var selectToneStyleTask: Task<Void, Never>?
     private let mainWindowIdentifier = NSUserInterfaceItemIdentifier("VoxFlowMainWindow")
     private var mainWindowController: NSWindowController?
@@ -309,6 +311,7 @@ final class AppCoordinator: ObservableObject {
             self?.externalAppTracker.currentVerified(lookup: ExternalAppTracker.liveLookup)?.targetSnapshot
         }
         cockpit.drainRecording = { [weak self] in await self?.cockpitCapture.stopRecording() ?? false }
+        startOrphanSessionSweeping()
 
         // R5.6: cockpit review can trigger protocols (gated inside the
         // coordinator on state.protocolCommandsEnabled + strict grammar).
@@ -451,6 +454,26 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Sweeps cockpit session files older than 7 days once at launch, then
+    /// hourly. The sweep is hourly because VoxFlow is a menu-bar app that runs
+    /// for weeks: a launch-only sweep would let a discarded session outlive
+    /// the "for 7 days" the UI promises (ruling R9: within an hour keeps it
+    /// true). It never runs under XCTest: `AppCoordinator.shared` builds the
+    /// service on the developer's real sessions folder, and tests must not
+    /// delete from it.
+    private func startOrphanSessionSweeping() {
+        guard !Self.isRunningUnderXCTest else { return }
+        cockpitSessionService.sweepOrphans()
+        orphanSweepTask?.cancel()
+        orphanSweepTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3600))
+                guard !Task.isCancelled, let self else { return }
+                self.cockpitSessionService.sweepOrphans()
+            }
+        }
+    }
+
     private func beginWarmupMonitoring() {
         warmupTask?.cancel()
         warmupTask = Task { [weak self] in
@@ -472,7 +495,11 @@ final class AppCoordinator: ObservableObject {
     /// class behind the ghost-hello and squatter incidents).
     private static let adoptForeignBackendOverride =
         ProcessInfo.processInfo.environment["VOXFLOW_ADOPT_FOREIGN_BACKEND"] == "1"
-        || NSClassFromString("XCTestCase") != nil
+        || isRunningUnderXCTest
+
+    /// True when the process is a test host (the XCTest bundle is loaded).
+    /// Gates side effects that must never reach the developer's real data.
+    private static let isRunningUnderXCTest = NSClassFromString("XCTestCase") != nil
 
     /// Launch-time identity probe (stale-backend hardening, 2026-06-12).
     /// The idle early-return below is the ONLY readiness path in WhisperKit
@@ -2379,6 +2406,12 @@ final class AppCoordinator: ObservableObject {
     /// Called from AppDelegate.applicationWillTerminate to cleanly stop the backend.
     func shutdownBackend() {
         backendManager.stop()
+    }
+
+    /// Called from AppDelegate.applicationWillTerminate so a pending dictation
+    /// paste never leaves its text on the clipboard after quit.
+    func restoreTemporaryClipboard() {
+        insertService.restorePendingClipboard()
     }
 
     /// Tracks the last activated non-VoxFlow app so the cockpit can freeze it

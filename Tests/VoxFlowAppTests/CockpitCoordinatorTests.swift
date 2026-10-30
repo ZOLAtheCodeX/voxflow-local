@@ -260,6 +260,11 @@ final class CockpitCoordinatorTests: XCTestCase {
 
     // MARK: - Discard (v0.1.5)
 
+    func test_discarded_notice_states_the_seven_day_retention() {
+        XCTAssertEqual(CockpitCoordinator.discardedNotice,
+                       "Transcript discarded. A copy stays in VoxFlow's sessions folder for 7 days.")
+    }
+
     func test_discardTranscript_leaves_review_for_idle() {
         let (_, coord, sessionService, _) = makeCoordinator()
         sessionService.start()
@@ -326,7 +331,8 @@ final class CockpitCoordinatorTests: XCTestCase {
         let insertion = TextInsertionCoordinator(
             state: state, insertService: inserter,
             audit: InsertionAuditLog(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")))
+                .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")),
+            copyToClipboard: ClipboardRecorder().copy)
         let coord = CockpitCoordinator(
             state: state, sessionService: sessionService,
             actionService: SmartActionService(backend: StubSmartActionBackend()),
@@ -435,9 +441,10 @@ final class CockpitCoordinatorTests: XCTestCase {
         let sessionService = LongFormSessionService(autoSaveDirectory: sessionDir)
         let auditURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")
+        let recorder = ClipboardRecorder()
         let insertion = TextInsertionCoordinator(
             state: state, insertService: FailingInsertService(),
-            audit: InsertionAuditLog(fileURL: auditURL))
+            audit: InsertionAuditLog(fileURL: auditURL), copyToClipboard: recorder.copy)
         let coord = CockpitCoordinator(
             state: state,
             sessionService: sessionService,
@@ -457,12 +464,13 @@ final class CockpitCoordinatorTests: XCTestCase {
                        "the transcript that must survive")
         XCTAssertTrue(state.statusLine.contains("Insert failed"),
                       "got: \(state.statusLine)")
+        XCTAssertEqual(recorder.copies, ["the transcript that must survive"],
+                       "the transcript reaches the clipboard via insertText's failure fallback")
     }
 
     // MARK: - Insert while recording (drain first)
 
-    /// Records inserted texts and reports success via `.simulatedPaste`, the
-    /// only method for which `TextInsertionCoordinator` skips the pasteboard.
+    /// Records inserted texts and reports success via `.simulatedPaste`.
     private final class RecordingInsertService: TextInserting {
         private(set) var texts: [String] = []
         private(set) var targets: [NSRunningApplication?] = []
@@ -505,7 +513,7 @@ final class CockpitCoordinatorTests: XCTestCase {
         let inserter = RecordingInsertService()
         let insertion = TextInsertionCoordinator(
             state: state, insertService: inserter,
-            audit: InsertionAuditLog(fileURL: auditURL))
+            audit: InsertionAuditLog(fileURL: auditURL), copyToClipboard: ClipboardRecorder().copy)
         let coord = CockpitCoordinator(
             state: state,
             sessionService: sessionService,

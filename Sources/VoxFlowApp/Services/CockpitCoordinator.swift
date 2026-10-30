@@ -325,7 +325,7 @@ final class CockpitCoordinator: ObservableObject {
     }
 
     /// Shown after Discard, so a mis-click says where the words went.
-    static let discardedNotice = "Transcript discarded. A copy stays in VoxFlow's sessions folder."
+    static let discardedNotice = "Transcript discarded. A copy stays in VoxFlow's sessions folder for 7 days."
 
     /// The visible way out of review (the Discard button, and the spoken
     /// "cancel"). The session file stays on disk. Refused while ⌘↩ is still

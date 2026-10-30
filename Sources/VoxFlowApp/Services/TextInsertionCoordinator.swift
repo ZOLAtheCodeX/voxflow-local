@@ -30,20 +30,21 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
     private let log = Logger(subsystem: "local.voxflow.app", category: "TextInsertion")
     private let state: AppState
     private let insertService: TextInserting
-    private let copyFailedInsertion: (String) -> Void
+    /// The only clipboard writer. Every deliberate copy (failed-insert
+    /// fallback, copy buttons, meeting templates) goes through it; a successful
+    /// insert never writes the clipboard. No default, so a test that forgets a
+    /// recorder fails to compile instead of touching the real clipboard.
+    private let copyToClipboard: @MainActor (String) -> Void
 
     /// Ghost-text forensics: every insertion gets a local JSONL receipt.
     private let audit: InsertionAuditLog
 
     init(state: AppState, insertService: TextInserting, audit: InsertionAuditLog? = nil,
-         copyFailedInsertion: @escaping (String) -> Void = {
-             NSPasteboard.general.clearContents()
-             NSPasteboard.general.setString($0, forType: .string)
-         }) {
+         copyToClipboard: @escaping @MainActor (String) -> Void) {
         self.state = state
         self.insertService = insertService
         self.audit = audit ?? InsertionAuditLog()
-        self.copyFailedInsertion = copyFailedInsertion
+        self.copyToClipboard = copyToClipboard
     }
 
     func insertCurrentText() async {
@@ -98,10 +99,6 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             if result.fallbackUsed {
                 state.fallbackInsertCount += 1
             }
-            if result.method != .simulatedPaste {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(state.displayText, forType: .string)
-            }
             state.statusLine = "Inserted"
             state.lastInsertedText = state.displayText
             // Receipt for the ghost-text forensics log — the review-mode insert
@@ -120,8 +117,10 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             state.sessionState = .idle
         } else {
             state.failedInsertCount += 1
+            // Copy directly: copyCurrentText() would overwrite this status line
+            // with "Copied to clipboard" and hide that the insert failed.
+            if !state.displayText.isEmpty { copyToClipboard(state.displayText) }
             state.statusLine = "Insert failed. Copied to clipboard."
-            copyCurrentText()
             state.sessionState = .review
         }
     }
@@ -167,10 +166,6 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             if result.fallbackUsed {
                 state.fallbackInsertCount += 1
             }
-            if result.method != .simulatedPaste {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
-            }
             state.statusLine = statusSuffix + result.submission.statusSuffix
             state.lastInsertedText = text
             audit.recordInsertion(
@@ -194,7 +189,7 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
             return true
         } else {
             state.failedInsertCount += 1
-            copyFailedInsertion(text)
+            copyToClipboard(text)
             state.statusLine = "Auto-insert failed — copied to clipboard"
             return false
         }
@@ -202,22 +197,19 @@ final class TextInsertionCoordinator: TextInsertionCoordinating {
 
     func copyCurrentText() {
         guard !state.displayText.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(state.displayText, forType: .string)
+        copyToClipboard(state.displayText)
         state.statusLine = "Copied to clipboard"
     }
 
     func copyMeetingMarkdownTemplate() {
         guard let meeting = state.meetingCandidate else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(meeting.markdownTemplate, forType: .string)
+        copyToClipboard(meeting.markdownTemplate)
         state.statusLine = "Meeting Markdown template copied"
     }
 
     func copyMeetingNotionTemplate() {
         guard let meeting = state.meetingCandidate else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(meeting.notionTemplate, forType: .string)
+        copyToClipboard(meeting.notionTemplate)
         state.statusLine = "Meeting Notion template copied"
     }
 

@@ -20,6 +20,15 @@ final class SystemClock: SessionClock {
 /// break ("\n\n"); shorter pauses join with ``ChunkJoiner``.
 /// Auto-save: every 5 s during recording + on stop. Recovery picks the
 /// most-recently-updated session JSON on disk.
+/// Retention: the session file holds the full plaintext transcript.
+/// ``reset()`` (the session was consumed or never usable: insert, Notion
+/// append, failed capture start) deletes it permanently with
+/// `FileManager.removeItem` (never the Trash, which would keep a copy).
+/// ``discard()`` keeps it as a mis-click safety net, and ``sweepOrphans()``
+/// removes session files older than ``orphanRetention`` (7 days), discarded
+/// ones included. The sweep is explicit: ``init(autoSaveDirectory:clock:orphanRetention:)``
+/// has no file-deleting side effects, and `AppCoordinator` calls
+/// ``sweepOrphans()`` at launch and hourly.
 @MainActor
 final class LongFormSessionService: ObservableObject {
     @Published private(set) var state: LongFormState = .idle
@@ -34,15 +43,24 @@ final class LongFormSessionService: ObservableObject {
 
     let clock: SessionClock
     private let autoSaveDirectory: URL
+    private let retention: TimeInterval
     private let log = Logger(subsystem: "local.voxflow.app", category: "LongFormSessionService")
     private var autoSaveTask: Task<Void, Never>?
 
     static let paragraphBreakPause: TimeInterval = 2.0
+    /// How long an orphaned session file (crash, force quit, discard)
+    /// survives before ``sweepOrphans()`` removes it.
+    static let orphanRetention: TimeInterval = 7 * 24 * 60 * 60
     private static let autoSaveIntervalNs: UInt64 = 5_000_000_000
 
-    init(autoSaveDirectory: URL, clock: SessionClock = SystemClock()) {
+    init(
+        autoSaveDirectory: URL,
+        clock: SessionClock = SystemClock(),
+        orphanRetention: TimeInterval = LongFormSessionService.orphanRetention
+    ) {
         self.autoSaveDirectory = autoSaveDirectory
         self.clock = clock
+        self.retention = orphanRetention
         try? FileManager.default.createDirectory(
             at: autoSaveDirectory,
             withIntermediateDirectories: true
@@ -144,23 +162,36 @@ final class LongFormSessionService: ObservableObject {
         log.info("session stopped at \(self.currentSession?.transcript.count ?? 0) chars")
     }
 
+    /// Ends the session because it was consumed or never usable (insert
+    /// success, Notion append success, failed capture start) and deletes its
+    /// file.
     func reset() {
-        autoSaveTask?.cancel()
-        autoSaveTask = nil
-        currentSession = nil
-        state = .idle
+        if let id = clearState() { removeSessionFile(id: id) }
     }
 
-    /// Leaves review without inserting. The session file stays on disk
-    /// (sessions are never deleted) and is saved once more first, in case
-    /// the last save failed. Refused outside review: discarding a live
-    /// recording would leave the microphone running behind an idle session.
+    /// Leaves review without inserting. Discard has no confirmation sheet, so
+    /// the session file stays on disk as the mis-click safety net; the orphan
+    /// sweep removes it once it is older than ``orphanRetention``. The session
+    /// is saved once more first, in case the last save failed. Refused outside
+    /// review: discarding a live recording would leave the microphone running
+    /// behind an idle session.
     @discardableResult
     func discard() -> Bool {
         guard case .reviewing = state else { return false }
         save()
-        reset()
+        _ = clearState()
         return true
+    }
+
+    /// Cancels the autosave task and returns to idle. Returns the id of the
+    /// session that ended, if any.
+    private func clearState() -> UUID? {
+        autoSaveTask?.cancel()
+        autoSaveTask = nil
+        let endedID = currentSession?.id
+        currentSession = nil
+        state = .idle
+        return endedID
     }
 
     // MARK: - Persistence
@@ -185,6 +216,47 @@ final class LongFormSessionService: ObservableObject {
             if consecutiveSaveFailures >= 2 { persistenceFailing = true }
             try? FileManager.default.createDirectory(
                 at: autoSaveDirectory, withIntermediateDirectories: true)
+        }
+    }
+
+    private func removeSessionFile(id: UUID) {
+        let url = autoSaveDirectory.appendingPathComponent("\(id.uuidString).json")
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            // Never saved (reset before the first save), nothing to remove.
+        } catch {
+            log.error("session file removal failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Remove `<uuid>.json` files not modified within ``orphanRetention``.
+    /// Files that are not UUID-named JSON are never touched. A listing
+    /// failure is logged and the sweep skipped. Never called from `init`.
+    func sweepOrphans() {
+        let fm = FileManager.default
+        let urls: [URL]
+        do {
+            urls = try fm.contentsOfDirectory(
+                at: autoSaveDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            log.error("orphan sweep skipped: \(error.localizedDescription)")
+            return
+        }
+        let cutoff = clock.currentTime().addingTimeInterval(-retention)
+        for url in urls where url.pathExtension == "json" {
+            guard UUID(uuidString: url.deletingPathExtension().lastPathComponent) != nil,
+                  let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                      .contentModificationDate,
+                  modified < cutoff else { continue }
+            do {
+                try fm.removeItem(at: url)
+            } catch {
+                log.error("orphan session removal failed: \(error.localizedDescription)")
+            }
         }
     }
 

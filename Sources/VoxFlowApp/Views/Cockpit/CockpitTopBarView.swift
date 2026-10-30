@@ -52,7 +52,7 @@ struct CockpitTopBarView: View {
             Button("Discard", action: onDiscard)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Leave review without inserting. A copy stays in VoxFlow's sessions folder.")
+                .help("Leave review without inserting. A copy stays in VoxFlow's sessions folder for 7 days.")
         }
     }
 

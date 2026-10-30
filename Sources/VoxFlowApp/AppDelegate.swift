@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         log.info("applicationWillTerminate — stopping backend")
+        AppCoordinator.shared.restoreTemporaryClipboard()
         AppCoordinator.shared.shutdownBackend()
     }
 
