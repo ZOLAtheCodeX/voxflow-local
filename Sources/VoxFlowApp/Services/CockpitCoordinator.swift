@@ -254,10 +254,14 @@ final class CockpitCoordinator: ObservableObject {
 
     // MARK: - Keyboard-shortcut targets
 
+    /// Undoes the last smart action only while the transcript is still that
+    /// action's output, so ⌘Z after a manual edit, a Discard, an insert or a
+    /// new session never replaces words the action did not write.
     func undoLastAction() async {
-        if let (_, beforeText) = await actionService.popLast() {
-            sessionService.setTranscript(beforeText)
-        }
+        guard let transcript = sessionService.currentSession?.transcript else { return }
+        guard let (_, beforeText) = await actionService.popLast(producing: transcript),
+              sessionService.currentSession?.transcript == transcript else { return }
+        sessionService.setTranscript(beforeText)
     }
 
     func insertIntoTarget() async {
@@ -324,10 +328,13 @@ final class CockpitCoordinator: ObservableObject {
     static let discardedNotice = "Transcript discarded. A copy stays in VoxFlow's sessions folder."
 
     /// The visible way out of review (the Discard button, and the spoken
-    /// "cancel"). The session file stays on disk.
+    /// "cancel"). The session file stays on disk. Refused while ⌘↩ is still
+    /// inserting: a new recording could start in the gap, and the insert's
+    /// own reset would then end it with the microphone still on.
     @discardableResult
     func discardTranscript() -> Bool {
-        sessionService.discard()
+        guard !insertInFlight else { return false }
+        return sessionService.discard()
     }
 
     func copyToClipboard() {

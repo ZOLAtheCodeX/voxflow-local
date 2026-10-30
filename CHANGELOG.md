@@ -14,14 +14,21 @@ All notable changes to VoxFlow Local are documented here. The format follows
   keeps the transcript for review, so the next Cmd+R often landed in review.
 - Review has a visible Discard button next to the review pill (the spoken
   "cancel" does the same). It returns the cockpit to ready without
-  inserting; the session file stays in VoxFlow's sessions folder, and a
-  notice says so. Discard is refused while recording, so it can never leave
-  the microphone running.
+  inserting; the session file, including any edit still in the editor,
+  stays in VoxFlow's sessions folder, and a notice says so. Discard is
+  refused while recording or while Cmd+Return is still inserting, so it can
+  never leave the microphone running.
+- Cmd+Z undoes a smart action only while the transcript is still that
+  action's output. The undo stack used to outlive its session, so Cmd+Z
+  after an insert or a discard could replace the next session's words with
+  the old session's text, and Cmd+Z after a manual edit discarded the edit.
 - The first smart action after Ollama unloads the model no longer times
-  out. Smart actions now get at least 90 seconds per request (the cold load
-  measured about 35 s against the provider's 30 s), and the stuck-runner
-  breaker measures against the same budget, so a slow cold load no longer
-  counts as a wedge. Dictation polish keeps the provider's timeout.
+  out. Smart actions on local providers now get at least 75 seconds per
+  request (the cold load measured about 35 s against the provider's 30 s),
+  and the stuck-runner breaker measures against the same budget, so a slow
+  cold load no longer counts as a wedge. Cloud providers and dictation
+  polish keep the provider's timeout, so a stuck local model plus a cloud
+  fallback still finishes inside the app's 120-second request.
 
 ### Security
 - transformers bumped 5.5.0 → 5.17.0, closing CVE-2026-9856 (path traversal

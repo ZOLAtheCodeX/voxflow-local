@@ -82,11 +82,13 @@ class PolishEngine:
     # Smart actions run in review with no capture live, and the first one
     # after Ollama unloads the model pays the cold load: about 35 s on
     # gemma4:e2b-mlx (measured 2026-10-28), past the 30 s provider timeout,
-    # so the action failed and only a warm retry worked. Their per-request
-    # budget is at least this (the app's own request allows 120 s); the wedge
-    # breaker measures against the same budget. Polish keeps the provider's
-    # timeout because it sits on the dictation hot path.
-    _SMART_ACTION_MIN_TIMEOUT_S = 90.0
+    # so the action failed and only a warm retry worked. On LOCAL providers
+    # their per-request budget is at least this, and the wedge breaker
+    # measures against the same budget. Cloud providers pay no cold load and
+    # keep their own timeout, so a wedged local entry plus a cloud fallback
+    # (75 + 30 s) still fits inside the app's 120 s request. Polish keeps the
+    # provider's timeout because it sits on the dictation hot path.
+    _SMART_ACTION_MIN_TIMEOUT_S = 75.0
 
     def __init__(
         self,
@@ -231,7 +233,9 @@ class PolishEngine:
             else:
                 send_text = text
 
-            timeout = self._request_timeout(spec, backend, smart_action=system_prompt is not None)
+            timeout = self._request_timeout(
+                spec, backend, cold_load_floor=system_prompt is not None and not is_cloud,
+            )
             started = self._clock()
             try:
                 candidate = backend.polish(
@@ -242,7 +246,9 @@ class PolishEngine:
                     timeout=timeout,
                 )
             except TypeError:
-                # Legacy backend without the per-request override params.
+                # Legacy backend without the per-request override params: it
+                # runs on its own timeout, so that is the breaker's budget.
+                timeout = getattr(backend, "timeout", 30.0)
                 try:
                     if system_prompt is not None:
                         candidate = backend.polish(send_text, tone, system_prompt=system_prompt)
@@ -325,12 +331,12 @@ class PolishEngine:
         spec: ProviderSpec | None,
         backend: TextLLMBackend,
         *,
-        smart_action: bool,
+        cold_load_floor: bool,
     ) -> float:
         """Per-request timeout: the provider's own, raised to the cold-load
-        floor for smart actions."""
+        floor for smart actions on local providers."""
         configured = (spec.timeout if spec and spec.timeout else None) or getattr(backend, "timeout", 30.0)
-        return max(configured, self._SMART_ACTION_MIN_TIMEOUT_S) if smart_action else configured
+        return max(configured, self._SMART_ACTION_MIN_TIMEOUT_S) if cold_load_floor else configured
 
     def _record_success(self, depth: int) -> None:
         with self._lock:

@@ -136,6 +136,9 @@ struct CockpitWindowView: View {
     private var mainPane: some View {
         VStack(spacing: 0) {
             CockpitTopBarView(state: state, sessionService: sessionService, onDiscard: {
+                    // Clicking a button leaves the editor focused, so the
+                    // draft would otherwise miss the copy Discard keeps.
+                    commitTranscriptDraft()
                     if coordinator.discardTranscript() { lastError = CockpitCoordinator.discardedNotice }
                 })
                 .padding(.horizontal, VF.spacingLarge)
@@ -221,20 +224,7 @@ struct CockpitWindowView: View {
             Task { await coordinator.insertIntoTarget() }
             return nil
         case .commitThenInsert:
-            // Commit the draft DETERMINISTICALLY before inserting: the
-            // focused transcript editor's NSTextView.string IS the draft, so
-            // write it through setTranscript synchronously rather than
-            // resigning focus and racing the editor's async focus-loss
-            // handler (a fixed sleep could still insert stale text under
-            // main-actor load). A focused TextField (e.g. Notion search)
-            // presents as the window's FIELD editor — skip it: no transcript
-            // draft is pending there. The later focus-loss commit becomes an
-            // idempotent no-op-or-duplicate write of the same text.
-            if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
-               textView.isEditable, !textView.isFieldEditor {
-                sessionService.setTranscript(textView.string)
-            }
-            NSApp.keyWindow?.makeFirstResponder(nil)
+            commitTranscriptDraft()
             Task { await coordinator.insertIntoTarget() }
             return nil
         case .copy:
@@ -254,6 +244,23 @@ struct CockpitWindowView: View {
         case .passThrough:
             return event
         }
+    }
+
+    /// Commit the transcript draft DETERMINISTICALLY (before ⌘↩ inserts or
+    /// Discard keeps its copy): the focused transcript editor's
+    /// NSTextView.string IS the draft, so write it through setTranscript
+    /// synchronously rather than resigning focus and racing the editor's
+    /// async focus-loss handler (a fixed sleep could still lose the edit
+    /// under main-actor load). A focused TextField (e.g. Notion search)
+    /// presents as the window's FIELD editor — skip it: no transcript draft
+    /// is pending there. The later focus-loss commit becomes an idempotent
+    /// no-op-or-duplicate write of the same text.
+    private func commitTranscriptDraft() {
+        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+           textView.isEditable, !textView.isFieldEditor {
+            sessionService.setTranscript(textView.string)
+        }
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
     /// Whether an editable text view (the transcript editor in `.reviewing`,

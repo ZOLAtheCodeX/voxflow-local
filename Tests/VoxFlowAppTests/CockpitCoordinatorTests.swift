@@ -272,6 +272,80 @@ final class CockpitCoordinatorTests: XCTestCase {
         XCTAssertNil(sessionService.currentSession)
     }
 
+    func test_undo_reverts_the_last_action() async throws {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        sessionService.start()
+        sessionService.appendTestChunk("session A text")
+        sessionService.stop()
+        _ = try await coord.applyAction(.memo, to: "session A text")
+
+        await coord.undoLastAction()
+
+        XCTAssertEqual(sessionService.currentSession?.transcript, "session A text")
+    }
+
+    /// v0.1.5 review: the undo stack outlived its session, so ⌘Z in the next
+    /// session replaced its words with the discarded session's text.
+    func test_undo_after_discard_never_touches_the_next_session() async throws {
+        let (_, coord, sessionService, _) = makeCoordinator()
+        sessionService.start()
+        sessionService.appendTestChunk("session A text")
+        sessionService.stop()
+        _ = try await coord.applyAction(.memo, to: "session A text")
+        XCTAssertTrue(coord.discardTranscript())
+        sessionService.start()
+        sessionService.appendTestChunk("session B words")
+        sessionService.stop()
+
+        await coord.undoLastAction()
+
+        XCTAssertEqual(sessionService.currentSession?.transcript, "session B words")
+    }
+
+    /// Holds the insert until released, so a test can act while ⌘↩ is still
+    /// inserting.
+    @MainActor
+    private final class GatedInsertService: TextInserting {
+        private var waiter: CheckedContinuation<Void, Never>?
+        private(set) var entered = false
+        func insert(text: String, targetApp: NSRunningApplication?) async -> InsertResult {
+            entered = true
+            await withCheckedContinuation { waiter = $0 }
+            return InsertResult(method: .simulatedPaste, success: true, fallbackUsed: false, errorCode: nil)
+        }
+        func release() { waiter?.resume(); waiter = nil }
+    }
+
+    /// v0.1.5 review: Discard while ⌘↩ was inserting let a new recording
+    /// start, and the insert's own reset then ended it with the mic still on.
+    func test_discard_is_refused_while_an_insert_is_in_flight() async {
+        let state = AppState()
+        let sessionService = LongFormSessionService(autoSaveDirectory: URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("voxflow-cockpit-test-\(UUID().uuidString)"))
+        let inserter = GatedInsertService()
+        let insertion = TextInsertionCoordinator(
+            state: state, insertService: inserter,
+            audit: InsertionAuditLog(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("cockpit-insert-audit-\(UUID().uuidString).jsonl")))
+        let coord = CockpitCoordinator(
+            state: state, sessionService: sessionService,
+            actionService: SmartActionService(backend: StubSmartActionBackend()),
+            textInsertionCoordinator: insertion, snippetStore: nil)
+        sessionService.start()
+        sessionService.appendTestChunk("words to insert")
+        sessionService.stop()
+
+        let insert = Task { await coord.insertIntoTarget() }
+        for _ in 0..<1000 where !inserter.entered { await Task.yield() }
+        XCTAssertTrue(inserter.entered, "the insert never started")
+
+        XCTAssertFalse(coord.discardTranscript())
+        XCTAssertEqual(sessionService.state, .reviewing)
+
+        inserter.release()
+        await insert.value
+    }
+
     func test_handleVoiceUtterance_reserved_word_does_not_expand_snippet() async throws {
         // A snippet keyword that collides with a reserved meta-word ("cancel")
         // must never expand — reserved/action-word precedence wins. "cancel"
