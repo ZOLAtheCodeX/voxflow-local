@@ -80,15 +80,17 @@ class PolishEngine:
     _SMART_ACTION_PRESSURE_SKIP_LEVEL = 4
 
     # Smart actions run in review with no capture live, and the first one
-    # after Ollama unloads the model pays the cold load: about 35 s on
-    # gemma4:e2b-mlx (measured 2026-10-28), past the 30 s provider timeout,
-    # so the action failed and only a warm retry worked. On LOCAL providers
+    # after Ollama unloads the model pays the cold load on gemma4:e2b-mlx:
+    # about 35 s (2026-10-28, past the 30 s provider timeout, so the action
+    # failed) and 60 s under heavy swap (2026-10-30). On LOCAL providers
     # their per-request budget is at least this, and the wedge breaker
-    # measures against the same budget. Cloud providers pay no cold load and
-    # keep their own timeout, so a wedged local entry plus a cloud fallback
-    # (75 + 30 s) still fits inside the app's 120 s request. Polish keeps the
-    # provider's timeout because it sits on the dictation hot path.
-    _SMART_ACTION_MIN_TIMEOUT_S = 75.0
+    # measures against the same budget (a wedge is 80% of it, 72 s). Cloud
+    # providers pay no cold load and keep their own timeout, so a wedged
+    # local entry plus a cloud fallback (90 + 30 s) fits inside the app's
+    # 180 s smart-action request (BackendAPIClient.smartActionTimeout).
+    # Polish keeps the provider's timeout because it sits on the dictation
+    # hot path.
+    _SMART_ACTION_MIN_TIMEOUT_S = 90.0
 
     def __init__(
         self,

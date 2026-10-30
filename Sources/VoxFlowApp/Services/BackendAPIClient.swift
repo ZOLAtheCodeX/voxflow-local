@@ -376,6 +376,22 @@ enum BackendAPIClient {
         return try await performGetRequest(path: "v1/ollama/models")
     }
 
+    /// A smart action can wait on a cold local model (60 s inside Ollama for
+    /// gemma4:e2b-mlx under heavy swap, measured 2026-10-30) and then a cloud
+    /// fallback; the backend gives local smart actions at least 90 s
+    /// (`_SMART_ACTION_MIN_TIMEOUT_S`). The shared session's 120 s resource
+    /// limit would cut that off, so smart actions get their own.
+    static let smartActionTimeout: TimeInterval = 180
+
+    /// The shared session's configuration (protocol classes included, so test
+    /// stubs carry over) with both timeouts raised for smart actions.
+    static func smartActionConfiguration(from base: URLSessionConfiguration) -> URLSessionConfiguration {
+        let config = base.copy() as! URLSessionConfiguration
+        config.timeoutIntervalForRequest = smartActionTimeout
+        config.timeoutIntervalForResource = smartActionTimeout
+        return config
+    }
+
     /// Cockpit Layer 0 — apply a smart action to a captured transcript.
     static func performSmartAction(
         _ action: SmartActionId,
@@ -410,7 +426,9 @@ enum BackendAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(Request(actionId: action.rawValue, transcript: transcript))
 
-        let (data, response) = try await session.data(for: request)
+        let smartActionSession = URLSession(configuration: smartActionConfiguration(from: session.configuration))
+        defer { smartActionSession.finishTasksAndInvalidate() }
+        let (data, response) = try await smartActionSession.data(for: request)
         try checkHTTPStatus(response, data: data)
         let parsed = try JSONDecoder().decode(Response.self, from: data)
         let actionId = SmartActionId(rawValue: parsed.actionId) ?? action

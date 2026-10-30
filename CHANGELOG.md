@@ -6,6 +6,14 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Smart actions tolerate slower cold loads. A live check of v0.1.5 measured
+  a cold gemma4:e2b-mlx smart action at 60 s inside Ollama under heavy swap,
+  leaving only 15 s before the 75-second floor. Local smart actions now get
+  at least 90 seconds (the stuck-runner breaker trips at 72 s), and the app
+  gives a smart-action request 180 seconds instead of the shared 120, so a
+  stuck local model plus a cloud fallback still fits.
+
 ## [0.1.5] — 2026-10-30
 
 A follow-up release that closes the two known issues of v0.1.4: Cmd+R in
