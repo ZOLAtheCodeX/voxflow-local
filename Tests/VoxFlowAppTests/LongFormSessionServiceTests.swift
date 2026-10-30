@@ -269,6 +269,39 @@ final class LongFormSessionServiceTests: XCTestCase {
         XCTAssertEqual(LongFormSessionService.orphanRetention, 7 * 24 * 60 * 60)
     }
 
+    // MARK: - Discard (v0.1.5: a visible way out of review)
+
+    /// Before v0.1.5 the only ways out of review were ⌘↩ (insert) and the
+    /// spoken "cancel". Discard returns to idle and keeps the session file on
+    /// disk, so the transcript stays recoverable.
+    func test_discard_in_review_returns_to_idle_and_keeps_the_file() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.appendTestChunk("hello world")
+        service.stop()
+        service.setTranscript("hello edited world")
+
+        XCTAssertTrue(service.discard())
+
+        XCTAssertEqual(service.state, .idle)
+        XCTAssertNil(service.currentSession)
+        XCTAssertEqual(service.recoverLatestSession()?.transcript, "hello edited world",
+                       "discard must leave the latest transcript on disk")
+    }
+
+    /// Discarding mid-recording would leave the microphone running behind an
+    /// idle session. Recording ends with ⌘. first.
+    func test_discard_is_refused_while_recording() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.appendTestChunk("still talking")
+
+        XCTAssertFalse(service.discard())
+
+        if case .recording = service.state {} else { XCTFail("expected recording state") }
+        XCTAssertEqual(service.currentSession?.transcript, "still talking")
+    }
+
     // MARK: - Helpers
 
     private final class FixedClock: SessionClock {

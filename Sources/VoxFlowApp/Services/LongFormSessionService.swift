@@ -166,6 +166,18 @@ final class LongFormSessionService: ObservableObject {
         if let endedID { removeSessionFile(id: endedID) }
     }
 
+    /// Leaves review without inserting. The session file stays on disk
+    /// (sessions are never deleted) and is saved once more first, in case
+    /// the last save failed. Refused outside review: discarding a live
+    /// recording would leave the microphone running behind an idle session.
+    @discardableResult
+    func discard() -> Bool {
+        guard case .reviewing = state else { return false }
+        save()
+        reset()
+        return true
+    }
+
     // MARK: - Persistence
 
     private func save() {
