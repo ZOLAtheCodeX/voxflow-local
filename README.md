@@ -183,6 +183,29 @@ payloads are PII-redacted before they leave the machine. API keys are stored
 in the Keychain and injected into the backend as environment variables at
 launch; they never touch a config file.
 
+### Known gaps with cloud providers
+
+These apply only if you add an `openai` or `anthropic` provider, or point an
+`openai_compat` provider at a hosted URL. With the default local setup none
+of them applies.
+
+- **Redaction is one-way.** Text a cloud provider returns keeps the
+  placeholders it was sent (`[EMAIL]`, `[PHONE]`, `[URL]` and so on), so
+  read polished or smart-action output before you insert it.
+- **No cloud marker and no consent step.** The model pill names the provider
+  that serves polish, but it doesn't flag a cloud provider as cloud, and a
+  cloud provider in a chain runs without the per-request preview-and-consent
+  step that the private-API mode has.
+- **The backend's audit log doesn't say who served a request.** Smart actions
+  write no backend audit entry, and cleanup served by a cloud provider is
+  logged as local. The app's insertion receipts are not affected.
+- **Provider edits need a relaunch.** The backend reads `providers.json` at
+  launch, and Settings restarts it only when an API key changed. After adding
+  a local provider or reordering a chain, quit and relaunch VoxFlow.
+- **Hosted `openai_compat` endpoints are half-supported.** Settings offers no
+  API-key field for them and labels them local, while the backend treats a
+  non-local URL as cloud and redacts what it sends.
+
 ## The pieces
 
 ```
@@ -205,6 +228,13 @@ swift test                                   # Swift suite
 ```
 
 Model-dependent tests skip automatically when models or Ollama are absent.
+
+## Project status
+
+Feature-complete. From v0.1.6 the project is in maintenance: fixes for bugs
+found in real use, security updates, and compatibility with new macOS and
+Ollama releases. Bug reports are welcome. New features are unlikely to land
+here, so fork freely.
 
 ## Contributing, security, license
 

@@ -4,6 +4,30 @@
 
 VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Python FastAPI backend. On-device ML: WhisperKit / Whisper-Small for STT, **Gemma 4 via local Ollama** for text polish (replaces the pre-Phase-3 FLAN-T5-Small path; regex pipeline is the fallback when Ollama is unreachable).
 
+## Freeze and finish line (read before proposing any work)
+
+Decided by the maintainer on 2026-10-31. The app is feature-complete and the project is in a freeze that ends in maintenance, not in a backlog. It stays in force until the maintainer lifts it explicitly and records that here.
+
+**Done means all three:**
+1. **v0.1.6 is tagged.** It ships what master already holds (CHANGELOG `[Unreleased]`: PR #24 and PR #25) once the maintainer has run the six manual clipboard checks in the PR #25 description and one cockpit session in their own voice. No new code goes into it. A failed check gets a fix for that check only, then a re-check.
+2. **A 14-day watch from the tag passes**, read from `~/Library/Logs/VoxFlow/insertions.jsonl`:
+   - at least 150 quick-dictation inserts (fewer extends the watch; it does not pass it);
+   - zero lost dictations: no reject where the user actually spoke, judged by listening to the receipt's retained `audio_file`. Silence and noise rejects don't count;
+   - no crash and no backend restart loop.
+   The raw reject rate is a reason to look, not the test.
+3. **Then the project is in maintenance.**
+
+**What justifies code, during the watch and in maintenance:**
+- a bug hit in real daily use, shown by a receipt or retained audio;
+- any path that loses dictated text, even one with no receipt;
+- a security alert that is reachable in this app, or a dependency bump it requires;
+- breakage from a macOS or Ollama update;
+- an issue reported by someone running a fork.
+
+**What does not:** review or audit findings with no field symptom, polish, latency ideas, new features, model or engine experiments, and the cloud-provider gaps listed in the README under "Known gaps with cloud providers". These go to the maintainer's private Someday list (not this repo) and never start work on their own.
+
+**For Claude sessions:** don't end a turn with a list of follow-up work, and don't propose new tasks or sessions for work that misses the bar above. Record such a finding in one line as a Someday candidate and stop. Reviews, audits and acceptance runs start only when the maintainer asks for one.
+
 ## Architecture
 
 ```
