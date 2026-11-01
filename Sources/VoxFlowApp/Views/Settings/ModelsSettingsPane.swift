@@ -188,7 +188,7 @@ struct ModelsSettingsPane: View {
                         }
                     }
                 }
-                Text("If a provider is unavailable, VoxFlow falls back to Ollama, then to local rules, so dictation keeps working offline. Local rules only skips the AI model entirely and never loads one.")
+                Text("If a cleanup provider is unavailable, VoxFlow falls back to Ollama, then to local rules, so cleanup keeps working offline. Local rules only never loads a model.")
                     .font(VF.microFont)
                     .foregroundStyle(.secondary)
 

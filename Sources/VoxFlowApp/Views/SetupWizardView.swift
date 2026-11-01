@@ -131,7 +131,7 @@ struct SetupWizardView: View {
         SetupRow(
             symbol: "cpu",
             title: "Speech engine",
-            purpose: "Transcribes on this Mac.",
+            purpose: SetupChecklist.speechEnginePurpose(state.sttBackend),
             status: SetupChecklist.engineStatus(
                 ready: engineReady, starting: state.backendReadiness.warmupInProgress)
         ) {

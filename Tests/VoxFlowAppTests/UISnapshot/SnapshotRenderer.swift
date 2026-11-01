@@ -3,8 +3,12 @@ import SwiftUI
 
 /// Offscreen render harness for the UI refresh. Hosts a SwiftUI view in a
 /// borderless window that is never ordered front, lets `onAppear` and `.task`
-/// run, and writes a PNG per appearance. Tooling only: nothing here asserts,
-/// and it never touches the screen, the installed app or the pasteboard.
+/// run, and writes a PNG per appearance. Tooling only, used by the opt-in
+/// `UISnapshotExportTests` (skipped unless `VOXFLOW_UI_SNAPSHOTS` is set,
+/// never run in CI): nothing here asserts, and it never touches the screen,
+/// the installed app or the pasteboard. The `onAppear` and `.task` bodies it
+/// runs are the views' own, so a view that queries permissions or probes the
+/// loopback backend does so here too.
 @MainActor
 enum SnapshotRenderer {
     enum Failure: Error, CustomStringConvertible {

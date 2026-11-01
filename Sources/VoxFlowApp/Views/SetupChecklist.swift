@@ -35,6 +35,15 @@ enum SetupChecklist {
         granted ? VFStatus(.ready, "Granted") : VFStatus(.attention, "Needed")
     }
 
+    /// The speech-engine row's purpose (ruling R40): where audio goes for
+    /// the selected speech backend. Exhaustive, so a new backend needs a line.
+    static func speechEnginePurpose(_ backend: STTBackend) -> String {
+        switch backend {
+        case .whisperKit, .whisper: return "Transcribes on this Mac."
+        case .openAI: return "Sends audio to your configured OpenAI endpoint."
+        }
+    }
+
     static func engineStatus(ready: Bool, starting: Bool) -> VFStatus {
         if ready { return VFStatus(.ready, "Ready") }
         if starting { return VFStatus(.starting, "Starting") }

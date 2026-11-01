@@ -147,4 +147,16 @@ final class SetupChecklistTests: XCTestCase {
             SetupChecklist.healthMessage(reachable: false, ready: false, firstIssue: nil),
             "Engine unreachable. Choose Start Engine, then Check Again.")
     }
+
+    // MARK: - Speech engine purpose (ruling R40)
+
+    /// The row says where audio is transcribed: on this Mac for the local
+    /// engines, at the configured endpoint for OpenAI.
+    func test_speech_engine_purpose_follows_the_backend() {
+        XCTAssertEqual(SetupChecklist.speechEnginePurpose(.whisperKit), "Transcribes on this Mac.")
+        XCTAssertEqual(SetupChecklist.speechEnginePurpose(.whisper), "Transcribes on this Mac.")
+        XCTAssertEqual(
+            SetupChecklist.speechEnginePurpose(.openAI), "Sends audio to your configured OpenAI endpoint.")
+        XCTAssertEqual(STTBackend.allCases.count, 3, "a new speech backend needs a purpose line")
+    }
 }

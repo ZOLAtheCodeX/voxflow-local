@@ -26,11 +26,15 @@ struct PaletteHeaderView: View {
                 }
             }
 
+            // Up to three lines (ruling R39): the coordinator appends its
+            // lost-text warnings to the end of this line, so one line
+            // truncated exactly the part that matters.
             Text(lines.statusLine)
                 .font(VF.secondaryFont)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(3)
                 .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
                 .help(lines.statusLine)
 
             if let hint = lines.hint {

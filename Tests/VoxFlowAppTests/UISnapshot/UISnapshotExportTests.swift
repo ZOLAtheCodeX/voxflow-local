@@ -4,8 +4,17 @@ import XCTest
 @testable import VoxFlowApp
 
 /// Renders today's views to PNG for the UI refresh (before and after images).
-/// Tooling, not assertions: every test is skipped unless `VOXFLOW_UI_SNAPSHOTS`
-/// names an absolute output directory.
+///
+/// Opt-in tooling, not a regression test:
+/// - Every test is skipped unless `VOXFLOW_UI_SNAPSHOTS` names an absolute
+///   output directory. CI never sets it, so CI never runs these.
+/// - It exports images and asserts nothing about their pixels.
+/// - It is not isolated from the system. Like other tests in this target it
+///   uses `AppCoordinator.shared`, which builds the real settings, stores and
+///   focus monitoring. Some views also query permissions and probe the
+///   loopback backend when they appear (Setup, Settings → Models and Privacy,
+///   the palette's setup progress), so images can show this Mac's live state.
+///   Fixture stores and fakes cover the rest (`UISnapshotFixtures`).
 ///
 ///     VOXFLOW_UI_SNAPSHOTS=$PWD/docs/superpowers/images/<set> \
 ///         swift test --filter UISnapshotExportTests
