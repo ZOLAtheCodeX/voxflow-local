@@ -28,6 +28,12 @@ Decided by the maintainer on 2026-10-31. The app is feature-complete and the pro
 
 **For Claude sessions:** don't end a turn with a list of follow-up work, and don't propose new tasks or sessions for work that misses the bar above. Record such a finding in one line as a Someday candidate and stop. Reviews, audits and acceptance runs start only when the maintainer asks for one.
 
+**Exception: one UI and UX track (decided by the maintainer on 2026-10-31).** The freeze is lifted for a single, bounded UI pass that runs alongside the watch, and for nothing else:
+- It lives on its own branch and worktree and ends in one design spec under `docs/superpowers/specs/` and one PR. The spec is reviewed by the maintainer before any code, and the PR is reviewed with Codex (`codex`) and with Gemini through Antigravity (`agy`).
+- It changes views, `VFDesignTokens.swift`, copy and layout only. It does not touch capture, STT, insertion, the clipboard, session storage, settings persistence or the backend, so the watch keeps measuring the same pipeline.
+- It is not merged into `master` or installed until the watch has passed. The installed app stays v0.1.6 for the whole watch, and maintenance fixes during the watch ship from `master` without it.
+- Whatever it turns up beyond that one PR goes to the Someday list.
+
 ## Architecture
 
 ```
