@@ -169,7 +169,7 @@ struct ModelsSettingsPane: View {
                                 } label: { Image(systemName: "trash") }
                             }
                         }
-                        Text(spec.kind.displayName)
+                        Text(Self.kindLabel(spec.kind))
                             .font(VF.microFont)
                             .foregroundStyle(.secondary)
                         if let result = providerTestResults[spec.id] {
@@ -306,6 +306,13 @@ struct ModelsSettingsPane: View {
             .font(VF.captionFont)
         }
         .font(VF.secondaryFont)
+    }
+
+    /// The provider row's kind label. Ollama makes no locality claim here: an
+    /// Ollama `:cloud` model is cloud, so `ProviderKind.displayName`
+    /// ("Ollama (local)") would be wrong for it. Other kinds use their display name.
+    static func kindLabel(_ kind: ProviderKind) -> String {
+        kind == .ollama ? "Ollama" : kind.displayName
     }
 
     @MainActor

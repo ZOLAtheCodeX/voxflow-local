@@ -18,6 +18,13 @@ final class SettingsRegroupTests: XCTestCase {
                        ["gearshape", "app.badge", "waveform", "cpu", "lock.shield", "wrench.and.screwdriver"])
     }
 
+    func test_provider_row_kind_label_makes_no_locality_claim_for_ollama() {
+        XCTAssertEqual(ModelsSettingsPane.kindLabel(.ollama), "Ollama")
+        for kind in [ProviderKind.openaiCompat, .openai, .anthropic] {
+            XCTAssertEqual(ModelsSettingsPane.kindLabel(kind), kind.displayName)
+        }
+    }
+
     func test_settings_views_do_not_carry_retired_names_or_em_dashes() throws {
         let views = try repoRoot().appendingPathComponent("Sources/VoxFlowApp/Views", isDirectory: true)
         let files = (try FileManager.default.contentsOfDirectory(at: views.appendingPathComponent("Settings"), includingPropertiesForKeys: nil))
