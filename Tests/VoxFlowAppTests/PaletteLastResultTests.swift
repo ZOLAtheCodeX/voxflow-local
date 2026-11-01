@@ -143,11 +143,4 @@ final class PaletteLastResultTests: XCTestCase {
         let row = CaptureReceiptRowModel(receipt: receipt(voiceAction))
         XCTAssertEqual(PaletteLastResult.headline(for: row), VFStatus(.info, "Voice action: Shortcut sent"))
     }
-
-    func test_reject_reason_reads_as_words() {
-        XCTAssertEqual(PaletteLastResult.rejectReasonText("silence"), "No speech detected")
-        XCTAssertEqual(PaletteLastResult.rejectReasonText("hallucination_filter"), "Filtered out as likely not speech")
-        XCTAssertEqual(PaletteLastResult.rejectReasonText("some_new_code"), "Some new code")
-        XCTAssertEqual(PaletteLastResult.rejectReasonText(nil), "No reason recorded")
-    }
 }

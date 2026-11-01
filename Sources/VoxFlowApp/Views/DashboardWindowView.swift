@@ -1,118 +1,119 @@
 import SwiftUI
 import AppKit
 
+/// The Dashboard window: health first, recent captures second (the view used
+/// to check a lost dictation), then session metrics and app compatibility.
+/// Experimental-mode cards appear only when those modes are in use.
 struct DashboardWindowView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
     @ObservedObject var receiptStore: InsertionReceiptStore
 
+    private var cardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous)
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: VF.spacingLarge) {
                 header
-                metricsGrid
-                backendSection
-                modeUsageSection
+                healthStrip
                 recentCapturesSection
-                benchmarkRecommendationSection
+                metricsSection
                 compatibilitySection
+                if DashboardRules.showsExperimentalSections(
+                    translationEnabled: state.translationModeEnabled,
+                    meetingEnabled: state.meetingModeEnabled,
+                    promptEnabled: state.promptModeEnabled,
+                    hasBenchmarkHistory: !state.benchmarkHistoryByProfile.isEmpty
+                ) {
+                    modeUsageSection
+                    benchmarkRecommendationSection
+                }
             }
-            .padding(18)
+            .padding(VF.spacingLarge)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(VF.surfaceWindow)
     }
+
+    // MARK: - Header
 
     private var header: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("VoxFlow Dashboard")
+            VStack(alignment: .leading, spacing: VF.spacingXSmall) {
+                Text("Dashboard")
                     .font(VF.displayFont)
-                Text("Session telemetry and app compatibility")
+                Text("This session, since \(Text(state.launchedAt, style: .time))")
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 8) {
-                Text("Uptime \(sessionDurationText)")
-                    .font(VF.labelFont)
-                    .foregroundStyle(.secondary)
-
-                Button("Reset Session Metrics") {
-                    coordinator.resetDashboardMetrics()
-                }
-                .buttonStyle(.bordered)
+            Button("Reset Metrics") {
+                coordinator.resetDashboardMetrics()
             }
+            .buttonStyle(.bordered)
         }
     }
 
-    private var metricsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            MetricCardView(title: "Captures", value: "\(state.captureCount)", detail: "Local \(state.localCaptureCount) · API \(state.privateAPICaptureCount)", minHeight: 74)
-            MetricCardView(title: "Transcription", value: "\(state.averageTranscriptionLatencyMs)ms avg", detail: "Last \(state.lastTranscriptionLatencyMs ?? 0)ms", minHeight: 74)
-            MetricCardView(title: "Insert Success", value: "\(Int((state.insertSuccessRate * 100).rounded()))%", detail: "Fallback \(state.fallbackInsertCount) · Failed \(state.failedInsertCount)", minHeight: 74)
-            MetricCardView(title: "Approvals", value: "Translate \(state.approvedTranslationCount) · Meeting \(state.approvedMeetingCount)", detail: "Raw \(state.privacyApproveRawCount) · Redacted \(state.privacyApproveRedactedCount)", minHeight: 74)
-        }
-    }
+    // MARK: - Health
 
-    private var backendSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Backend Runtime")
-                .font(VF.headingFont)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(backendStatusColor)
-                        .frame(width: 8, height: 8)
-                    Text(state.backendReadiness.statusSummary)
-                        .font(VF.bodyEmphasizedFont)
-                        .foregroundStyle(backendStatusColor)
-                }
-
-                Text("Process \(state.backendReadiness.processRunning ? "running" : "stopped") · STT \(state.sttBackend.displayName)")
+    private var healthStrip: some View {
+        let readiness = state.backendReadiness
+        let provider = readiness.activePolishProvider
+        let cleanupLabel = VFCopy.cleanupProviderLabel(provider: provider, model: readiness.activePolishModel)
+        let cleanup = VFStatus(VFCopy.isCleanupDegraded(provider: provider) ? .attention : .ready, cleanupLabel)
+        return VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            HStack(spacing: VF.spacingLarge) {
+                VFStatusBadge(
+                    status: VFStatus.engine(readiness, backendShouldRun: state.backendShouldRun))
+                VFStatusBadge(
+                    status: VFStatus.speechModel(readiness),
+                    detail: readiness.activeSTTModel.isEmpty ? nil : readiness.activeSTTModel)
+                VFStatusBadge(status: cleanup)
+                Spacer(minLength: 0)
+            }
+            if let issue = readiness.readinessIssue, !issue.isEmpty {
+                Text("Engine issue: \(issue)")
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
-
-                if !state.backendReadiness.activeSTTModel.isEmpty {
-                    Text("Active backend STT model: \(state.backendReadiness.activeSTTModel)")
-                        .font(VF.secondaryFont)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let issue = state.backendReadiness.readinessIssue, !issue.isEmpty {
-                    Text("Issue: \(issue)")
-                        .font(VF.secondaryFont)
-                        .foregroundStyle(.secondary)
-                }
+                    .textSelection(.enabled)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(VF.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
         }
+        .padding(VF.spacingMedium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .vfSurface(.card, in: cardShape)
     }
+
+    // MARK: - Recent captures
 
     /// Pipeline provenance history: the newest receipts from insertions.jsonl,
-    /// rejects included. Read-only — the file is written by InsertionAuditLog.
+    /// rejects included. Read-only; the file is written by InsertionAuditLog.
     private var recentCapturesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Recent Captures")
-                .font(VF.headingFont)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            VFSectionHeader(title: "Recent captures")
 
             if receiptStore.receipts.isEmpty {
-                Text("No captures recorded yet")
+                Text("No captures yet. Every dictation appears here, including ones that were not inserted.")
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
+                    .padding(VF.spacingMedium)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .vfSurface(.card, in: cardShape)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(receiptStore.receipts.enumerated()), id: \.offset) { _, receipt in
+                VStack(alignment: .leading, spacing: 0) {
+                    let receipts = Array(receiptStore.receipts.enumerated())
+                    ForEach(receipts, id: \.offset) { index, receipt in
+                        if index > 0 {
+                            Divider()
+                        }
                         recentCaptureRow(receipt)
                     }
                 }
+                .padding(.horizontal, VF.spacingMedium)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .vfSurface(.card, in: cardShape)
             }
         }
         .onAppear { receiptStore.refresh() }
@@ -122,43 +123,49 @@ struct DashboardWindowView: View {
 
     private func recentCaptureRow(_ receipt: CaptureReceipt) -> some View {
         let row = CaptureReceiptRowModel(receipt: receipt)
-        return HStack(spacing: VF.spacingSmall) {
-            Image(systemName: row.isReject ? "xmark.circle" : "checkmark.circle")
+        let outcome = PaletteLastResult.headline(for: row)
+        let audioURL = row.audioFileURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        let second = DashboardRules.secondLine(for: row, audioAvailable: audioURL != nil)
+        return HStack(alignment: .top, spacing: VF.spacingSmall) {
+            Image(systemName: outcome.symbol)
                 .font(VF.captionFont)
-                .foregroundStyle(row.isReject ? VF.colorWarning : VF.colorSuccess)
-            Text(row.relativeTime)
-                .font(VF.monoCaptionFont)
-                .foregroundStyle(.secondary)
-                .frame(width: 56, alignment: .leading)
-            ForEach(row.chips, id: \.self) { chip in
-                Text(chip)
-                    .font(VF.microFont)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(VF.cardBackground, in: Capsule())
+                .foregroundStyle(outcome.color)
+                .frame(width: 16)
+                .accessibilityLabel(outcome.label)
+            VStack(alignment: .leading, spacing: VF.spacingXSmall) {
+                HStack(spacing: VF.spacingSmall) {
+                    Text(row.relativeTime)
+                        .font(VF.monoCaptionFont)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 56, alignment: .leading)
+                    ForEach(DashboardRules.chips(for: row), id: \.self) { chip in
+                        VFChip(text: chip)
+                    }
+                    if let target = row.targetLabel, !target.isEmpty {
+                        Text(target)
+                            .font(VF.captionFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    if !row.detail.isEmpty {
+                        Text(row.detail)
+                            .font(VF.monoCaptionFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                if !second.isEmpty {
+                    Text(second)
+                        .font(VF.secondaryFont)
+                        .foregroundStyle(row.isReject ? VF.colorWarning : Color.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(second)
+                }
             }
-            if let target = row.targetLabel {
-                Text(target)
-                    .font(VF.captionFont)
-                    .foregroundStyle(.secondary)
-            }
-            if !row.detail.isEmpty {
-                Text(row.detail)
-                    .font(VF.captionFont)
-                    .foregroundStyle(.secondary)
-            }
-            if let reason = row.rejectReason {
-                Text(reason)
-                    .font(VF.captionFont)
-                    .foregroundStyle(VF.colorWarning)
-            }
-            Text(row.snippet)
-                .font(VF.captionFont)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
-            if let url = row.audioFileURL, FileManager.default.fileExists(atPath: url.path) {
+            if let url = audioURL {
                 // Rejects that retained their audio (RejectedAudioStore ring)
                 // get a one-click path to the WAV for forensic triage.
                 Button {
@@ -168,146 +175,199 @@ struct DashboardWindowView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Reveal retained audio in Finder")
+                .accessibilityLabel("Reveal retained audio in Finder")
             }
         }
+        .padding(.vertical, VF.spacingSmall)
+        .accessibilityElement(children: .contain)
     }
 
-    private var compatibilitySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("App Compatibility Matrix")
-                .font(VF.headingFont)
-                .foregroundStyle(.secondary)
+    // MARK: - Metrics
 
-            if state.appInsertStatsSummary.isEmpty {
-                Text("No insert attempts recorded yet. Dictate and insert text to build compatibility data.")
-                    .font(VF.secondaryFont)
-                    .foregroundStyle(.secondary)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(VF.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
-            } else {
-                VStack(spacing: 8) {
-                    headerRow
-                    ForEach(state.appInsertStatsSummary) { stats in
-                        appRow(stats)
-                    }
+    private var metricsSection: some View {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            VFSectionHeader(title: "This session")
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 200), spacing: VF.spacingMedium)],
+                spacing: VF.spacingMedium
+            ) {
+                MetricCardView(
+                    title: "Captures", value: "\(state.captureCount)",
+                    detail: "Local \(state.localCaptureCount) \u{00B7} Private API \(state.privateAPICaptureCount)",
+                    minHeight: 74)
+                MetricCardView(
+                    title: "Latency", value: "\(state.averageTranscriptionLatencyMs) ms avg",
+                    detail: state.lastTranscriptionLatencyMs.map { "Last \($0) ms" } ?? "No capture yet",
+                    minHeight: 74)
+                MetricCardView(
+                    title: "Insert success", value: "\(Int((state.insertSuccessRate * 100).rounded()))%",
+                    detail: "Fallback \(state.fallbackInsertCount) \u{00B7} Failed \(state.failedInsertCount)",
+                    minHeight: 74)
+                if DashboardRules.showsApprovals(
+                    translationEnabled: state.translationModeEnabled, meetingEnabled: state.meetingModeEnabled
+                ) {
+                    MetricCardView(
+                        title: "Approvals",
+                        value: "Translate \(state.approvedTranslationCount) \u{00B7} Meeting \(state.approvedMeetingCount)",
+                        detail: "Raw \(state.privacyApproveRawCount) \u{00B7} Redacted \(state.privacyApproveRedactedCount)",
+                        minHeight: 74)
                 }
             }
         }
     }
 
-    private var modeUsageSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Mode Usage")
-                .font(VF.headingFont)
-                .foregroundStyle(.secondary)
+    // MARK: - App compatibility
 
-            let used = state.workflowUsageSummary.filter { $0.captures > 0 }
-            if used.isEmpty {
-                Text("No mode usage captured yet. Dictate in Dictation, Translate, or Meeting mode to populate this section.")
+    private var compatibilitySection: some View {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            VFSectionHeader(title: "App compatibility")
+
+            if state.appInsertStatsSummary.isEmpty {
+                Text("No inserts recorded yet. Dictate into an app to see how well it works there.")
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
-                    .padding(12)
+                    .padding(VF.spacingMedium)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(VF.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
+                    .vfSurface(.card, in: cardShape)
             } else {
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("Mode")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("Captures")
-                            .frame(width: 90, alignment: .trailing)
+                Grid(alignment: .trailing, horizontalSpacing: VF.spacingMedium, verticalSpacing: VF.spacingSmall) {
+                    GridRow {
+                        Text("App")
+                            .gridColumnAlignment(.leading)
+                        Text("Success")
+                        Text("Fallback")
+                        Text("Failed")
+                        Text("Status")
                     }
                     .font(VF.captionEmphasizedFont)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
+
+                    Divider()
+                        .gridCellUnsizedAxes(.horizontal)
+
+                    ForEach(state.appInsertStatsSummary) { stats in
+                        let status = DashboardRules.compatibility(for: stats)
+                        GridRow {
+                            Text(stats.appName)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("\(stats.successCount)")
+                            Text("\(stats.fallbackCount)")
+                            Text("\(stats.failedCount)")
+                            Text(status.label)
+                                .font(VF.captionEmphasizedFont)
+                                .foregroundStyle(status.color)
+                        }
+                        .font(VF.secondaryFont)
+                    }
+                }
+                .padding(VF.spacingMedium)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .vfSurface(.card, in: cardShape)
+            }
+        }
+    }
+
+    // MARK: - Experimental modes
+
+    private var modeUsageSection: some View {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            VFSectionHeader(title: "Mode usage")
+
+            let used = state.workflowUsageSummary.filter { $0.captures > 0 }
+            if used.isEmpty {
+                Text("No mode usage yet. Dictate in Translate, Meeting or Prompt mode to fill this in.")
+                    .font(VF.secondaryFont)
+                    .foregroundStyle(.secondary)
+                    .padding(VF.spacingMedium)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .vfSurface(.card, in: cardShape)
+            } else {
+                Grid(alignment: .trailing, horizontalSpacing: VF.spacingMedium, verticalSpacing: VF.spacingSmall) {
+                    GridRow {
+                        Text("Mode")
+                            .gridColumnAlignment(.leading)
+                        Text("Captures")
+                    }
+                    .font(VF.captionEmphasizedFont)
+                    .foregroundStyle(.secondary)
+
+                    Divider()
+                        .gridCellUnsizedAxes(.horizontal)
 
                     ForEach(used) { metric in
-                        HStack {
+                        GridRow {
                             Text(metric.mode.displayName)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text("\(metric.captures)")
-                                .frame(width: 90, alignment: .trailing)
-                                .font(VF.labelFont)
                         }
                         .font(VF.secondaryFont)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 6)
-                        .background(VF.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
+                .padding(VF.spacingMedium)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .vfSurface(.card, in: cardShape)
             }
         }
     }
 
     private var benchmarkRecommendationSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Benchmark Recommendation")
-                .font(VF.headingFont)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            VFSectionHeader(title: "Benchmark recommendation")
 
             if let recommended = state.recommendedProfileFromHistory {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: VF.spacingSmall) {
                     Text("Recommended: \(recommended.profile.displayName)")
                         .font(VF.bodyEmphasizedFont)
-                    Text("avg median \(recommended.averageMedianLatencyMs)ms · avg p95 \(recommended.averageP95LatencyMs)ms")
+                    Text("Median \(recommended.averageMedianLatencyMs) ms \u{00B7} 95th percentile \(recommended.averageP95LatencyMs) ms")
                         .font(VF.secondaryFont)
                         .foregroundStyle(.secondary)
-                    Text("Successful runs \(recommended.successfulRuns)/\(recommended.benchmarkRuns) · placeholders \(recommended.placeholderRuns)")
+                    Text("Successful runs \(recommended.successfulRuns) of \(recommended.benchmarkRuns) \u{00B7} Placeholder runs \(recommended.placeholderRuns)")
                         .font(VF.captionFont)
                         .foregroundStyle(.secondary)
                 }
-                .padding(12)
+                .padding(VF.spacingMedium)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(VF.tintedBackground(VF.colorSuccess, opacity: 0.10))
-                .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
+                .background(VF.tintedBackground(VF.colorSuccess, opacity: 0.10), in: cardShape)
             } else {
-                Text("No benchmark history yet. Run Translate Benchmark in Settings to generate a recommendation.")
+                Text("No benchmark history yet. Run Translate Benchmark in Settings, Models to get a recommendation.")
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
-                    .padding(12)
+                    .padding(VF.spacingMedium)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(VF.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
+                    .vfSurface(.card, in: cardShape)
             }
 
             if !state.benchmarkHistoryByProfile.isEmpty {
-                VStack(spacing: 8) {
-                    HStack {
+                Grid(alignment: .trailing, horizontalSpacing: VF.spacingMedium, verticalSpacing: VF.spacingSmall) {
+                    GridRow {
                         Text("Profile")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("avg med")
-                            .frame(width: 80, alignment: .trailing)
-                        Text("avg p95")
-                            .frame(width: 80, alignment: .trailing)
-                        Text("succ/run")
-                            .frame(width: 90, alignment: .trailing)
+                            .gridColumnAlignment(.leading)
+                        Text("Median")
+                        Text("95th percentile")
+                        Text("Successful runs")
                     }
                     .font(VF.captionEmphasizedFont)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
+
+                    Divider()
+                        .gridCellUnsizedAxes(.horizontal)
 
                     ForEach(historyRows) { row in
-                        HStack {
+                        GridRow {
                             Text(row.profile.displayName)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("\(row.averageMedianLatencyMs)ms")
-                                .frame(width: 80, alignment: .trailing)
-                            Text("\(row.averageP95LatencyMs)ms")
-                                .frame(width: 80, alignment: .trailing)
-                            Text("\(row.successfulRuns)/\(row.benchmarkRuns)")
-                                .frame(width: 90, alignment: .trailing)
+                            Text("\(row.averageMedianLatencyMs) ms")
+                            Text("\(row.averageP95LatencyMs) ms")
+                            Text("\(row.successfulRuns) of \(row.benchmarkRuns)")
                         }
                         .font(VF.secondaryFont)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 6)
-                        .background(VF.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
+                .padding(VF.spacingMedium)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .vfSurface(.card, in: cardShape)
             }
         }
     }
@@ -319,86 +379,5 @@ struct DashboardWindowView: View {
             }
             return $0.recommendationScore < $1.recommendationScore
         }
-    }
-
-    private var backendStatusColor: Color {
-        if !state.backendShouldRun && !state.backendReadiness.processRunning && !state.backendReadiness.warmupInProgress {
-            return VF.colorNeutral
-        }
-        if state.backendReadiness.readyForDictation {
-            return VF.colorSuccess
-        }
-        if state.backendReadiness.warmupInProgress {
-            return VF.colorWarning
-        }
-        return VF.colorError
-    }
-
-    private var headerRow: some View {
-        HStack {
-            Text("App")
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Success")
-                .frame(width: 70, alignment: .trailing)
-            Text("Fallback")
-                .frame(width: 70, alignment: .trailing)
-            Text("Failed")
-                .frame(width: 60, alignment: .trailing)
-            Text("Status")
-                .frame(width: 110, alignment: .trailing)
-        }
-        .font(VF.captionEmphasizedFont)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 6)
-    }
-
-    private func appRow(_ stats: AppInsertStats) -> some View {
-        let status = compatibilityStatus(for: stats)
-        return HStack {
-            Text(stats.appName)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("\(stats.successCount)")
-                .frame(width: 70, alignment: .trailing)
-            Text("\(stats.fallbackCount)")
-                .frame(width: 70, alignment: .trailing)
-            Text("\(stats.failedCount)")
-                .frame(width: 60, alignment: .trailing)
-            Text(status.label)
-                .frame(width: 110, alignment: .trailing)
-                .foregroundStyle(status.color)
-                .font(VF.captionEmphasizedFont)
-        }
-        .font(VF.secondaryFont)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-        .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var sessionDurationText: String {
-        let duration = Int(state.sessionDuration)
-        let hours = duration / 3600
-        let minutes = (duration % 3600) / 60
-        let seconds = duration % 60
-        if hours > 0 {
-            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        }
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    private func compatibilityStatus(for stats: AppInsertStats) -> (label: String, color: Color) {
-        if stats.totalAttempts == 0 {
-            return ("No Data", VF.colorNeutral)
-        }
-        if stats.successRate >= 0.95 && stats.failedCount == 0 {
-            return ("Excellent", VF.colorSuccess)
-        }
-        if stats.successRate >= 0.80 {
-            return ("Good", .blue)
-        }
-        if stats.successRate >= 0.60 {
-            return ("Needs Tuning", VF.colorWarning)
-        }
-        return ("Unstable", VF.colorError)
     }
 }

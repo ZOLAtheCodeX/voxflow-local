@@ -63,6 +63,14 @@ final class VFCopyTests: XCTestCase {
         XCTAssertEqual(VFCopy.yesNo("ok"), "ok")
     }
 
+    func test_reject_reason_reads_as_words() {
+        XCTAssertEqual(VFCopy.rejectReasonText("silence"), "No speech detected")
+        XCTAssertEqual(VFCopy.rejectReasonText("hallucination_filter"), "Filtered out as likely not speech")
+        XCTAssertEqual(VFCopy.rejectReasonText("some_new_code"), "Some new code")
+        XCTAssertEqual(VFCopy.rejectReasonText(nil), "No reason recorded")
+        XCTAssertEqual(VFCopy.rejectReasonText(""), "No reason recorded")
+    }
+
     @MainActor
     func test_app_display_name_falls_back_to_bundle_id() {
         XCTAssertEqual(

@@ -46,6 +46,25 @@ enum VFCopy {
         return "Still working. The first run after a pause can take up to a minute while the model loads."
     }
 
+    /// A receipt's reject reason code in plain words. Unknown codes are
+    /// shown with underscores as spaces rather than hidden.
+    static func rejectReasonText(_ code: String?) -> String {
+        guard let code, !code.isEmpty else { return "No reason recorded" }
+        switch code {
+        case "silence": return "No speech detected"
+        case "empty", "placeholder": return "Nothing was transcribed"
+        case "hallucination_filter": return "Filtered out as likely not speech"
+        case "low_confidence": return "Recognition confidence too low"
+        case "transcription_error": return "Transcription failed"
+        case "interrupted_tail": return "Recording was interrupted"
+        case "capture_stalled": return "The microphone delivered no audio"
+        case "device_changed": return "The audio device changed"
+        default:
+            let words = code.replacingOccurrences(of: "_", with: " ")
+            return words.prefix(1).uppercased() + words.dropFirst()
+        }
+    }
+
     /// Maps a raw "true" / "false" flag to words. Anything else is returned
     /// unchanged; nil reads as unknown.
     static func yesNo(_ raw: String?) -> String {

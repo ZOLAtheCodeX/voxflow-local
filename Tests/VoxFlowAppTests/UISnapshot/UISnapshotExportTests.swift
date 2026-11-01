@@ -302,6 +302,40 @@ final class UISnapshotExportTests: XCTestCase {
             name: "dashboard", size: CGSize(width: 860, height: 720))
     }
 
+    /// Experimental modes on (Approvals, mode usage and benchmark show), a
+    /// reject whose audio was kept, and a degraded cleanup chain.
+    func testDashboardExperimental() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let clip = UISnapshotFixtures.makeTempDirectory().appendingPathComponent("rejected.wav")
+        try Data([0]).write(to: clip)
+        let now = Date()
+        let stamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-9 * 60))
+        let reject =
+            #"{"event":"reject","ts":"\#(stamp)","reason":"low_confidence","source":"Rejected (low_confidence)","audio_seconds":4.2,"rms":0.03,"audio_file":"\#(clip.path)"}"#
+        let state = UISnapshotFixtures.state {
+            $0.translationModeEnabled = true
+            $0.meetingModeEnabled = true
+            $0.approvedTranslationCount = 3
+            $0.approvedMeetingCount = 1
+            $0.privacyApproveRawCount = 1
+            $0.privacyApproveRedactedCount = 3
+            $0.workflowCaptureCounts = [.dictation: 38, .translateEnToDe: 3, .meeting: 1]
+            $0.backendReadiness.activePolishProvider = ""
+            $0.backendReadiness.activePolishModel = ""
+            $0.benchmarkHistoryByProfile = [
+                .translateGemma4B: TranslationBenchmarkHistoryStats(
+                    profile: .translateGemma4B, benchmarkRuns: 4, successfulRuns: 4, placeholderRuns: 0,
+                    totalMedianLatencyMs: 4 * 820, totalP95LatencyMs: 4 * 1_300,
+                    lastMedianLatencyMs: 800, lastP95LatencyMs: 1_250)
+            ]
+        }
+        let receipts = UISnapshotFixtures.receiptStore(
+            lines: UISnapshotFixtures.sampleReceiptLines(now: now) + [reject])
+        try SnapshotRenderer.export(
+            DashboardWindowView(coordinator: coordinator, state: state, receiptStore: receipts),
+            name: "dashboard-experimental", size: CGSize(width: 860, height: 1340))
+    }
+
     // MARK: - Settings
 
     private func settingsView(initialTab: SettingsTab, state: AppState = UISnapshotFixtures.state()) -> SettingsView {

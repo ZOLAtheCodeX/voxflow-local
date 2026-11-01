@@ -68,25 +68,6 @@ enum PaletteLastResult {
         }
         return VFStatus(.ready, "Inserted")
     }
-
-    /// A receipt's reject reason code in plain words. Unknown codes are
-    /// shown with underscores as spaces rather than hidden.
-    static func rejectReasonText(_ code: String?) -> String {
-        guard let code, !code.isEmpty else { return "No reason recorded" }
-        switch code {
-        case "silence": return "No speech detected"
-        case "empty", "placeholder": return "Nothing was transcribed"
-        case "hallucination_filter": return "Filtered out as likely not speech"
-        case "low_confidence": return "Recognition confidence too low"
-        case "transcription_error": return "Transcription failed"
-        case "interrupted_tail": return "Recording was interrupted"
-        case "capture_stalled": return "The microphone delivered no audio"
-        case "device_changed": return "The audio device changed"
-        default:
-            let words = code.replacingOccurrences(of: "_", with: " ")
-            return words.prefix(1).uppercased() + words.dropFirst()
-        }
-    }
 }
 
 /// The idle palette's main card: the outcome of the latest capture from its
@@ -155,7 +136,7 @@ struct PaletteLastResultCard: View {
     }
 
     private func reasonLine(_ row: CaptureReceiptRowModel) -> String {
-        let reason = PaletteLastResult.rejectReasonText(row.rejectReason)
+        let reason = VFCopy.rejectReasonText(row.rejectReason)
         return row.audioFileURL == nil ? reason : "\(reason) · Audio kept"
     }
 }
