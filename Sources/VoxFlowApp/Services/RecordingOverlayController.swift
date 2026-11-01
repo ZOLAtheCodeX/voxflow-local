@@ -86,9 +86,9 @@ final class PillPresentation: ObservableObject {
 /// its working row for up to `lateStatusHold` and shows the first new line
 /// with a full outcome window, or hides with no outcome if none comes. Any
 /// other neutral outcome follows at most one later status line, restarting
-/// its window. A new capture cancels all of it at once. A status line the
-/// focus monitor writes in the same turn as a focus change ("Ready in X",
-/// ruling R35) is not about the capture: it neither ends the hold nor uses
+/// its window. A new capture cancels all of it at once. The status line the
+/// focus monitor writes right after a focus change ("Ready in X", rulings
+/// R35 and R53) is not about the capture: it neither ends the hold nor uses
 /// the follow.
 @MainActor
 final class RecordingOverlayController {
@@ -134,11 +134,14 @@ final class RecordingOverlayController {
     /// The status line current at `.transcribing` entry for this capture.
     private var transcribingLine: String?
     private var transcribingLineTask: Task<Void, Never>?
-    /// True for the rest of the main-actor turn in which `focusTarget`
-    /// changed. `AppCoordinator.startFocusMonitoring` writes the focus target
-    /// and then, in the same closure, its own status line; that line is
-    /// recognised by this turn, never by its words.
-    private var focusChangedThisTurn = false
+    /// Set when `focusTarget` changes; the next status line consumes it and
+    /// is ignored (ruling R53). `AppCoordinator.startFocusMonitoring` writes
+    /// the focus target and then, synchronously and only while the session
+    /// is idle, its own status line, and the focus monitor is frozen during
+    /// a capture, so the line right after a focus change is the focus line.
+    /// It is recognised by that order, never by its words. Capture start and
+    /// hiding the pill clear a mark that no line consumed.
+    private var focusLinePending = false
 
     var isVisible: Bool { panel.isVisible }
     var panelForTesting: NSPanel { panel }
@@ -267,6 +270,7 @@ final class RecordingOverlayController {
         transcribingLineTask?.cancel()
         transcribingLineTask = nil
         transcribingLine = nil
+        focusLinePending = false
         classificationPending = false
         afterCapture = .none
         presentation.outcome = nil
@@ -289,12 +293,9 @@ final class RecordingOverlayController {
         }
     }
 
-    /// Marks the current turn; the mark clears on the next one.
+    /// Marks that the next status line is the focus monitor's.
     private func focusTargetChanged() {
-        focusChangedThisTurn = true
-        Task { @MainActor [weak self] in
-            self?.focusChangedThisTurn = false
-        }
+        focusLinePending = true
     }
 
     private func insertResultChanged(_ result: InsertResult?) {
@@ -306,12 +307,15 @@ final class RecordingOverlayController {
     /// the pill waits, the first different line becomes the outcome. After a
     /// neutral outcome, one later line replaces it, since that outcome IS the
     /// status line. Either way the window restarts and nothing follows after.
-    /// A failed insert keeps its own message. A line written in the turn of a
-    /// focus change is ignored outright (ruling R35): it neither ends the hold
-    /// nor uses the follow.
+    /// A failed insert keeps its own message. The one line right after a
+    /// focus change is ignored outright (rulings R35, R53): it neither ends
+    /// the hold nor uses the follow, and it clears the mark.
     private func statusLineChanged(_ line: String) {
-        guard !focusChangedThisTurn,
-              !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if focusLinePending {
+            focusLinePending = false
+            return
+        }
+        guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         switch afterCapture {
         case .none:
             return
@@ -429,6 +433,7 @@ final class RecordingOverlayController {
         outcomeTask?.cancel()
         outcomeTask = nil
         classificationPending = false
+        focusLinePending = false
         afterCapture = .none
         presentation.outcome = nil
         presentation.awaitingLateStatus = false

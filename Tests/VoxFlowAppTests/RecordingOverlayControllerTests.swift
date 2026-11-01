@@ -564,12 +564,43 @@ final class RecordingOverlayControllerTests: XCTestCase {
         finish(controller)
     }
 
-    /// Only the turn of the focus change is ignored.
-    func test_a_focus_change_on_an_earlier_turn_does_not_mute_later_lines() async {
+    /// Ruling R53 (Codex NB3): the focus mark is consumed by the one line
+    /// that follows the focus change. A job queued during the focus poll
+    /// (the diagnosis continuation writing the reject reason) can run before
+    /// any next turn; its line must not be swallowed.
+    func test_reason_right_after_the_focus_line_is_shown() async {
+        let state = AppState()
+        let recorder = AnnouncementRecorder()
+        let controller = makeController(state, outcomeDuration: holdDuration, recorder: recorder)
+        await enterTranscribing(controller, state)
+        controller.sessionStateChanged(.idle)
+        let holding = await waitUntil { controller.isHoldingForStatusLine }
+        XCTAssertTrue(holding)
+
+        // No await in between: nothing scheduled for a later turn runs.
+        let reason = "Background noise only (audio kept)"
+        state.focusTarget = focus("Mail")
+        state.statusLine = "Ready in Mail. Hold hotkey to talk"
+        state.statusLine = reason
+        XCTAssertEqual(controller.currentOutcome, .status(message: reason))
+        XCTAssertEqual(recorder.messages, [reason])
+        finish(controller)
+    }
+
+    /// A focus change whose line never came (a state the monitor does not
+    /// write in) leaves a mark; the next capture's start clears it, so that
+    /// capture's first late line is not swallowed.
+    func test_capture_start_clears_a_focus_mark_left_without_its_line() async {
         let state = AppState()
         let controller = makeController(state, outcomeDuration: holdDuration)
-        await enterTranscribing(controller, state)
+        state.statusLine = "Transcribing..."
         state.focusTarget = focus("Mail")
+        // No status line is written between the mark and the reason, so only
+        // the capture start can clear the mark.
+        controller.sessionStateChanged(.recording)
+        controller.sessionStateChanged(.transcribing)
+        let recorded = await waitUntil { controller.transcribingLineForTesting == "Transcribing..." }
+        XCTAssertTrue(recorded)
         controller.sessionStateChanged(.idle)
         let holding = await waitUntil { controller.isHoldingForStatusLine }
         XCTAssertTrue(holding)
