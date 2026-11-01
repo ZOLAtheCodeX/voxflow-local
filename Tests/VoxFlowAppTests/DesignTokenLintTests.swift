@@ -4,11 +4,9 @@ import XCTest
 /// `Sources/VoxFlowApp/Views/` goes through `VFDesignTokens.swift` (colors,
 /// type) and through the Reduce Motion aware modifiers (repeating motion).
 ///
-/// `pendingFiles` lists views that still carry literals and are fixed by a
-/// later task. Each task that cleans a file removes it from the set; the
-/// second test fails if a listed file is already clean, so the set cannot go
-/// stale. A task that moves code into new files adds those files to the set
-/// for as long as the moved literals remain.
+/// `pendingFiles` is the baseline of views allowed to carry literals. It is
+/// empty and must stay empty: the second test fails if anyone adds a file to
+/// it, so the baseline cannot silently regrow.
 final class DesignTokenLintTests: XCTestCase {
 
     static let pendingFiles: Set<String> = []
@@ -64,14 +62,11 @@ final class DesignTokenLintTests: XCTestCase {
         )
     }
 
-    func test_every_pending_file_still_needs_its_fix() throws {
-        let filesWithViolations = Set(try scanViews().map(\.file))
-        for file in Self.pendingFiles.sorted() {
-            XCTAssertTrue(
-                filesWithViolations.contains(file),
-                "\(file) has no violations left: remove it from pendingFiles"
-            )
-        }
+    func test_pending_baseline_stays_empty() {
+        XCTAssertTrue(
+            Self.pendingFiles.isEmpty,
+            "pendingFiles must stay empty; fix the literals instead of listing the file: \(Self.pendingFiles.sorted())"
+        )
     }
 
     // MARK: - Scanner
