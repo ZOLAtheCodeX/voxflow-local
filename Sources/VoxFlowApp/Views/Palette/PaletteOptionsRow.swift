@@ -13,19 +13,35 @@ struct PaletteOptionsRow: View {
 
     @State private var showProfilePopover = false
 
-    /// Whether the row's menus accept input. Not while a capture is in
-    /// flight (ruling R18): the workflow Mode picker clears candidates and
-    /// restarts the backend. The old palette hid its Cleanup and Tone chips
-    /// then, but its Skill profile and Voice actions menus stayed reachable
-    /// mid-capture; they are disabled now with the rest of the row, and
-    /// Settings still changes them. The chips stay visible. Exhaustive on
-    /// purpose, so a new session state needs a decision here.
-    nonisolated static func isInteractive(sessionState: SessionState) -> Bool {
+    /// The row's controls, each with its own capture-time rule.
+    enum Option: CaseIterable {
+        case cleanupLevel, tone, appProfile, skillProfile, voiceActions, provider, mode, setup
+    }
+
+    /// Ruling R38, which replaces R18's whole-row rule. The Skill profile and
+    /// Voice actions menus stay enabled in every state: changing either
+    /// revokes captured action permissions and a pending automatic Enter,
+    /// a safety control the old palette offered mid-capture. Every other
+    /// control is disabled while a capture is in flight (the workflow Mode
+    /// picker clears candidates and restarts the backend). The ••• menu
+    /// itself stays open so the two revocation menus can be reached; the
+    /// chips stay visible.
+    nonisolated static func isEnabled(_ option: Option, sessionState: SessionState) -> Bool {
+        switch option {
+        case .skillProfile, .voiceActions:
+            return true
+        case .cleanupLevel, .tone, .appProfile, .provider, .mode, .setup:
+            return !isCaptureInFlight(sessionState)
+        }
+    }
+
+    /// Exhaustive on purpose, so a new session state needs a decision here.
+    nonisolated static func isCaptureInFlight(_ sessionState: SessionState) -> Bool {
         switch sessionState {
         case .recording, .transcribing, .inserting:
-            return false
-        case .idle, .review, .onboarding, .error:
             return true
+        case .idle, .review, .onboarding, .error:
+            return false
         }
     }
 
@@ -44,7 +60,9 @@ struct PaletteOptionsRow: View {
         "Cleanup level: \(mode.displayName)"
     }
 
-    private var isInteractive: Bool { Self.isInteractive(sessionState: state.sessionState) }
+    private func isEnabled(_ option: Option) -> Bool {
+        Self.isEnabled(option, sessionState: state.sessionState)
+    }
 
     private var showsCleanupMenu: Bool {
         Self.showsCleanupMenu(sessionState: state.sessionState, hasPrivacyPreview: state.privacyPreview != nil)
@@ -62,11 +80,10 @@ struct PaletteOptionsRow: View {
             }
             .menuStyle(.button)
             .buttonStyle(.borderless)
-            .disabled(!isInteractive)
-            .onChange(of: state.sessionState) { _, _ in
+            .onChange(of: state.sessionState) { _, newState in
                 // A capture that starts while the app profile popover is
                 // open closes it, as the old palette did when its anchor left.
-                if !isInteractive { showProfilePopover = false }
+                if Self.isCaptureInFlight(newState) { showProfilePopover = false }
             }
 
             PaletteOptionChips(
@@ -82,37 +99,48 @@ struct PaletteOptionsRow: View {
 
     // MARK: - Menus
 
+    // The Cleanup level and Tone choices are bound inline pickers (ruling
+    // R42), so the menu items carry the native checkmark and VoiceOver's
+    // selected state; picking one calls the same coordinator method.
+
     private var cleanupMenu: some View {
         Menu {
-            ForEach(CleanupMode.allCases) { mode in
-                Button {
-                    coordinator.selectCleanupMode(mode)
-                } label: {
-                    checked(mode.displayName, state.selectedMode == mode)
+            Picker("Cleanup level", selection: Binding(
+                get: { state.selectedMode },
+                set: { coordinator.selectCleanupMode($0) }
+            )) {
+                ForEach(CleanupMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
                 }
             }
+            .pickerStyle(.inline)
+            .labelsHidden()
         } label: {
             Text(Self.cleanupMenuTitle(state.selectedMode))
         }
         .fixedSize()
+        .disabled(!isEnabled(.cleanupLevel))
         .help("The cleanup level of the text under review")
         .accessibilityLabel(Self.cleanupMenuTitle(state.selectedMode))
     }
 
     private var toneMenu: some View {
         Menu {
-            ForEach(ToneStyle.allCases) { tone in
-                Button {
-                    coordinator.selectToneStyle(tone)
-                } label: {
-                    checked(tone.displayName, state.toneStyle == tone)
+            Picker("Tone", selection: Binding(
+                get: { state.toneStyle },
+                set: { coordinator.selectToneStyle($0) }
+            )) {
+                ForEach(ToneStyle.allCases) { tone in
+                    Text(tone.displayName).tag(tone)
                 }
-                .accessibilityLabel("\(tone.displayName) tone")
             }
+            .pickerStyle(.inline)
+            .labelsHidden()
         } label: {
             Text("Tone: \(state.toneStyle.displayName)")
         }
         .fixedSize()
+        .disabled(!isEnabled(.tone))
         .accessibilityLabel("Tone: \(state.toneStyle.displayName)")
     }
 
@@ -122,10 +150,18 @@ struct PaletteOptionsRow: View {
                 Button(state.appProfiles[bundleID] != nil
                        ? "Profile for \(appName) (Custom)\u{2026}"
                        : "Profile for \(appName)\u{2026}") {
-                    showProfilePopover = true
+                    // Ruling R44: present on a later main-actor turn, after
+                    // the menu has dismissed, so the popover does not race it.
+                    Task { @MainActor in
+                        await Task.yield()
+                        showProfilePopover = true
+                    }
                 }
+                .disabled(!isEnabled(.appProfile))
             }
 
+            // Always enabled (ruling R38): a change here revokes captured
+            // permissions and a pending Enter.
             SkillProfileMenu(store: coordinator.skillProfiles)
             VoiceActionModeMenu(settings: coordinator.computerActionSettings, selectMode: coordinator.selectVoiceActionMode)
 
@@ -138,6 +174,7 @@ struct PaletteOptionsRow: View {
                 }
             }
             .pickerStyle(.menu)
+            .disabled(!isEnabled(.provider))
 
             if state.availableWorkflowModes.count > 1 {
                 Picker("Mode: \(state.workflowMode.displayName)", selection: Binding(
@@ -149,6 +186,7 @@ struct PaletteOptionsRow: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .disabled(!isEnabled(.mode))
             }
 
             Divider()
@@ -158,6 +196,7 @@ struct PaletteOptionsRow: View {
             Button("Setup\u{2026}") {
                 onOpenSetup()
             }
+            .disabled(!isEnabled(.setup))
         } label: {
             Image(systemName: "ellipsis.circle")
         }
@@ -169,15 +208,6 @@ struct PaletteOptionsRow: View {
             if let appName = state.focusTarget.appName, let bundleID = state.focusTarget.bundleID {
                 appProfilePopover(bundleID: bundleID, appName: appName)
             }
-        }
-    }
-
-    @ViewBuilder
-    private func checked(_ title: String, _ isSelected: Bool) -> some View {
-        if isSelected {
-            Label(title, systemImage: "checkmark")
-        } else {
-            Text(title)
         }
     }
 

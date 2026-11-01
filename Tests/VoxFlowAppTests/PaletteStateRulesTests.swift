@@ -4,29 +4,38 @@ import XCTest
 /// Which palette controls each session state exposes.
 final class PaletteStateRulesTests: XCTestCase {
 
-    // MARK: - Options row (ruling R18)
+    // MARK: - Options row (ruling R38, superseding R18's whole-row rule)
 
-    /// The options row's menus are disabled while a capture is in flight:
+    private let allStates: [SessionState] = [.idle, .recording, .transcribing, .review, .inserting, .onboarding, .error]
+
+    /// While a capture is in flight the configuration controls are disabled:
     /// the workflow Mode picker clears candidates and restarts the backend.
-    /// (The old palette hid its Cleanup and Tone chips then, but its Skill
-    /// profile and Voice actions menus stayed reachable; Settings still
-    /// changes those mid-capture.)
-    func test_options_row_is_interactive_only_outside_a_capture() {
-        let expected: [SessionState: Bool] = [
-            .idle: true,
-            .recording: false,
-            .transcribing: false,
-            .review: true,
-            .inserting: false,
-            .onboarding: true,
-            .error: true,
-        ]
-        XCTAssertEqual(expected.count, 7, "every SessionState case is covered")
-        for (state, interactive) in expected {
-            XCTAssertEqual(
-                PaletteOptionsRow.isInteractive(sessionState: state), interactive,
-                "isInteractive(\(state.rawValue))")
+    func test_configuration_controls_are_disabled_during_a_capture() {
+        let capturing: Set<SessionState> = [.recording, .transcribing, .inserting]
+        let configuration: [PaletteOptionsRow.Option] = [.cleanupLevel, .tone, .appProfile, .provider, .mode, .setup]
+        for option in configuration {
+            for state in allStates {
+                XCTAssertEqual(
+                    PaletteOptionsRow.isEnabled(option, sessionState: state), !capturing.contains(state),
+                    "\(option) in \(state.rawValue)")
+            }
         }
+    }
+
+    /// Changing the skill profile or the voice-action mode revokes captured
+    /// permissions and a pending Enter, so both stay reachable mid-capture,
+    /// as they were in the old palette.
+    func test_revocation_menus_stay_enabled_in_every_state() {
+        for option: PaletteOptionsRow.Option in [.skillProfile, .voiceActions] {
+            for state in allStates {
+                XCTAssertTrue(PaletteOptionsRow.isEnabled(option, sessionState: state), "\(option) in \(state.rawValue)")
+            }
+        }
+    }
+
+    func test_every_option_has_a_rule() {
+        XCTAssertEqual(PaletteOptionsRow.Option.allCases.count, 8)
+        XCTAssertEqual(allStates.count, 7, "every SessionState case is covered")
     }
 
     // MARK: - Review card (ruling R19)
