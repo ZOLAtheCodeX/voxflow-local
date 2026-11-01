@@ -6,7 +6,7 @@ typealias SecretLoader = (String) -> String?
 
 /// The Settings tabs, in display order.
 enum SettingsTab: Hashable {
-    case general, models, tools, privacy, advanced, permissions
+    case general, apps, voice, models, privacy, advanced
 }
 
 struct SettingsView: View {
@@ -44,21 +44,21 @@ struct SettingsView: View {
             GeneralSettingsPane(coordinator: coordinator, state: state)
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
+            AppsSettingsPane(coordinator: coordinator, state: state)
+                .tabItem { Label("Apps", systemImage: "app.badge") }
+                .tag(SettingsTab.apps)
+            VoiceSettingsPane(coordinator: coordinator, dictionary: dictionary, snippetStore: snippetStore, chainStore: chainStore)
+                .tabItem { Label("Voice", systemImage: "waveform") }
+                .tag(SettingsTab.voice)
             ModelsSettingsPane(coordinator: coordinator, state: state, providerStore: providerStore, secretLoader: secretLoader)
-                .tabItem { Label("Models", systemImage: "brain") }
+                .tabItem { Label("Models", systemImage: "cpu") }
                 .tag(SettingsTab.models)
-            ToolsSettingsPane(coordinator: coordinator, state: state, dictionary: dictionary, snippetStore: snippetStore, chainStore: chainStore, secretLoader: secretLoader)
-                .tabItem { Label("Dictation Tools", systemImage: "text.badge.star") }
-                .tag(SettingsTab.tools)
             PrivacySettingsPane(coordinator: coordinator, state: state, secretLoader: secretLoader)
                 .tabItem { Label("Privacy", systemImage: "lock.shield") }
                 .tag(SettingsTab.privacy)
-            AdvancedSettingsPane(coordinator: coordinator, state: state)
+            AdvancedSettingsPane(coordinator: coordinator, state: state, secretLoader: secretLoader)
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
                 .tag(SettingsTab.advanced)
-            PermissionsSettingsPane(coordinator: coordinator)
-                .tabItem { Label("Permissions", systemImage: "checkmark.shield") }
-                .tag(SettingsTab.permissions)
         }
         .frame(minWidth: 620, idealWidth: 660, minHeight: 480, idealHeight: 560)
     }

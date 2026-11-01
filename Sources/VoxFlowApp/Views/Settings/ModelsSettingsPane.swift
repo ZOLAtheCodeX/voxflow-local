@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings > Models: local Ollama model, speech models, BYOM providers, translate benchmark.
+/// Settings > Models: local AI model, speech model, model providers, translate benchmark.
 struct ModelsSettingsPane: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
@@ -25,7 +25,7 @@ struct ModelsSettingsPane: View {
 
     var body: some View {
         Form {
-            Section("Local AI Model") {
+            Section("Local AI model") {
                 ollamaStatusRow
                 if let status = ollamaStatus {
                     if !status.models.isEmpty {
@@ -81,7 +81,7 @@ struct ModelsSettingsPane: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Ollama not detected")
                                     .font(VF.labelFont)
-                                Text("Install Ollama and pull a Gemma 4 model for higher-quality polish. The dictation flow keeps working without it.")
+                                Text("Install Ollama and pull a Gemma 4 model for higher-quality cleanup. Dictation keeps working without it.")
                                     .font(VF.captionFont)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -100,9 +100,9 @@ struct ModelsSettingsPane: View {
             }
 
 
-            Section("Speech Models") {
+            Section("Speech model") {
                 Picker(
-                    "STT Backend",
+                    "Speech model",
                     selection: Binding(
                         get: { state.sttBackend },
                         set: { coordinator.selectSTTBackend($0) }
@@ -136,10 +136,10 @@ struct ModelsSettingsPane: View {
                             .textFieldStyle(.roundedBorder)
                         SecureField("OpenAI API Key", text: $openAIAPIKeyDraft)
                             .textFieldStyle(.roundedBorder)
-                        TextField("OpenAI STT Model", text: $openAISTTModelDraft)
+                        TextField("OpenAI Speech Model", text: $openAISTTModelDraft)
                             .textFieldStyle(.roundedBorder)
 
-                        Button("Apply OpenAI Speech Config") {
+                        Button("Apply OpenAI Speech Settings") {
                             coordinator.updateOpenAIConfig(
                                 baseURL: openAIBaseURLDraft,
                                 apiKey: openAIAPIKeyDraft,
@@ -152,12 +152,12 @@ struct ModelsSettingsPane: View {
                 }
             }
 
-            Section("Model Providers (BYOM)") {
+            Section("Model providers") {
                 ForEach(providerStore.providers) { spec in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(spec.id).font(VF.captionEmphasizedFont)
-                            Text(spec.kind.rawValue)
+                            Text(Self.kindLabel(spec.kind))
                                 .font(VF.microFont)
                                 .foregroundStyle(.secondary)
                             if let model = spec.model, !model.isEmpty {
@@ -179,7 +179,7 @@ struct ModelsSettingsPane: View {
                 }
 
                 ForEach(ProviderConfigStore.tasks, id: \.self) { task in
-                    Picker(task == "polish" ? "Polish provider" : "Smart-action provider", selection: chainPrimaryBinding(for: task)) {
+                    Picker(task == "polish" ? "Cleanup provider" : "Smart-action provider", selection: chainPrimaryBinding(for: task)) {
                         ForEach(providerStore.providers.map(\.id), id: \.self) { pid in
                             Text(pid).tag(pid)
                         }
@@ -188,7 +188,7 @@ struct ModelsSettingsPane: View {
                         }
                     }
                 }
-                Text("Chains fall back to Ollama, then the local regex pipeline — dictation keeps working offline no matter what. \"Local rules only\" skips LLM polish entirely and never loads a model.")
+                Text("If a provider is unavailable, VoxFlow falls back to Ollama, then to local rules, so dictation keeps working offline. Local rules only skips the AI model entirely and never loads one.")
                     .font(VF.microFont)
                     .foregroundStyle(.secondary)
 
@@ -280,11 +280,11 @@ struct ModelsSettingsPane: View {
     private var sttBackendNote: String {
         switch state.sttBackend {
         case .whisper:
-            return "Whisper local STT uses an open-source OpenAI Whisper model on-device. If it fails, audio stays local unless you enable the OpenAI fallback (off by default)."
+            return "Whisper runs an open-source OpenAI Whisper model on this Mac. If it fails, audio stays local unless you enable the OpenAI fallback (off by default)."
         case .whisperKit:
             return "WhisperKit runs Whisper on Apple Neural Engine. Fastest local option. No network access."
         case .openAI:
-            return "OpenAI STT sends microphone audio to your configured OpenAI endpoint."
+            return "OpenAI speech recognition sends microphone audio to your configured OpenAI endpoint."
         }
     }
 
@@ -293,14 +293,11 @@ struct ModelsSettingsPane: View {
             Text("Ollama")
             Spacer()
             if let status = ollamaStatus {
-                Text(status.available ? "Reachable" : "Not running")
-                    .foregroundStyle(status.available ? .green : .secondary)
+                VFStatusBadge(status: status.available ? VFStatus(.ready, "Reachable") : VFStatus(.inactive, "Not running"))
             } else if ollamaLoadError != nil {
-                Text("Error")
-                    .foregroundStyle(VF.colorExternal)
+                VFStatusBadge(status: VFStatus(.error, "Error"))
             } else {
-                Text("Checking…")
-                    .foregroundStyle(.secondary)
+                VFStatusBadge(status: VFStatus(.working, "Checking"))
             }
             Button("Refresh") {
                 Task { await refreshOllamaStatus() }
@@ -309,6 +306,15 @@ struct ModelsSettingsPane: View {
             .font(VF.captionFont)
         }
         .font(VF.secondaryFont)
+    }
+
+    /// A short, plain label for where a provider runs.
+    private static func kindLabel(_ kind: ProviderKind) -> String {
+        switch kind {
+        case .ollama: return "Local"
+        case .openaiCompat: return "Local server"
+        case .openai, .anthropic: return "Cloud"
+        }
     }
 
     @MainActor

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings > General: hotkeys, dictation behavior and per-app profiles, activation targeting.
+/// Settings > General: hotkeys, dictation behavior, automatic Enter, targeting.
 struct GeneralSettingsPane: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
@@ -21,7 +21,7 @@ struct GeneralSettingsPane: View {
                 }
 
                 Picker(
-                    "Command lane",
+                    "Voice control",
                     selection: Binding(
                         get: { state.commandLaneHotkeyPreset },
                         set: { coordinator.setCommandLaneHotkeyPreset($0) }
@@ -53,71 +53,29 @@ struct GeneralSettingsPane: View {
                 Text(insertBehaviorNote)
                     .font(VF.captionFont)
                     .foregroundStyle(.secondary)
-
-                Divider()
-
-                Text("App Profiles")
-                    .font(VF.labelFont)
-
-                if state.appProfiles.isEmpty {
-                    Text("No custom overrides. Apps use your selected settings or built-in defaults (Slack → Concise, Mail → Formal, etc).")
-                        .font(VF.captionFont)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(state.appProfiles.keys.sorted()), id: \.self) { bundleID in
-                        if let profile = state.appProfiles[bundleID] {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(bundleID.components(separatedBy: ".").last ?? bundleID)
-                                        .font(VF.labelFont)
-                                    Spacer()
-                                    Button("Remove") {
-                                        coordinator.updateAppProfile(bundleID: bundleID, profile: nil)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                                HStack(spacing: 12) {
-                                    Picker("Tone", selection: Binding(
-                                        get: { profile.tone },
-                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: $0, cleanupMode: profile.cleanupMode, insertBehavior: profile.insertBehavior)) }
-                                    )) {
-                                        ForEach(ToneStyle.allCases) { t in Text(t.displayName).tag(t) }
-                                    }
-                                    .frame(width: 110)
-                                    Picker("Mode", selection: Binding(
-                                        get: { profile.cleanupMode },
-                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: $0, insertBehavior: profile.insertBehavior)) }
-                                    )) {
-                                        ForEach(CleanupMode.allCases) { m in Text(m.displayName).tag(m) }
-                                    }
-                                    .frame(width: 90)
-                                    Picker("Insert", selection: Binding(
-                                        get: { profile.insertBehavior },
-                                        set: { coordinator.updateAppProfile(bundleID: bundleID, profile: AppProfile(tone: profile.tone, cleanupMode: profile.cleanupMode, insertBehavior: $0)) }
-                                    )) {
-                                        ForEach(InsertBehavior.allCases) { b in Text(b.displayName).tag(b) }
-                                    }
-                                    .frame(width: 150)
-                                }
-                                .font(VF.captionFont)
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                }
             }
 
-            Section("Activation Targeting") {
+            Section("Automatic Enter") {
+                Picker("Press Enter after", selection: Binding(
+                    get: { state.autoSubmitMode },
+                    set: { coordinator.selectAutoSubmitMode($0) }
+                )) {
+                    ForEach(AutoSubmitMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                Text("Press Enter once after successful automatic insertion. Depending on the app, Enter submits a message, runs a command, or adds a new line. Off leaves submission to you.")
+                    .font(VF.captionFont).foregroundStyle(.secondary)
+            }
+
+            Section("Targeting") {
                 Picker("Dictation target", selection: $state.targetingMode) {
                     ForEach(TargetingMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
 
-                Text(state.targetingMode == .cursorAware
-                     ? "Dictation is enabled when an insertion cursor is active in any text target."
-                     : "Dictation is enabled only when a text input field is focused.")
+                Text(targetingNote)
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
             }
@@ -129,13 +87,24 @@ struct GeneralSettingsPane: View {
     private var insertBehaviorNote: String {
         switch state.insertBehavior {
         case .alwaysReview:
-            return "Transcribed text is shown for review before insertion. Default behavior."
+            return "Text waits in the VoxFlow panel until you insert it."
         case .autoInsertRaw:
-            return "Raw transcription is inserted immediately with no cleanup. Fastest path."
+            return "Inserts the transcription as heard, with no cleanup."
         case .autoInsertLight:
-            return "Light cleanup is applied then text is inserted automatically."
+            return "Applies light cleanup, then inserts."
         case .autoInsertPolish:
-            return "Full polish cleanup is applied then text is inserted automatically."
+            return "Applies full cleanup, then inserts."
+        }
+    }
+
+    private var targetingNote: String {
+        switch state.targetingMode {
+        case .anyApp:
+            return "Dictation works in any app. When no text field is available, VoxFlow falls back to the clipboard."
+        case .cursorAware:
+            return "Dictation is enabled when an insertion cursor is active in any text target."
+        case .textFieldOnly:
+            return "Dictation is enabled only when a text input field is focused."
         }
     }
 }

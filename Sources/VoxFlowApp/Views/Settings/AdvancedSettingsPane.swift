@@ -1,36 +1,25 @@
 import SwiftUI
 
-/// Settings > Advanced: experimental workflows, translate profile, backend control, onboarding.
+/// Settings > Advanced: experimental workflows and translate profile, integrations
+/// (assistant handoff, Notion token), engine (backend) control, setup.
 struct AdvancedSettingsPane: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
+    let secretLoader: SecretLoader
+    @State private var notionToken: String = ""
+    @State private var draftsLoaded = false
 
     var body: some View {
         Form {
-            Section("Workflow") {
+            Section("Experimental") {
                 Toggle("Protocol commands (experimental)", isOn: Binding(
                     get: { state.protocolCommandsEnabled },
                     set: { coordinator.settings.setProtocolCommandsEnabled($0) }
                 ))
-                Text("Say \u{201C}run <name> protocol\u{201D} in the voice-control lane or cockpit review to run a workflow chain by voice. The whole phrase must match exactly; low-confidence transcriptions never trigger.")
+                Text("Say \u{201C}run <name> protocol\u{201D} in voice control or cockpit review to run a workflow chain by voice. The whole phrase must match exactly; low-confidence transcriptions never trigger.")
                     .font(VF.captionFont)
                     .foregroundStyle(.secondary)
-
-                Toggle("Assistant handoff (experimental)", isOn: Binding(
-                    get: { state.assistantHandoffEnabled },
-                    set: { coordinator.settings.setAssistantHandoffEnabled($0) }
-                ))
-                if state.assistantHandoffEnabled {
-                    TextField("Agent command (receives transcript on stdin)", text: Binding(
-                        get: { state.assistantHandoffCommand },
-                        set: { coordinator.settings.updateAssistantHandoffCommand($0) }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    Text("Example: claude -p — the cockpit transcript is piped to this command after you approve a visible preview. The response is only displayed; nothing executes automatically.")
-                        .font(VF.captionFont)
-                        .foregroundStyle(.secondary)
-                }
 
                 Toggle(
                     "Enable Experimental Translate Mode (EN→DE)",
@@ -75,18 +64,46 @@ struct AdvancedSettingsPane: View {
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
 
-                Text("Changing translate model restarts backend automatically.")
+                Text("Changing the translate model restarts the engine automatically.")
                     .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             }
 
-            Section("Backend") {
+            Section("Integrations") {
+                Toggle("Assistant handoff (experimental)", isOn: Binding(
+                    get: { state.assistantHandoffEnabled },
+                    set: { coordinator.settings.setAssistantHandoffEnabled($0) }
+                ))
+                if state.assistantHandoffEnabled {
+                    TextField("Agent command (receives transcript on stdin)", text: Binding(
+                        get: { state.assistantHandoffCommand },
+                        set: { coordinator.settings.updateAssistantHandoffCommand($0) }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    Text("Example: claude -p. The cockpit transcript is piped to this command after you approve a visible preview. The response is only displayed; nothing executes automatically.")
+                        .font(VF.captionFont)
+                        .foregroundStyle(.secondary)
+                }
+
+                SecureField("Notion personal access token", text: $notionToken)
+                Button("Save Token") {
+                    KeychainService.save(account: NotionKeychain.account, value: notionToken)
+                }
+                if secretLoader(NotionKeychain.account)?.isEmpty == false {
+                    Label("Token stored in Keychain", systemImage: "checkmark.seal")
+                        .font(VF.captionFont).foregroundStyle(.secondary)
+                }
+                Text("Create a personal access token in the Developer portal of Notion, under Personal access tokens, and grant it the \u{201C}Notion API\u{201D} capability. No page sharing is needed: it uses your own access and expires after one year.")
+                    .font(VF.captionFont).foregroundStyle(.secondary)
+            }
+
+            Section("Engine (backend)") {
                 HStack {
-                    Button("Start Backend") {
+                    Button("Start Engine") {
                         coordinator.startBackend()
                     }
 
-                    Button("Stop Backend") {
+                    Button("Stop Engine") {
                         coordinator.stopBackend()
                     }
                 }
@@ -96,27 +113,26 @@ struct AdvancedSettingsPane: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(backendStatusColor)
-                            .frame(width: 8, height: 8)
-                        Text(state.backendReadiness.statusSummary)
-                            .font(VF.captionEmphasizedFont)
-                            .foregroundStyle(backendStatusColor)
-                    }
+                    VFStatusBadge(
+                        status: VFStatus.engine(state.backendReadiness, backendShouldRun: state.backendShouldRun)
+                    )
+
+                    Text(state.backendReadiness.statusSummary)
+                        .font(VF.captionFont)
+                        .foregroundStyle(.secondary)
 
                     if state.backendReadiness.warmupInProgress {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
-                            Text("Backend process is running and waiting to answer readiness checks.")
+                            Text("The engine is running and waiting to answer readiness checks.")
                                 .font(VF.captionFont)
                                 .foregroundStyle(.secondary)
                         }
                     }
 
                     if !state.backendReadiness.activeSTTModel.isEmpty {
-                        Text("Active STT path: \(state.backendReadiness.activeSTTModel)")
+                        Text("Speech model in use: \(state.backendReadiness.activeSTTModel)")
                             .font(VF.captionFont)
                             .foregroundStyle(.secondary)
                     }
@@ -129,8 +145,8 @@ struct AdvancedSettingsPane: View {
                 }
             }
 
-            Section("Onboarding") {
-                Button("Open Setup Wizard") {
+            Section("Setup") {
+                Button("Open Setup") {
                     openWindow(id: "setup")
                 }
 
@@ -142,19 +158,11 @@ struct AdvancedSettingsPane: View {
 
         }
         .formStyle(.grouped)
-    }
-
-    private var backendStatusColor: Color {
-        if !state.backendShouldRun && !state.backendReadiness.processRunning && !state.backendReadiness.warmupInProgress {
-            return VF.colorNeutral
+        .onAppear {
+            guard !draftsLoaded else { return }
+            draftsLoaded = true
+            notionToken = secretLoader(NotionKeychain.account) ?? ""
         }
-        if state.backendReadiness.readyForDictation {
-            return VF.colorSuccess
-        }
-        if state.backendReadiness.warmupInProgress {
-            return VF.colorWarning
-        }
-        return VF.colorError
     }
 
     private func profileRow(_ profile: TranslationProfile) -> some View {

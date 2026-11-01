@@ -1,14 +1,11 @@
 import SwiftUI
 
-/// Settings > Dictation Tools: vocabulary, voice actions, skill profiles, automatic Enter,
-/// voice snippets, workflow chains, Notion token.
-struct ToolsSettingsPane: View {
+/// Settings > Voice: vocabulary, voice snippets, skill profiles, voice actions, workflow chains.
+struct VoiceSettingsPane: View {
     @ObservedObject var coordinator: AppCoordinator
-    @ObservedObject var state: AppState
     @ObservedObject var dictionary: DictionaryStore
     @ObservedObject var snippetStore: SnippetStore
     @ObservedObject var chainStore: ChainStore
-    let secretLoader: SecretLoader
     @State private var newSnippetKeyword = ""
     @State private var newSnippetText = ""
     @State private var newSnippetScope: SnippetScope = .global
@@ -20,31 +17,12 @@ struct ToolsSettingsPane: View {
     @State private var draftStepKind: ChainStepKind = .action
     @State private var draftActionId: SmartActionId = .memo
     @State private var draftCaptureMode: CaptureMode = .quick
-    @State private var notionToken: String = ""
-    @State private var draftsLoaded = false
 
     var body: some View {
         Form {
             VocabularySettingsSection(dictionary: dictionary)
-            ComputerActionSettingsSection(settings: coordinator.computerActionSettings,
-                selectMode: coordinator.selectVoiceActionMode, setEnabled: coordinator.setComputerActionEnabled,
-                setRequiresPrefix: coordinator.setComputerActionRequiresPrefix)
-            SkillProfileSettingsSection(store: coordinator.skillProfiles)
 
-            Section("Automatic Enter") {
-                Picker("Press Enter after", selection: Binding(
-                    get: { state.autoSubmitMode },
-                    set: { coordinator.selectAutoSubmitMode($0) }
-                )) {
-                    ForEach(AutoSubmitMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                Text("Press Enter once after successful automatic insertion. Depending on the app, Enter submits a message, runs a command, or adds a new line. Off leaves submission to you.")
-                    .font(VF.captionFont).foregroundStyle(.secondary)
-            }
-
-            Section("Voice Snippets") {
+            Section("Voice snippets") {
                 if snippetStore.snippets.isEmpty {
                     Text("No snippets yet. Add a keyword and the expansion VoxFlow inserts when you say it.")
                         .font(VF.captionFont).foregroundStyle(.secondary)
@@ -108,7 +86,13 @@ struct ToolsSettingsPane: View {
                 }
             }
 
-            Section("Workflow Chains") {
+            SkillProfileSettingsSection(store: coordinator.skillProfiles)
+
+            ComputerActionSettingsSection(settings: coordinator.computerActionSettings,
+                selectMode: coordinator.selectVoiceActionMode, setEnabled: coordinator.setComputerActionEnabled,
+                setRequiresPrefix: coordinator.setComputerActionRequiresPrefix)
+
+            Section("Workflow chains") {
                 if chainStore.chains.isEmpty {
                     Text("No chains yet. Build a named sequence of actions VoxFlow runs over the captured transcript from the ⌘K palette.")
                         .font(VF.captionFont).foregroundStyle(.secondary)
@@ -184,7 +168,7 @@ struct ToolsSettingsPane: View {
                             .font(VF.captionFont).foregroundStyle(.tertiary)
                     }
 
-                    Button("Add step") {
+                    Button("Add Step") {
                         newChainSteps.append(draftStepKind.makeStep(action: draftActionId, mode: draftCaptureMode))
                     }
                 }
@@ -206,26 +190,8 @@ struct ToolsSettingsPane: View {
                     .disabled(newChainName.isEmpty || newChainSteps.isEmpty)
                 }
             }
-
-            Section("Notion") {
-                SecureField("Personal access token", text: $notionToken)
-                Button("Save token") {
-                    KeychainService.save(account: NotionKeychain.account, value: notionToken)
-                }
-                if secretLoader(NotionKeychain.account)?.isEmpty == false {
-                    Label("Token stored in Keychain", systemImage: "checkmark.seal")
-                        .font(VF.captionFont).foregroundStyle(.secondary)
-                }
-                Text("Create a Personal Access Token in Notion's Developer portal → Personal access tokens (grant the “Notion API” capability). No page-sharing needed — it uses your own access; expires after 1 year.")
-                    .font(VF.captionFont).foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
-        .onAppear {
-            guard !draftsLoaded else { return }
-            draftsLoaded = true
-            notionToken = secretLoader(NotionKeychain.account) ?? ""
-        }
     }
 
     private func resetChainDraft() {

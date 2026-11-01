@@ -304,18 +304,18 @@ final class UISnapshotExportTests: XCTestCase {
 
     // MARK: - Settings
 
-    private func settingsView(initialTab: SettingsTab) -> SettingsView {
+    private func settingsView(initialTab: SettingsTab, state: AppState = UISnapshotFixtures.state()) -> SettingsView {
         let stores = UISnapshotFixtures.settingsStores()
         return SettingsView(
-            coordinator: coordinator, state: UISnapshotFixtures.state(),
+            coordinator: coordinator, state: state,
             dictionary: stores.dictionary, snippetStore: stores.snippets,
             chainStore: stores.chains, providerStore: stores.providers,
             initialTab: initialTab, secretLoader: { _ in nil })
     }
 
-    private func exportSettings(_ tab: SettingsTab, name: String) throws {
+    private func exportSettings(_ tab: SettingsTab, name: String, state: AppState = UISnapshotFixtures.state()) throws {
         try SnapshotRenderer.export(
-            settingsView(initialTab: tab), name: "settings-\(name)", size: CGSize(width: 660, height: 560))
+            settingsView(initialTab: tab, state: state), name: "settings-\(name)", size: CGSize(width: 660, height: 560))
     }
 
     func testSettingsGeneral() throws {
@@ -323,14 +323,27 @@ final class UISnapshotExportTests: XCTestCase {
         try exportSettings(.general, name: "general")
     }
 
+    func testSettingsApps() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.appProfiles = [
+                "com.apple.Notes": AppProfile(tone: .neutral, cleanupMode: .light, insertBehavior: .autoInsertLight),
+                "com.apple.Terminal": AppProfile(tone: .concise, cleanupMode: .raw, insertBehavior: .autoInsertRaw),
+                "com.apple.mail": AppProfile(tone: .formal, cleanupMode: .light, insertBehavior: .alwaysReview),
+                "com.example.notinstalled": AppProfile(tone: .neutral, cleanupMode: .raw, insertBehavior: .alwaysReview),
+            ]
+        }
+        try exportSettings(.apps, name: "apps", state: state)
+    }
+
+    func testSettingsVoice() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        try exportSettings(.voice, name: "voice")
+    }
+
     func testSettingsModels() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
         try exportSettings(.models, name: "models")
-    }
-
-    func testSettingsTools() throws {
-        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
-        try exportSettings(.tools, name: "tools")
     }
 
     func testSettingsPrivacy() throws {
@@ -341,11 +354,6 @@ final class UISnapshotExportTests: XCTestCase {
     func testSettingsAdvanced() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
         try exportSettings(.advanced, name: "advanced")
-    }
-
-    func testSettingsPermissions() throws {
-        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
-        try exportSettings(.permissions, name: "permissions")
     }
 
     // MARK: - Setup and welcome

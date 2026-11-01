@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Settings > Privacy: inference routing and the private API configuration.
+/// Settings > Privacy: inference routing, the private API configuration, and the
+/// microphone and accessibility permissions (with their polling timer).
 struct PrivacySettingsPane: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
@@ -9,12 +10,14 @@ struct PrivacySettingsPane: View {
     @State private var privateAPIModelDraft = ""
     @State private var privateAPIKeyDraft = ""
     @State private var draftsLoaded = false
+    @State private var permissions = PermissionSnapshot(microphoneAuthorized: false, accessibilityAuthorized: false)
+    @State private var permissionPollTimer: Timer?
 
     var body: some View {
         Form {
-            Section("Provider Mode") {
+            Section("Provider mode") {
                 Picker(
-                    "Inference routing",
+                    "Process text with",
                     selection: Binding(
                         get: { state.providerMode },
                         set: { coordinator.selectProviderMode($0) }
@@ -52,14 +55,74 @@ struct PrivacySettingsPane: View {
                 }
             }
 
+            Section("Permissions") {
+                HStack {
+                    Text("Microphone")
+                    Spacer()
+                    VFStatusBadge(status: Self.permissionStatus(granted: permissions.microphoneAuthorized))
+                    Button("Request") {
+                        coordinator.requestMicrophonePermission()
+                        refreshPermissions()
+                    }
+                }
+
+                HStack {
+                    Text("Accessibility")
+                    Spacer()
+                    VFStatusBadge(status: Self.permissionStatus(granted: permissions.accessibilityAuthorized))
+                    Button("Request") {
+                        coordinator.requestAccessibilityPermission()
+                        startPermissionPolling()
+                    }
+                }
+
+                Button("Refresh Permissions") {
+                    refreshPermissions()
+                }
+
+                Text("Microphone lets VoxFlow hear you. Accessibility lets it type into other apps.")
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+            }
+
         }
         .formStyle(.grouped)
         .onAppear {
+            refreshPermissions()
             guard !draftsLoaded else { return }
             draftsLoaded = true
             privateAPIBaseURLDraft = state.privateAPIBaseURL
             privateAPIModelDraft = state.privateAPIModel
             privateAPIKeyDraft = secretLoader(SettingsCoordinator.keychainPrivateAPIKeyAccount) ?? ""
         }
+        .onDisappear {
+            permissionPollTimer?.invalidate()
+            permissionPollTimer = nil
+        }
+    }
+
+    /// The permission vocabulary: Granted is ready, Missing needs attention.
+    static func permissionStatus(granted: Bool) -> VFStatus {
+        granted ? VFStatus(.ready, "Granted") : VFStatus(.attention, "Missing")
+    }
+
+    private func refreshPermissions() {
+        permissions = coordinator.permissionSnapshot()
+    }
+
+    private func startPermissionPolling() {
+        permissionPollTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            Task { @MainActor in
+                let snap = coordinator.permissionSnapshot()
+                permissions = snap
+                if snap.accessibilityAuthorized {
+                    permissionPollTimer?.invalidate()
+                    permissionPollTimer = nil
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        permissionPollTimer = timer
     }
 }

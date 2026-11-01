@@ -24,11 +24,11 @@ struct ComputerActionSettingsSection: View {
     let setRequiresPrefix: (Bool) -> Void
 
     var body: some View {
-        Section("Voice action controls") {
+        Section("Voice actions") {
             Picker("Allow voice actions", selection: Binding(get: { settings.mode }, set: { selectMode($0) })) {
                 ForEach(VoiceActionMode.allCases) { mode in Text(mode.displayName).tag(mode) }
             }
-            Text("Custom prompts use your selected skill profile below. Off keeps quick capture as dictation.")
+            Text("Custom prompts use your selected skill profile above. Off keeps quick capture as dictation.")
                 .font(VF.captionFont).foregroundStyle(.secondary)
             Picker("Command phrases", selection: Binding(get: { settings.requiresPrefix }, set: setRequiresPrefix)) {
                 Text("Require ‘Voxflow’").tag(true)
