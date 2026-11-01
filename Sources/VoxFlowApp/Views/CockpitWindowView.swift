@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Cockpit Layer 0 — top-level long-form workspace window.
 ///
-/// Document-centric layout per the design spec: top bar (status pills),
+/// Document-centric layout per the design spec: top bar (status badge and chips),
 /// main pane (transcript + voice prompt strip + chip row), side panel
 /// (Target / Notion / Dictionary / Assistant / Recent). Keyboard shortcuts
 /// wired via ``KeyEventBridge``
@@ -35,7 +35,7 @@ struct CockpitWindowView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 480)
-        .background(.regularMaterial)
+        .background(VF.surfaceWindow)
         .overlay(alignment: .top) {
             // R4.4: spotlight-style overlay, not a sheet — sheets slide from
             // the window chrome and read as modal dialogs.
@@ -59,12 +59,12 @@ struct CockpitWindowView: View {
                     body: preview,
                     primary: ("Send", { appCoordinator?.confirmAssistantHandoff() }),
                     secondary: ("Cancel", { appCoordinator?.dismissAssistantHandoff() }),
-                    footnote: "Runs: \(state.assistantHandoffCommand) — transcript is passed on stdin. Nothing executes automatically."
+                    footnote: "Runs: \(state.assistantHandoffCommand). The transcript is passed on stdin, and nothing runs automatically."
                 )
             } else if state.handoffInFlight {
                 ProgressView("Waiting for assistant…")
                     .padding(VF.spacingLarge)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+                    .vfSurface(.elevated, in: RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous))
             } else if let result = state.handoffResult {
                 handoffCard(
                     title: "Assistant response",
@@ -115,7 +115,7 @@ struct CockpitWindowView: View {
             }
             .frame(maxHeight: 220)
             .padding(VF.spacingSmall)
-            .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
+            .vfSurface(.card, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
             if let footnote {
                 Text(footnote).font(VF.microFont).foregroundStyle(.secondary)
             }
@@ -129,7 +129,7 @@ struct CockpitWindowView: View {
         }
         .padding(VF.spacingLarge)
         .frame(width: 480)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+        .vfSurface(.elevated, in: RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
     }
 
@@ -159,9 +159,7 @@ struct CockpitWindowView: View {
                     onShowPalette: { showPalette = true }
                 )
                 if let lastError {
-                    Text(lastError)
-                        .font(VF.captionFont)
-                        .foregroundStyle(VF.colorWarning)
+                    VFBanner(kind: .warning, message: lastError, onDismiss: { self.lastError = nil })
                         // Transient failure banner — auto-dismiss after a beat
                         // instead of lingering until the next action succeeds.
                         // task(id:) cancels the previous timer when a new error

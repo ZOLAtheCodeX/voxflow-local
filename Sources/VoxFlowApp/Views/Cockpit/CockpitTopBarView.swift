@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Cockpit top bar — recording status pill, model badge, target pill.
+/// Cockpit top bar: session status badge, Discard, in-flight action, cleanup
+/// provider, save-failure warning and the insert target.
 struct CockpitTopBarView: View {
     @ObservedObject var state: AppState
     @ObservedObject var sessionService: LongFormSessionService
@@ -8,40 +9,37 @@ struct CockpitTopBarView: View {
 
     var body: some View {
         HStack(spacing: VF.spacingSmall) {
-            recordingPill
+            statusBadge
             discardButton
-            inFlightPill
-            modelPill
-            persistenceWarningPill
+            inFlightChip
             Spacer()
-            targetPill
+            persistenceWarningChip
+            providerChip
+            targetChip
         }
         .font(VF.captionFont)
     }
 
-    /// Session 29: auto-save failures were silent — the user could dictate
+    /// Session 29: auto-save failures were silent, so the user could dictate
     /// for half an hour with the crash-recovery contract void. Visible the
     /// moment two consecutive saves fail; disappears on the next success.
-    @ViewBuilder private var persistenceWarningPill: some View {
+    @ViewBuilder private var persistenceWarningChip: some View {
         if sessionService.persistenceFailing {
-            pill("session not saving to disk", tint: VF.colorError)
+            VFChip(text: "Not saving to disk", symbol: "exclamationmark.triangle.fill", tint: VF.colorError)
                 .accessibilityLabel("Warning: session auto-save is failing")
         }
     }
 
-    @ViewBuilder private var recordingPill: some View {
+    @ViewBuilder private var statusBadge: some View {
         switch sessionService.state {
-        case .idle:
-            pill("● ready", tint: VF.colorNeutral)
         case .recording(let startedAt):
-            // TimelineView drives the tick — without it the elapsed string
+            // TimelineView drives the tick; without it the elapsed string
             // only refreshed when the parent happened to redraw (R4.6).
             TimelineView(.periodic(from: .now, by: 1.0)) { _ in
-                pill("● recording · \(elapsedString(since: startedAt))", tint: VF.colorError)
+                VFStatusBadge(status: .cockpit(sessionService.state), detail: elapsedString(since: startedAt))
             }
-            .accessibilityLabel("Recording in progress")
-        case .reviewing:
-            pill("● review", tint: VF.colorInfo)
+        default:
+            VFStatusBadge(status: .cockpit(sessionService.state))
         }
     }
 
@@ -58,52 +56,44 @@ struct CockpitTopBarView: View {
 
     /// Session 32: smart actions had no visible in-progress state (a 6 s
     /// transform looked like a dead chip). Ticks once a second while running.
-    @ViewBuilder private var inFlightPill: some View {
+    @ViewBuilder private var inFlightChip: some View {
         if let action = state.smartActionInFlight, let startedAt = state.smartActionStartedAt {
             TimelineView(.periodic(from: .now, by: 1.0)) { _ in
-                pill("● \(action.label.lowercased()) · \(elapsedString(since: startedAt))", tint: VF.colorInfo)
+                VFChip(
+                    text: "\(action.label) \(elapsedString(since: startedAt))",
+                    symbol: "ellipsis.circle", tint: VF.colorInfo)
             }
             .accessibilityLabel("\(action.label) smart action in progress")
         }
     }
 
-    private var modelPill: some View {
-        // R3.7: provenance from /v1/ready — which provider/model the polish
-        // chain would use right now. Empty provider = regex fallback
-        // (degraded, orange); "rules" = user-chosen rules floor (neutral).
+    private var providerChip: some View {
+        // R3.7: provenance from /v1/ready, meaning which provider and model
+        // the polish chain would use right now. An empty provider is the
+        // built-in rules fallback (degraded, warning tint); "rules" is the
+        // user's own choice (neutral).
         let provider = state.backendReadiness.activePolishProvider
         let model = state.backendReadiness.activePolishModel
         let isRules = provider == ProviderConfigStore.rulesSentinel
-        let label = provider.isEmpty
-            ? "regex fallback"
-            : (isRules ? "rules · local" : (model.isEmpty ? provider : "\(provider) · \(model)"))
-        return pill(label, tint: provider.isEmpty ? VF.colorWarning : VF.colorNeutral)
-            .accessibilityLabel(provider.isEmpty
-                ? "Polish degraded to regex fallback"
-                : (isRules ? "Polish served by local rules (chosen)" : "Polish served by \(label)"))
+        let degraded = VFCopy.isCleanupDegraded(provider: provider)
+        let label = VFCopy.cleanupProviderLabel(provider: provider, model: model)
+        return VFChip(text: label, tint: degraded ? VF.colorWarning : VF.colorNeutral)
+            .layoutPriority(-1)
+            .accessibilityLabel(degraded
+                ? "Cleanup degraded to the built-in rules"
+                : (isRules ? "Cleanup served by local rules (chosen)" : label))
     }
 
-    @ViewBuilder private var targetPill: some View {
-        if let target = sessionService.currentSession?.targetApp,
-           let name = target.appName {
-            HStack(spacing: 4) {
-                Text("→").foregroundStyle(.secondary)
-                pill(name, tint: VF.colorInfo)
-            }
-        } else {
-            HStack(spacing: 4) {
-                Text("→").foregroundStyle(.secondary)
-                pill("focused app", tint: VF.colorNeutral)
-            }
+    private var targetChip: some View {
+        let name = sessionService.currentSession?.targetApp?.appName
+        return HStack(spacing: VF.spacingXSmall) {
+            Image(systemName: "arrow.right")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VFChip(text: name ?? "Focused app", tint: name == nil ? VF.colorNeutral : VF.colorInfo)
         }
-    }
-
-    private func pill(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(VF.cardBackground, in: Capsule())
-            .foregroundStyle(tint)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Target: \(name ?? "Focused app")")
     }
 
     private func elapsedString(since: Date) -> String {

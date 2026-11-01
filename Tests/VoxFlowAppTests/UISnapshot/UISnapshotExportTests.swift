@@ -262,6 +262,35 @@ final class UISnapshotExportTests: XCTestCase {
         try SnapshotRenderer.export(cockpitView(fixture), name: "cockpit-review", size: cockpitSize)
     }
 
+    /// Recording: the top bar reads "Listening" with the elapsed time.
+    func testCockpitListening() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        // A fresh install still shows the voice-keyword banner.
+        let state = UISnapshotFixtures.state { $0.totalCaptureCount = 2; $0.voicePromptStripDismissed = false }
+        let fixture = UISnapshotFixtures.cockpit(state: state, transcript: nil)
+        fixture.session.start(targetApp: state.focusTarget)
+        fixture.session.setTranscript("Draft the quarterly update for the design team. Mention the new onboarding flow")
+        try SnapshotRenderer.export(cockpitView(fixture), name: "cockpit-listening", size: cockpitSize)
+    }
+
+    /// A long transcript wraps inside the reading width, with an action
+    /// running (the in-flight chip) and a wide window to show the centering.
+    func testCockpitLongTranscript() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let paragraph = "Draft the quarterly update for the design team. Mention the new onboarding flow, "
+            + "the two open accessibility fixes, and the review scheduled for Thursday afternoon. "
+            + "Then call out that the cockpit now has a proper reading surface with a capped line length, "
+            + "so a long dictation stays comfortable to read and to edit before it is inserted."
+        let transcript = [paragraph, paragraph, paragraph].joined(separator: "\n\n")
+        let state = UISnapshotFixtures.state {
+            $0.smartActionInFlight = .memo
+            $0.smartActionStartedAt = Date().addingTimeInterval(-4)
+        }
+        let fixture = UISnapshotFixtures.cockpit(state: state, transcript: transcript)
+        try SnapshotRenderer.export(
+            cockpitView(fixture), name: "cockpit-long-transcript", size: CGSize(width: 1180, height: 700))
+    }
+
     // MARK: - Dashboard
 
     func testDashboard() throws {

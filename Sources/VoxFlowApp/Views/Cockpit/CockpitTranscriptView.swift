@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Cockpit transcript pane — editable when the session is in `.reviewing` state;
+/// Cockpit transcript pane: editable when the session is in `.reviewing` state;
 /// read-only during recording and idle. Focus-loss commits the edit via
 /// `LongFormSessionService.setTranscript(_:)` and fires `onEditCommit` for
 /// downstream consumers (e.g. dictionary learning).
@@ -13,38 +13,63 @@ struct CockpitTranscriptView: View {
     @FocusState private var editing: Bool
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: VF.spacingSmall) {
-                if let session = sessionService.currentSession {
-                    crumbs(session)
-                    if sessionService.state == .reviewing {
-                        TextEditor(text: $draft)
-                            .font(VF.bodyFont)
-                            .frame(minHeight: 200)
-                            .focused($editing)
-                            .onChange(of: editing) { _, isEditing in
-                                if isEditing { baseline = draft }
-                                else { commitEdit() }
-                            }
-                    } else {
-                        Text(session.transcript.isEmpty ? placeholder : session.transcript)
-                            .font(VF.bodyFont)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+        Group {
+            if let session = sessionService.currentSession {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: VF.spacingSmall) {
+                        crumbs(session)
+                        page(session)
                     }
-                } else {
-                    Text("Press ⌘R to start a long-form capture.")
-                        .font(VF.bodyFont)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // A capped line length, centered when the window is wide.
+                    .frame(maxWidth: VF.readingMaxWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(VF.spacingLarge)
                 }
+            } else {
+                VFEmptyState(
+                    title: "No capture yet",
+                    symbol: "waveform",
+                    message: "Press ⌘R to start a long-form capture.",
+                    shortcuts: [
+                        VFShortcutHint(keys: "⌘R", label: "Record"),
+                        VFShortcutHint(keys: "⌘.", label: "Stop"),
+                        VFShortcutHint(keys: "⌘↩", label: "Insert"),
+                        VFShortcutHint(keys: "⌘K", label: "Actions"),
+                    ])
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(VF.spacingLarge)
         }
         .onChange(of: sessionService.currentSession?.transcript) { _, new in
             if !editing { draft = new ?? "" }
         }
         .onAppear { draft = sessionService.currentSession?.transcript ?? "" }
+    }
+
+    /// The writing surface: an opaque text background in reading type.
+    private func page(_ session: LongFormSession) -> some View {
+        Group {
+            if sessionService.state == .reviewing {
+                TextEditor(text: $draft)
+                    .font(VF.readingFont)
+                    .lineSpacing(VF.readingLineSpacing)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 200)
+                    .focused($editing)
+                    .onChange(of: editing) { _, isEditing in
+                        if isEditing { baseline = draft }
+                        else { commitEdit() }
+                    }
+            } else {
+                Text(session.transcript.isEmpty ? placeholder : session.transcript)
+                    .font(VF.readingFont)
+                    .lineSpacing(VF.readingLineSpacing)
+                    .foregroundStyle(session.transcript.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(VF.spacingMedium)
+        .vfSurface(.content, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
     }
 
     private func commitEdit() {

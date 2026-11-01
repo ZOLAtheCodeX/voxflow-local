@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Action chip row — visible smart actions plus the "all actions" overflow.
+/// Action chip row: visible smart actions plus the "All Actions" overflow.
 ///
 /// Layer 0 ships the three default chips (memo / MECE / items). Other
 /// actions appear via the ⌘K palette and graduate into the chip row after
@@ -18,15 +18,18 @@ struct CockpitChipRowView: View {
             }
             Spacer()
             Button(action: onShowPalette) {
-                Text("⌘K  all actions")
-                    .font(VF.captionFont)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, VF.spacingMedium)
-                    .padding(.vertical, 5)
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(VF.colorNeutral.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-                    )
+                HStack(spacing: VF.spacingXSmall) {
+                    Text("All Actions")
+                        .font(VF.captionFont)
+                    VFKeycap(keys: "⌘K")
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, VF.spacingMedium)
+                .padding(.vertical, 5)
+                .overlay(
+                    Capsule()
+                        .strokeBorder(VF.hairline, lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
             .keyboardShortcut("k", modifiers: .command)
@@ -43,14 +46,10 @@ struct CockpitChipRowView: View {
         Button {
             onActionTriggered(action)
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: VF.spacingXSmall) {
                 Text(state.smartActionInFlight == action ? "\(action.label)…" : action.label)
                     .font(VF.captionFont)
-                Text("⌘\(shortcut)")
-                    .font(VF.monoMicroFont)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: 3))
+                VFKeycap(keys: "⌘\(shortcut)")
             }
             .padding(.horizontal, VF.spacingMedium)
             .padding(.vertical, 5)
