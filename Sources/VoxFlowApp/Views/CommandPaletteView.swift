@@ -150,10 +150,9 @@ struct CommandPaletteView: View {
             let latest = receiptStore.latest
             PaletteLastResultCard(
                 row: latest.map { CaptureReceiptRowModel(receipt: $0) },
-                canReinsert: PaletteLastResult.canReinsert(
-                    latest: latest, hasRecentDictation: !state.recentDictations.isEmpty),
+                // SessionMemoryStore.recent() lists newest first.
+                canReinsert: PaletteLastResult.canReinsert(latest: latest, newest: state.recentDictations.first),
                 onInsertAgain: {
-                    // SessionMemoryStore.recent() lists newest first.
                     if let newest = state.recentDictations.first {
                         coordinator.insertRecentDictation(newest)
                     }

@@ -106,10 +106,11 @@ struct PaletteOptionsRow: View {
 
             Divider()
 
+            // No shortcut here: Cmd-1 is bound once, on the footer's hidden
+            // button, so it can never fire twice.
             Button("Setup\u{2026}") {
                 onOpenSetup()
             }
-            .keyboardShortcut("1", modifiers: [.command])
         } label: {
             Image(systemName: "ellipsis.circle")
         }

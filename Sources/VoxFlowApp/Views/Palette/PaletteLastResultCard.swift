@@ -8,16 +8,43 @@ import SwiftUI
 /// the last one.
 enum PaletteLastResult {
 
-    static func canReinsert(receiptIsReject: Bool, hasRecentDictation: Bool) -> Bool {
-        !receiptIsReject && hasRecentDictation
+    static func canReinsert(
+        receiptIsReject: Bool, hasRecentDictation: Bool, newestDictationMatchesReceipt: Bool
+    ) -> Bool {
+        !receiptIsReject && hasRecentDictation && newestDictationMatchesReceipt
     }
 
-    /// The same rule read from the latest receipt itself. Only an insertion
-    /// counts: no receipt, a reject, or a voice action (which inserts no
-    /// text, so the newest dictation predates it) never offers Insert Again.
-    static func canReinsert(latest receipt: CaptureReceipt?, hasRecentDictation: Bool) -> Bool {
+    /// Whether the receipt records an insertion of this very dictation. The
+    /// receipt's `text` is the full inserted text (the audit log writes it
+    /// verbatim under the default retention), so both sides are compared
+    /// whole after trimming whitespace and newlines. Empty text never
+    /// matches: when unsure, no Insert Again.
+    static func matches(receiptText: String, candidateTexts: [String]) -> Bool {
+        let inserted = receiptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !inserted.isEmpty else { return false }
+        return candidateTexts.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == inserted }
+    }
+
+    /// The rule read from the latest receipt and the newest recent dictation.
+    /// Only an insertion of that dictation counts. No receipt, a reject, a
+    /// voice action, an insert of other text (a cockpit insert adds nothing
+    /// to the recent dictations), or a receipt without text (digest or none
+    /// retention) never offers Insert Again.
+    static func canReinsert(latest receipt: CaptureReceipt?, newest candidate: TranscriptCandidate?) -> Bool {
         guard let receipt else { return false }
-        return canReinsert(receiptIsReject: receipt.event != .insert, hasRecentDictation: hasRecentDictation)
+        let matchesReceipt = candidate.map {
+            matches(receiptText: receipt.text ?? "", candidateTexts: candidateTexts(for: $0))
+        } ?? false
+        return canReinsert(
+            receiptIsReject: receipt.event != .insert,
+            hasRecentDictation: candidate != nil,
+            newestDictationMatchesReceipt: matchesReceipt)
+    }
+
+    /// Every text the dictation could have been inserted as: one per cleanup
+    /// mode, plus the raw transcript.
+    private static func candidateTexts(for candidate: TranscriptCandidate) -> [String] {
+        CleanupMode.allCases.map { candidate.text(for: $0) } + [candidate.rawText]
     }
 
     /// The first chip `CaptureReceiptRowModel` gives a computer-action

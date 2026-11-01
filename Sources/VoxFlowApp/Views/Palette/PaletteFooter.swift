@@ -59,7 +59,8 @@ struct PaletteFooter: View {
 
     /// Cmd-1 opens Setup as before. Setup lives in the ••• menu and the
     /// setup banner now, so this button is invisible and hidden from
-    /// VoiceOver; it exists only for the shortcut.
+    /// VoiceOver; it exists only for the shortcut, and it is the palette's
+    /// only Cmd-1 binding (the ••• "Setup…" item carries none).
     private var setupShortcut: some View {
         Button("Open Setup", action: onOpenSetup)
             .keyboardShortcut("1", modifiers: [.command])
