@@ -11,6 +11,15 @@ enum VFMotion {
     }
 }
 
+extension EnvironmentValues {
+    /// Makes `vfSurface(.hud, in:)` use the `.regularMaterial` look even on
+    /// macOS 26, where it would otherwise use Liquid Glass. Nothing in the app
+    /// sets it, so live behavior is unchanged; it exists so offscreen renders
+    /// (the UI snapshot harness), where glass does not draw, can show the
+    /// macOS 14 and 15 look.
+    @Entry var vfPrefersMaterialSurfaces: Bool = false
+}
+
 enum VFSurfaceKind {
     /// Floating chrome: the pill and the palette panel.
     case hud
@@ -70,6 +79,7 @@ private struct VFSurfaceModifier<S: InsettableShape>: ViewModifier {
     let kind: VFSurfaceKind
     let shape: S
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.vfPrefersMaterialSurfaces) private var prefersMaterial
 
     private var wantsStroke: Bool {
         contrast == .increased && (kind == .hud || kind == .card)
@@ -88,7 +98,7 @@ private struct VFSurfaceModifier<S: InsettableShape>: ViewModifier {
     private func surfaced(_ content: Content) -> some View {
         switch kind {
         case .hud:
-            if #available(macOS 26, *) {
+            if #available(macOS 26, *), !prefersMaterial {
                 content.glassEffect(.regular, in: shape)
             } else {
                 content.background(.regularMaterial, in: shape)

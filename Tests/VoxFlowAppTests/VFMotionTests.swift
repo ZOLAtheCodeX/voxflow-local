@@ -9,4 +9,8 @@ final class VFMotionTests: XCTestCase {
         XCTAssertFalse(VFMotion.allowsRepeatingAnimation(isActive: false, reduceMotion: false))
         XCTAssertFalse(VFMotion.allowsRepeatingAnimation(isActive: false, reduceMotion: true))
     }
+
+    func test_material_surfaces_preference_defaults_to_false() {
+        XCTAssertFalse(EnvironmentValues().vfPrefersMaterialSurfaces)
+    }
 }

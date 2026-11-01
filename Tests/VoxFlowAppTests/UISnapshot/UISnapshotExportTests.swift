@@ -27,7 +27,8 @@ final class UISnapshotExportTests: XCTestCase {
         let presentation = PillPresentation()
         presentation.outcome = outcome
         try SnapshotRenderer.export(
-            RecordingPillView(state: state, presentation: presentation, onCancel: {}),
+            RecordingPillView(state: state, presentation: presentation, onCancel: {})
+                .environment(\.vfPrefersMaterialSurfaces, true),
             name: name, size: RecordingOverlayController.pillSize(for: outcome))
     }
 
