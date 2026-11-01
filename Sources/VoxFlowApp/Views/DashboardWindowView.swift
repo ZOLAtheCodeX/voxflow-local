@@ -95,7 +95,7 @@ struct DashboardWindowView: View {
             VFSectionHeader(title: "Recent captures")
 
             if receiptStore.receipts.isEmpty {
-                Text("No captures yet. Every dictation appears here, including ones that were not inserted.")
+                Text("No captures yet. Dictations that reach transcription appear here.")
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
                     .padding(VF.spacingMedium)

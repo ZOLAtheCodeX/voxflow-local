@@ -198,7 +198,7 @@ struct ModelsSettingsPane: View {
                         .textFieldStyle(.roundedBorder)
                     Picker("Type", selection: $newProviderKind) {
                         ForEach(ProviderKind.allCases) { kind in
-                            Text(kind.displayName).tag(kind)
+                            Text(Self.kindLabel(kind)).tag(kind)
                         }
                     }
                     if newProviderKind == .ollama || newProviderKind == .openaiCompat {

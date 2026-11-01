@@ -106,6 +106,11 @@ final class DesignTokenLintTests: XCTestCase {
             }
             dir.deleteLastPathComponent()
         }
-        throw XCTSkip("Package.swift not found above \(#filePath)")
+        // A lint that cannot find the sources must fail, not skip: a skip
+        // reads as green and the token rule would go unenforced.
+        XCTFail("Package.swift not found above \(#filePath)")
+        throw RepoRootNotFound()
     }
+
+    private struct RepoRootNotFound: Error {}
 }

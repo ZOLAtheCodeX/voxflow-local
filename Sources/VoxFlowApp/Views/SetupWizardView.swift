@@ -250,7 +250,7 @@ struct SetupWizardView: View {
                 .help("Skip the voice profile setup. You can run calibration later from Setup.")
             }
             Spacer()
-            Button("Start Over") {
+            Button("Reset Setup") {
                 coordinator.restartOnboardingCalibration()
                 coordinator.startBackend()
                 refreshPermissions()

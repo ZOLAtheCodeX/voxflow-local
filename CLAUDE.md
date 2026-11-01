@@ -52,6 +52,7 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
     SessionMemoryStore.swift            Ring buffer for recent dictations
     InsertionReceiptStore.swift         Read-only insertions.jsonl tail reader — palette last-capture row + Dashboard Recent Captures (CaptureReceipt/RowModel)
     MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem
+    RecordingOverlayController.swift    Floating recording pill panel (never key); `PillOutcome` classifies how a capture ended, `PillPresentation` publishes it (and the late-status-line hold) to `RecordingPillView`
     FocusContextMonitor.swift           Focused-target poller; frozen during capture
     CockpitCoordinator.swift            @MainActor cockpit orchestration — chip MRU + voice routing + insert/copy/undo + Notion target/search + assistant handoff + protocol/chain dispatch
     CockpitCaptureCoordinator.swift     Cockpit capture loop: periodic chunk cuts, single-flight drain on stop, session-bound appends, device-change salvage
@@ -69,7 +70,7 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
     Components/                 Shared view primitives (VFBanner, VFChip, VFEmptyState, VFKeycap, VFSectionHeader, VFStatusBadge)
     Palette/                    Command palette cards (header, recording, progress, review, last result, recent list, options row, footer)
     Settings/                   Settings panes (General, Apps, Voice, Models, Privacy, Advanced); SettingsView.swift is the thin tab shell
-    RecordingPillView.swift     Floating pill content (RecordingOverlayController owns the panel); live, working and outcome states
+    RecordingPillView.swift     Floating pill content (RecordingOverlayController owns the panel); live, working and outcome states, drawn from `PillPresentation` and `PillOutcome.badgeStatus`
     VFStatus.swift              One status vocabulary (symbol + word + color) and the pure mappings every surface uses
     VFModifiers.swift           Reduce Motion aware motion (`vfLive`) and surface wrappers; the only view file allowed repeating animation
     VFCopy.swift                Shared user-facing strings (cleanup label, hotkey hint, reject reasons), as pure functions
@@ -231,7 +232,7 @@ VOXFLOW_STT_BENCHMARK=1 swift test --filter WhisperKitPerformanceTests
 VOXFLOW_UI_SNAPSHOTS=<absolute dir> swift test --filter UISnapshotExportTests  # renders views to PNG from fixture data; skipped when unset
 ```
 
-`DesignTokenLintTests` enforces the Views token rule: no `Color` literals, system color names, `.system(size:)` or repeating animation outside `VFDesignTokens.swift` and `VFModifiers.swift`, and its baseline of exempt files must stay empty.
+`DesignTokenLintTests` enforces the Views token rule: no `Color` literals, system color names or `.system(size:)` outside `VFDesignTokens.swift`, and no repeating animation outside `VFDesignTokens.swift` and `VFModifiers.swift` (which is exempt from the motion rules only). Its baseline of exempt files must stay empty.
 
 Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish golden set: `backend/tests/golden_polish_set.json`.
 

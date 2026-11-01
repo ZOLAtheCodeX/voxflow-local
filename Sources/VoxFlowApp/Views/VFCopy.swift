@@ -5,7 +5,8 @@ import Foundation
 /// no state, no side effects.
 enum VFCopy {
 
-    /// How long a smart action runs before the slow-run notice appears.
+    /// How long the dictation progress card runs before the slow-run notice
+    /// appears.
     static let slowRunThresholdSeconds = 15
 
     /// The one-line description of what cleans up dictated text.
