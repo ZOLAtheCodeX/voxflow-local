@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// The menu-bar palette: status, the last result (or the live capture), one
+/// options row and a footer. A shell over the views in `Views/Palette/`;
+/// every control calls the coordinator method it called before the UI
+/// refresh.
 struct CommandPaletteView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
@@ -7,15 +11,14 @@ struct CommandPaletteView: View {
     var onOpenDashboardWindow: () -> Void = {}
     var onOpenSetup: () -> Void = {}
     var onQuit: () -> Void = {}
-    // Internal (not private) so the subviews in Views/Palette/ can reach them.
-    @State var activePanel: ActivePanel = .capture
-    @State var recordingBadgeAnimating = false
-    @State var showClearHistoryAlert = false
-    @State var showProfilePopover = false
-    @State var transcribingElapsed: Int = 0
 
-    /// Spelled out so the call sites' initializer stays exactly as it was
-    /// while the view state above is internal.
+    @State private var activePanel: ActivePanel = .dictate
+    /// Required setup steps still open (microphone, Accessibility), read
+    /// from the coordinator's permission snapshot.
+    @State private var setupStepsLeft = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Spelled out so the call sites' initializer stays exactly as it was.
     init(
         coordinator: AppCoordinator,
         state: AppState,
@@ -33,127 +36,172 @@ struct CommandPaletteView: View {
     }
 
     enum ActivePanel: String, CaseIterable, Identifiable {
-        case capture
-        case dashboard
+        case dictate
         case recent
 
         var id: String { rawValue }
 
         var displayName: String {
             switch self {
-            case .capture:
-                return "Dictate"
-            case .dashboard:
-                return "Stats"
-            case .recent:
-                return "Recent"
+            case .dictate: return "Dictate"
+            case .recent: return "Recent"
             }
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: VF.spacingMedium) {
-            header
+            PaletteHeaderView(
+                status: status,
+                targetAppName: state.focusTarget.appName,
+                isVoiceControlActive: state.isCommandLaneActive,
+                secondLine: secondLine,
+                errorMessage: state.errorMessage)
+                .padding(.horizontal, VF.spacingLarge)
+
+            if setupStepsLeft > 0 {
+                VFBanner(kind: .warning, message: setupBannerText, actionTitle: "Open", action: onOpenSetup)
+                    .padding(.horizontal, VF.spacingLarge)
+            }
 
             if state.onboardingPhase == .calibrating {
                 OnboardingCalibrationView(coordinator: coordinator, state: state)
             } else {
-                contentCard
+                mainSection
             }
 
-            if let error = state.errorMessage {
-                Text(error)
-                    .font(VF.labelFont)
-                    .foregroundStyle(VF.colorError)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            lastCaptureRow
-
-            SkillProfileMenu(store: coordinator.skillProfiles)
-                .font(VF.captionFont)
-                .padding(.horizontal, VF.spacingLarge)
-            VoiceActionModeMenu(settings: coordinator.computerActionSettings, selectMode: coordinator.selectVoiceActionMode)
-                .font(VF.captionFont)
+            PaletteOptionsRow(coordinator: coordinator, state: state, onOpenSetup: onOpenSetup)
                 .padding(.horizontal, VF.spacingLarge)
 
-            Text("Automatic Enter: \(state.autoSubmitMode.displayName)")
-                .font(VF.captionFont)
-                .foregroundStyle(state.autoSubmitMode == .off ? .secondary : VF.colorWarning)
-                .padding(.horizontal, VF.spacingLarge)
+            Divider()
 
-            footerBar
+            PaletteFooter(
+                state: state,
+                onOpenDashboard: onOpenDashboardWindow,
+                onOpenSetup: onOpenSetup,
+                onQuit: onQuit)
+                .padding(.horizontal, VF.spacingLarge)
         }
         .padding(.vertical, VF.spacingMedium)
-        .background(state.isCommandLaneActive ? VF.tintedBackground(VF.colorWarning, opacity: 0.08) : Color.clear)
+        .background(state.isCommandLaneActive ? VF.tintedBackground(VF.colorVoiceControl, opacity: 0.08) : Color.clear)
         .animation(VF.animationStandard, value: activePanel)
-        .animation(.smooth(duration: 0.3), value: state.sessionState)
+        .animation(VF.animationStandard, value: state.sessionState)
         .onAppear {
-            updateRecordingBadgeAnimation()
             receiptStore.refresh()
+            refreshSetupProgress()
         }
-        .onChange(of: state.sessionState) { _, _ in
-            updateRecordingBadgeAnimation()
+        .onChange(of: state.sessionState) { _, newState in
+            // A capture or a review always lands on the Dictate tab, so a
+            // review that opens the panel is never hidden behind Recent.
+            if newState != .idle { activePanel = .dictate }
+            refreshSetupProgress()
         }
         .onChange(of: state.captureCount) { _, _ in receiptStore.refresh() }
         .onChange(of: state.statusLine) { _, _ in receiptStore.refresh() }
     }
 
-    private var contentCard: some View {
-        Group {
-            switch state.sessionState {
-            case .recording:
-                recordingStateCard
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
-            case .transcribing:
-                transcribingStateCard
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
-            default:
-                mainDictationCard
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+    // MARK: - Main card
+
+    @ViewBuilder private var mainSection: some View {
+        switch state.sessionState {
+        case .recording:
+            PaletteRecordingCard(
+                duration: state.recordingDuration,
+                targetAppName: state.focusTarget.appName,
+                isVoiceControl: state.isCommandLaneActive,
+                onCancel: { coordinator.cancelActiveCapture() })
+                .padding(.horizontal, VF.spacingMedium)
+                .transition(.vfStateChange(reduceMotion: reduceMotion))
+        case .transcribing, .inserting:
+            PaletteProgressCard()
+                .padding(.horizontal, VF.spacingMedium)
+                .transition(.vfStateChange(reduceMotion: reduceMotion))
+        default:
+            VStack(alignment: .leading, spacing: VF.spacingSmall) {
+                Picker("Panel", selection: $activePanel) {
+                    ForEach(ActivePanel.allCases) { panel in
+                        Text(panel.displayName).tag(panel)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, VF.spacingLarge)
+
+                Group {
+                    switch activePanel {
+                    case .recent:
+                        PaletteRecentList(coordinator: coordinator, state: state)
+                    case .dictate:
+                        dictateCard
+                    }
+                }
+                .id(activePanel)
+                .padding(.horizontal, VF.spacingMedium)
+                .transition(.vfStateChange(reduceMotion: reduceMotion))
             }
+            .transition(.vfStateChange(reduceMotion: reduceMotion))
         }
     }
 
-    private var mainDictationCard: some View {
-        VStack(alignment: .leading, spacing: VF.spacingMedium) {
-            HStack {
-                Text(state.canStartCaptureForDictation ? "Target Ready" : "No Text Target")
-                    .font(VF.labelFont)
-                    .foregroundStyle(state.canStartCaptureForDictation ? .green : .orange)
-                Spacer()
-                Text(state.focusTarget.appName ?? "No active app")
-                    .font(VF.captionFont)
-                    .foregroundStyle(.secondary)
-            }
-
-            Picker("Panel", selection: $activePanel) {
-                ForEach(ActivePanel.allCases) { panel in
-                    Text(panel.displayName).tag(panel)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Group {
-                switch activePanel {
-                case .dashboard:
-                    DashboardPanelView(coordinator: coordinator, state: state) {
-                        activePanel = .capture
-                    } onOpenFullDashboard: {
-                        onOpenDashboardWindow()
+    @ViewBuilder private var dictateCard: some View {
+        if state.sessionState == .review || state.privacyPreview != nil {
+            PaletteReviewCard(coordinator: coordinator, state: state)
+        } else {
+            let latest = receiptStore.latest
+            PaletteLastResultCard(
+                row: latest.map { CaptureReceiptRowModel(receipt: $0) },
+                canReinsert: PaletteLastResult.canReinsert(
+                    latest: latest, hasRecentDictation: !state.recentDictations.isEmpty),
+                onInsertAgain: {
+                    // SessionMemoryStore.recent() lists newest first.
+                    if let newest = state.recentDictations.first {
+                        coordinator.insertRecentDictation(newest)
                     }
-                case .recent:
-                    recentDictationsPanel
-                case .capture:
-                    capturePanel
-                }
-            }
-            .id(activePanel)
-            .transition(.opacity.combined(with: .move(edge: .trailing)))
+                },
+                onCopy: {
+                    if let newest = state.recentDictations.first {
+                        PaletteRecentCopy.copy(newest, state: state)
+                    }
+                },
+                onDetails: onOpenDashboardWindow)
         }
-        .padding(16)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+    }
+
+    // MARK: - Status
+
+    private var dictationReady: Bool {
+        state.canUseSelectedSTTBackend && (!state.workflowNeedsBackend || state.backendReadiness.readyForDictation)
+    }
+
+    private var status: VFStatus {
+        VFStatus.palette(
+            sessionState: state.sessionState,
+            isCommandLaneActive: state.isCommandLaneActive,
+            dictationReady: dictationReady,
+            isWarmingUp: state.backendReadiness.warmupInProgress,
+            hasTextTarget: state.canStartCaptureForDictation)
+    }
+
+    private var secondLine: String {
+        VFCopy.paletteSecondLine(
+            status: status,
+            hint: VFCopy.hotkeyHint(dictation: state.dictationHotkeyPreset, voiceControl: state.commandLaneHotkeyPreset),
+            statusLine: state.statusLine)
+    }
+
+    // MARK: - Setup
+
+    private var setupBannerText: String {
+        setupStepsLeft == 1 ? "Finish setup: 1 step left" : "Finish setup: \(setupStepsLeft) steps left"
+    }
+
+    private func refreshSetupProgress() {
+        let permissions = coordinator.permissionSnapshot()
+        let progress = SetupProgress(
+            microphone: permissions.microphoneAuthorized,
+            accessibility: permissions.accessibilityAuthorized,
+            engine: dictationReady,
+            calibration: state.onboardingPhase == .complete)
+        setupStepsLeft = progress.remainingRequired
     }
 }

@@ -94,7 +94,15 @@ final class UISnapshotExportTests: XCTestCase {
 
     func testPaletteIdle() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
-        let state = UISnapshotFixtures.state { $0.statusLine = "Hold Fn to talk" }
+        // The recent dictation lets the Last-dictation card offer Insert
+        // Again; the old palette showed recent dictations only under Recent,
+        // so the before image is unaffected.
+        let state = UISnapshotFixtures.state {
+            $0.statusLine = "Hold Fn to talk"
+            $0.recentDictations = [
+                UISnapshotFixtures.candidate("Draft the quarterly update for the design team.", minutesAgo: 4),
+            ]
+        }
         try SnapshotRenderer.export(
             palette(state, receipts: UISnapshotFixtures.sampleReceiptLines()),
             name: "palette-idle", size: paletteSize, fitHeight: true)
@@ -148,7 +156,9 @@ final class UISnapshotExportTests: XCTestCase {
             ]
         }
         // The active panel is private view state with no injection seam, so
-        // the harness selects the Recent segment on the live control.
+        // the harness selects the Recent segment (the last one of the
+        // palette's only segmented control, Dictate | Recent) on the live
+        // control.
         try SnapshotRenderer.export(
             palette(state, receipts: UISnapshotFixtures.sampleReceiptLines()),
             name: "palette-recent", size: paletteSize, fitHeight: true,
@@ -157,6 +167,75 @@ final class UISnapshotExportTests: XCTestCase {
                 segments.selectedSegment = max(0, segments.segmentCount - 1)
                 _ = segments.sendAction(segments.action, to: segments.target)
             })
+    }
+
+    /// Review Focus 3: the newest receipt is a reject while recent
+    /// dictations exist. The card shows the reason and no Insert Again.
+    func testPaletteAfterReject() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.statusLine = "No speech detected. Try again."
+            $0.recentDictations = [
+                UISnapshotFixtures.candidate("Draft the quarterly update for the design team.", minutesAgo: 4),
+            ]
+        }
+        let now = Date()
+        let reject = #"{"event":"reject","ts":"\#(ISO8601DateFormatter().string(from: now.addingTimeInterval(-60)))","reason":"silence","source":"Rejected (silence)","audio_seconds":1.4,"rms":0.002,"audio_file":"/tmp/voxflow-snapshot-reject.wav"}"#
+        try SnapshotRenderer.export(
+            palette(state, receipts: UISnapshotFixtures.sampleReceiptLines(now: now) + [reject]),
+            name: "palette-after-reject", size: paletteSize, fitHeight: true)
+    }
+
+    /// Review Focus 5: a 300-character status line and a long target name
+    /// stay on one line each, tail-truncated.
+    func testPaletteLongStrings() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.backendReadiness.readyForDictation = false
+            $0.backendReadiness.whisperKitReady = false
+            $0.statusLine = String(repeating: "Speech model still loading after a long pause, please wait. ", count: 5)
+            $0.focusTarget = FocusTargetSnapshot(
+                hasFocusedTextInput: true, hasInsertionCursor: true, appName: "Microsoft Outlook (PWA)",
+                bundleID: "com.example.outlook-pwa", role: "AXTextArea", processIdentifier: nil)
+            $0.autoSubmitMode = .both
+            $0.providerMode = .privateAPI
+        }
+        try SnapshotRenderer.export(
+            palette(state, receipts: UISnapshotFixtures.sampleReceiptLines()),
+            name: "palette-long-strings", size: paletteSize, fitHeight: true)
+    }
+
+    /// The privacy preview is a consent gate: warning banner and outline.
+    func testPalettePrivacyReview() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.sessionState = .review
+            $0.providerMode = .privateAPI
+            $0.privateAPIBaseURL = "https://api.example.com"
+            $0.privateAPIModel = "example-model"
+            $0.privateAPIKeyConfigured = true
+            $0.statusLine = "Review privacy preview and approve request"
+            $0.privacyPreview = PrivacyPreview(
+                operation: .cleanup, token: "snapshot",
+                originalText: "Call Alex at 555 0100 about the invoice.",
+                redactedText: "Call [NAME] at [PHONE] about the invoice.")
+        }
+        try SnapshotRenderer.export(
+            palette(state, receipts: UISnapshotFixtures.sampleReceiptLines()),
+            name: "palette-privacy", size: paletteSize, fitHeight: true)
+    }
+
+    func testPaletteVoiceControl() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.sessionState = .recording
+            $0.isCommandLaneActive = true
+            $0.statusLine = "Listening for a command"
+            $0.recordingDuration = 2.4
+        }
+        try SnapshotRenderer.export(
+            palette(state, receipts: UISnapshotFixtures.sampleReceiptLines()),
+            name: "palette-voice-control", size: paletteSize, fitHeight: true)
     }
 
     // MARK: - Cockpit

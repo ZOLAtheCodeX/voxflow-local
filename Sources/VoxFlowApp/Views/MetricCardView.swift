@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shared metric card used by `DashboardPanelView` and `DashboardWindowView`.
+/// Metric card used by `DashboardWindowView`.
 ///
 /// Renders a label, a prominent value, and an optional detail line in a
 /// rounded `VF.cardBackground` surface. Extracted so both dashboards stay

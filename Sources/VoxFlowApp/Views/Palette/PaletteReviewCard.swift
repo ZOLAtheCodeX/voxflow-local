@@ -1,105 +1,112 @@
 import SwiftUI
 
-extension CommandPaletteView {
-    var capturePanel: some View {
-        VStack(alignment: .leading, spacing: VF.spacingSmall) {
-            Picker("Provider", selection: Binding(
-                get: { state.providerMode },
-                set: { coordinator.selectProviderMode($0) }
-            )) {
-                ForEach(ProviderMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+/// The palette's review state: the privacy preview (a consent gate, so it
+/// leads with a warning and a warning outline), or the translation, meeting
+/// or dictation review, then Insert (return), Copy and Start Over (Cmd-R).
+/// Every button calls the coordinator method it called before the refresh.
+struct PaletteReviewCard: View {
+    @ObservedObject var coordinator: AppCoordinator
+    @ObservedObject var state: AppState
 
-            if state.providerMode == .privateAPI && (state.privateAPIBaseURL.isEmpty || state.privateAPIModel.isEmpty || !state.privateAPIKeyConfigured) {
-                Text("Private API mode needs Base URL, Model, and API key in Settings.")
-                    .font(VF.captionFont.weight(.semibold))
-                    .foregroundStyle(VF.colorExternal)
-            }
+    private let shape = RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous)
 
-            Picker("Mode", selection: Binding(
-                get: { state.workflowMode },
-                set: { coordinator.selectWorkflowMode($0) }
-            )) {
-                ForEach(state.availableWorkflowModes) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            if let privacyPreview = state.privacyPreview {
-                privacyReview(preview: privacyPreview)
+    var body: some View {
+        VStack(alignment: .leading, spacing: VF.spacingMedium) {
+            if let preview = state.privacyPreview {
+                privacyReview(preview: preview)
             } else {
                 switch state.workflowMode {
                 case .translateEnToDe:
                     translationReview
                 case .meeting:
                     meetingReview
-                case .dictation:
+                case .dictation, .prompt:
+                    // Prompt mode reuses the dictation review surface.
                     dictationReview
-                case .prompt:
-                    dictationReview // prompt mode reuses the dictation review surface for now
                 }
             }
 
-            HStack(spacing: 10) {
-                Button("Insert") {
-                    coordinator.insertCurrentText()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.return, modifiers: [])
-                .disabled(insertDisabled)
-
-                Button("Copy") {
-                    coordinator.copyCurrentText()
-                }
-                .buttonStyle(.bordered)
-                .disabled(state.displayText.isEmpty)
-
-                Button("Retry") {
-                    coordinator.retryLastCapture()
-                }
-                .buttonStyle(.bordered)
-                .keyboardShortcut("r", modifiers: [.command])
-
-                Spacer()
+            actions
+        }
+        .padding(VF.spacingMedium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .vfSurface(.card, in: shape)
+        .overlay {
+            if state.privacyPreview != nil {
+                shape.strokeBorder(VF.colorWarning, lineWidth: 1)
             }
         }
     }
 
+    // MARK: - Actions
+
+    private var actions: some View {
+        HStack(spacing: VF.spacingSmall) {
+            Button("Insert") {
+                coordinator.insertCurrentText()
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.return, modifiers: [])
+            .disabled(insertDisabled)
+
+            Button("Copy") {
+                coordinator.copyCurrentText()
+            }
+            .buttonStyle(.bordered)
+            .disabled(state.displayText.isEmpty)
+
+            Button("Start Over") {
+                coordinator.retryLastCapture()
+            }
+            .buttonStyle(.bordered)
+            .keyboardShortcut("r", modifiers: [.command])
+            .help("Discard this text and start over (\u{2318}R)")
+
+            Spacer(minLength: 0)
+
+            if showsConfidence, let candidate = state.transcriptCandidate, candidate.confidence > 0 {
+                ConfidenceBadge(confidence: candidate.confidence)
+            }
+        }
+    }
+
+    private var showsConfidence: Bool {
+        state.privacyPreview == nil && (state.workflowMode == .dictation || state.workflowMode == .prompt)
+    }
+
+    private var insertDisabled: Bool {
+        if state.privacyPreview != nil {
+            return true
+        }
+
+        if state.displayText.isEmpty {
+            return true
+        }
+
+        if state.workflowMode == .translateEnToDe {
+            return state.translationCandidate?.approved != true
+        }
+
+        if state.workflowMode == .meeting {
+            return state.meetingCandidate?.approved != true
+        }
+
+        return false
+    }
+
+    // MARK: - Privacy
+
     private func privacyReview(preview: PrivacyPreview) -> some View {
         VStack(alignment: .leading, spacing: VF.spacingSmall) {
-            Text("Privacy Review")
-                .font(VF.labelFont.weight(.semibold))
-                .foregroundStyle(.secondary)
+            VFBanner(kind: .warning, message: "This text will leave your Mac. Check it before you approve.")
 
-            Text("Original")
-                .font(VF.captionFont.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(preview.originalText)
-                .font(VF.bodyFont)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
-                .lineLimit(4)
+            VFSectionHeader(title: "Original")
+            textBlock(preview.originalText, lineLimit: 4)
 
-            Text("Redacted")
-                .font(VF.captionFont.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(preview.redactedText)
-                .font(VF.bodyFont)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background {
-                    RoundedRectangle(cornerRadius: VF.cornerMedium)
-                        .fill(.regularMaterial)
-                        .overlay(VF.colorInfo.opacity(0.08))
-                }
-                .lineLimit(4)
+            VFSectionHeader(title: "Redacted")
+            textBlock(preview.redactedText, lineLimit: 4, tint: VF.colorInfo)
 
-            HStack(spacing: 8) {
+            HStack(spacing: VF.spacingSmall) {
                 Button("Approve Redacted") {
                     coordinator.approvePrivacyPreview(sendRaw: false)
                 }
@@ -119,105 +126,36 @@ extension CommandPaletteView {
         }
     }
 
+    // MARK: - Dictation
+
     private var dictationReview: some View {
-        VStack(alignment: .leading, spacing: VF.spacingSmall) {
-            Group {
-                if state.displayText.isEmpty {
-                    Text("Hold \(state.dictationHotkeyPreset.displayName) to dictate. Use \(state.commandLaneHotkeyPreset.displayName) for command lane.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ScrollView {
-                        Text(state.displayText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-            .font(VF.bodyFont)
-            .frame(minHeight: 92, maxHeight: 120)
-            .padding(10)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
-
-            HStack(spacing: 8) {
-                ForEach(CleanupMode.allCases) { mode in
-                    ModeChip(mode: mode, selected: state.selectedMode == mode) {
-                        coordinator.selectCleanupMode(mode)
-                    }
-                }
-                Spacer()
-                if let candidate = state.transcriptCandidate, candidate.confidence > 0 {
-                    ConfidenceBadge(confidence: candidate.confidence)
-                }
-            }
-
-            HStack(spacing: 8) {
-                Text("Tone")
-                    .font(VF.labelFont.weight(.semibold))
+        Group {
+            if state.displayText.isEmpty {
+                Text(VFCopy.hotkeyHint(dictation: state.dictationHotkeyPreset, voiceControl: state.commandLaneHotkeyPreset))
                     .foregroundStyle(.secondary)
-
-                ForEach(ToneStyle.allCases) { tone in
-                    Button(tone.displayName) {
-                        coordinator.selectToneStyle(tone)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(state.toneStyle == tone ? .accentColor : VF.colorNeutral)
-                    .accessibilityLabel("\(tone.displayName) tone")
-                    .accessibilityAddTraits(state.toneStyle == tone ? .isSelected : [])
-                }
-            }
-
-            if let bundleID = state.focusTarget.bundleID, let appName = state.focusTarget.appName {
-                Divider()
-                HStack(spacing: 6) {
-                    Button {
-                        showProfilePopover.toggle()
-                    } label: {
-                        Label("Profile: \(appName)", systemImage: "gearshape")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .popover(isPresented: $showProfilePopover) {
-                        appProfilePopover(bundleID: bundleID, appName: appName)
-                    }
-
-                    if state.appProfiles[bundleID] != nil {
-                        Text("Custom")
-                            .font(VF.captionFont.weight(.medium))
-                            .foregroundStyle(VF.colorInfo)
-                    }
+            } else {
+                ScrollView {
+                    Text(state.displayText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
+        .font(VF.bodyFont)
+        .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 120, alignment: .topLeading)
+        .padding(VF.spacingSmall + 2)
+        .vfSurface(.elevated, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
     }
+
+    // MARK: - Translation
 
     private var translationReview: some View {
         VStack(alignment: .leading, spacing: VF.spacingSmall) {
             if let candidate = state.translationCandidate {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Captured English")
-                        .font(VF.captionFont.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(candidate.sourceEnglish)
-                        .font(VF.bodyFont)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
-                }
+                VFSectionHeader(title: "Captured English")
+                textBlock(candidate.sourceEnglish)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("German Output")
-                        .font(VF.captionFont.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(candidate.targetGerman)
-                        .font(VF.bodyFont)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background {
-                            RoundedRectangle(cornerRadius: VF.cornerMedium)
-                                .fill(.regularMaterial)
-                                .overlay(VF.tintedBackground(VF.colorSuccess, opacity: 0.08))
-                        }
-                }
+                VFSectionHeader(title: "German output")
+                textBlock(candidate.targetGerman, tint: VF.colorSuccess)
 
                 if !candidate.approved {
                     Button {
@@ -229,89 +167,47 @@ extension CommandPaletteView {
                     .tint(VF.colorSuccess)
                 }
             } else {
-                Text("Hold hotkey, speak in English, release to produce German text.")
+                Text("Hold the hotkey, speak in English, and release to get German text.")
                     .font(VF.bodyFont)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
             }
         }
     }
 
+    // MARK: - Meeting
+
     private var meetingReview: some View {
         VStack(alignment: .leading, spacing: VF.spacingSmall) {
             if let meeting = state.meetingCandidate {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Captured Transcript")
-                        .font(VF.captionFont.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(meeting.transcript)
+                VFSectionHeader(title: "Captured transcript")
+                textBlock(meeting.transcript, lineLimit: 4)
+
+                VFSectionHeader(title: "Structured notes")
+                ScrollView {
+                    Text(meeting.formattedNotes)
                         .font(VF.bodyFont)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
-                        .lineLimit(4)
                 }
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Structured Notes")
-                        .font(VF.captionFont.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ScrollView {
-                        Text(meeting.formattedNotes)
-                            .font(VF.bodyFont)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(minHeight: 100, maxHeight: 150)
-                    .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: VF.cornerMedium)
-                            .fill(.regularMaterial)
-                            .overlay(VF.colorInfo.opacity(0.08))
-                    }
-                }
+                .frame(minHeight: 100, maxHeight: 150)
+                .padding(VF.spacingSmall + 2)
+                .background(VF.tintedBackground(VF.colorInfo, opacity: 0.08),
+                            in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
+                .vfSurface(.elevated, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
 
                 if !meeting.speakerSegments.isEmpty {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Speaker Segments")
-                            .font(VF.captionFont.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(meeting.speakerSegments) { segment in
-                                Text("• \(segment.speaker) (\(segment.utteranceCount)): \(segment.text)")
-                                    .font(VF.labelFont)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(10)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: VF.cornerMedium))
-                    }
+                    VFSectionHeader(title: "Speaker segments")
+                    listBlock(meeting.speakerSegments.map { "\u{2022} \($0.speaker) (\($0.utteranceCount)): \($0.text)" })
                 }
 
                 if !meeting.taskOwners.isEmpty {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Task Owners")
-                            .font(VF.captionFont.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(meeting.taskOwners) { owner in
-                                let confidence = Int((owner.confidence * 100).rounded())
-                                Text("• \(owner.task) -> \(owner.owner) (\(confidence)%)")
-                                    .font(VF.labelFont)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(10)
-                        .background {
-                            RoundedRectangle(cornerRadius: VF.cornerMedium)
-                                .fill(.regularMaterial)
-                                .overlay(VF.tintedBackground(VF.colorSuccess, opacity: 0.08))
-                        }
-                    }
+                    VFSectionHeader(title: "Task owners")
+                    listBlock(meeting.taskOwners.map { owner in
+                        let confidence = Int((owner.confidence * 100).rounded())
+                        return "\u{2022} \(owner.task) \u{2192} \(owner.owner) (\(confidence)%)"
+                    }, tint: VF.colorSuccess)
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: VF.spacingSmall) {
                     Button("Copy Markdown Template") {
                         coordinator.copyMeetingMarkdownTemplate()
                     }
@@ -333,33 +229,38 @@ extension CommandPaletteView {
                     .tint(VF.colorSuccess)
                 }
             } else {
-                Text("Meeting mode: hold hotkey to capture, then review summary, decisions, actions, and follow-ups.")
+                Text("Meeting mode: hold the hotkey to capture, then review the summary, decisions, actions and follow-ups.")
                     .font(VF.bodyFont)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
             }
         }
     }
 
-    private var insertDisabled: Bool {
-        if state.privacyPreview != nil {
-            return true
-        }
+    // MARK: - Blocks
 
-        if state.displayText.isEmpty {
-            return true
-        }
+    /// Read-only text on a raised surface, optionally tinted.
+    private func textBlock(_ text: String, lineLimit: Int? = nil, tint: Color? = nil) -> some View {
+        Text(text)
+            .font(VF.bodyFont)
+            .lineLimit(lineLimit)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(VF.spacingSmall + 2)
+            .background(tint.map { VF.tintedBackground($0, opacity: 0.08) } ?? Color.clear,
+                        in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
+            .vfSurface(.elevated, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
+    }
 
-        if state.workflowMode == .translateEnToDe {
-            return state.translationCandidate?.approved != true
+    private func listBlock(_ lines: [String], tint: Color? = nil) -> some View {
+        VStack(alignment: .leading, spacing: VF.spacingXSmall) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(VF.labelFont)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-
-        if state.workflowMode == .meeting {
-            return state.meetingCandidate?.approved != true
-        }
-
-        return false
+        .padding(VF.spacingSmall + 2)
+        .background(tint.map { VF.tintedBackground($0, opacity: 0.08) } ?? Color.clear,
+                    in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
+        .vfSurface(.elevated, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
     }
 }

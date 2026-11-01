@@ -1,78 +1,99 @@
 import SwiftUI
 
-extension CommandPaletteView {
-    var footerBar: some View {
-        HStack(spacing: VF.spacingSmall) {
-            Button {
-                onOpenSetup()
-            } label: {
-                Image(systemName: "wand.and.stars")
-            }
-            .accessibilityLabel("Open Setup Wizard")
-            .help("Open Setup Wizard")
-            .buttonStyle(.bordered)
-            .keyboardShortcut("1", modifiers: [.command])
+/// The palette's footer: the cleanup provider on its own line (a model name
+/// is too long to share a 430 pt row with four buttons), then Settings
+/// (Cmd-,), Dashboard (Cmd-2), Cockpit (opens through the same notification
+/// as the Welcome window and the Opt-Cmd-V hotkey) and Quit (Cmd-Q). Setup
+/// left the footer; a hidden button keeps Cmd-1.
+struct PaletteFooter: View {
+    @ObservedObject var state: AppState
+    var onOpenDashboard: () -> Void
+    var onOpenSetup: () -> Void
+    var onQuit: () -> Void
 
-            Button {
-                onOpenDashboardWindow()
-            } label: {
-                Image(systemName: "chart.bar.xaxis")
-            }
-            .accessibilityLabel("Open Dashboard")
-            .help("Open Dashboard")
-            .buttonStyle(.bordered)
-            .keyboardShortcut("2", modifiers: [.command])
-
-            SettingsLink {
-                Image(systemName: "gearshape")
-            }
-            .accessibilityLabel("Open Settings")
-            .help("Open Settings")
-            .keyboardShortcut(",", modifiers: [.command])
-
-            Spacer()
-
-            polishProviderIndicator
-
-            Button {
-                onQuit()
-            } label: {
-                Image(systemName: "power")
-            }
-            .accessibilityLabel("Quit VoxFlow")
-            .help("Quit VoxFlow")
-            .buttonStyle(.bordered)
-            .keyboardShortcut("q", modifiers: [.command])
+    var body: some View {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            cleanupLabel
+            buttons
         }
-        .labelStyle(.iconOnly)
-        .controlSize(.regular)
-        .padding(.horizontal, 16)
     }
 
-    /// R3.7 mode-in-use indicator: which provider serves polish right now.
-    /// Orange = degraded to the local regex fallback (provider chain down).
-    /// "rules · local" = the user CHOSE the rules floor (not degraded).
-    @ViewBuilder private var polishProviderIndicator: some View {
+    private var buttons: some View {
+        HStack(spacing: VF.spacingSmall) {
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .keyboardShortcut(",", modifiers: [.command])
+            .help("Open Settings (\u{2318},)")
+
+            Button(action: onOpenDashboard) {
+                Label("Dashboard", systemImage: "chart.bar.xaxis")
+            }
+            .keyboardShortcut("2", modifiers: [.command])
+            .help("Open the Dashboard (\u{2318}2)")
+
+            Button {
+                NotificationCenter.default.post(name: .voxflowOpenCockpit, object: nil)
+            } label: {
+                HStack(spacing: VF.spacingXSmall) {
+                    Label("Cockpit", systemImage: "rectangle.and.pencil.and.ellipsis")
+                    VFKeycap(keys: "\u{2325}\u{2318}V")
+                }
+            }
+            .help("Open the Cockpit (\u{2325}\u{2318}V)")
+            .accessibilityLabel("Open the Cockpit")
+
+            Spacer(minLength: VF.spacingSmall)
+
+            Button(action: onQuit) {
+                Image(systemName: "power")
+            }
+            .keyboardShortcut("q", modifiers: [.command])
+            .help("Quit VoxFlow (\u{2318}Q)")
+            .accessibilityLabel("Quit VoxFlow")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .background { setupShortcut }
+    }
+
+    /// Cmd-1 opens Setup as before. Setup lives in the ••• menu and the
+    /// setup banner now, so this button is invisible and hidden from
+    /// VoiceOver; it exists only for the shortcut.
+    private var setupShortcut: some View {
+        Button("Open Setup", action: onOpenSetup)
+            .keyboardShortcut("1", modifiers: [.command])
+            .frame(width: 0, height: 0)
+            .opacity(0)
+            .accessibilityHidden(true)
+    }
+
+    /// Which provider cleans up dictated text right now. Warning tint and a
+    /// warning symbol when the chain fell back to the built-in rules without
+    /// the user choosing them.
+    @ViewBuilder private var cleanupLabel: some View {
         let provider = state.backendReadiness.activePolishProvider
         let model = state.backendReadiness.activePolishModel
-        let isRules = provider == ProviderConfigStore.rulesSentinel
         if state.backendReadiness.processRunning || !provider.isEmpty {
-            HStack(spacing: 3) {
-                Image(systemName: provider.isEmpty ? "exclamationmark.triangle" : (isRules ? "text.badge.checkmark" : "brain"))
-                    .font(VF.microFont)
-                Text(provider.isEmpty ? "regex fallback" : (isRules ? "rules · local" : (model.isEmpty ? provider : "\(provider) · \(model)")))
-                    .font(VF.microFont)
+            let label = VFCopy.cleanupProviderLabel(provider: provider, model: model)
+            let degraded = VFCopy.isCleanupDegraded(provider: provider)
+            let isRules = provider == ProviderConfigStore.rulesSentinel
+            HStack(spacing: VF.spacingXSmall) {
+                Image(systemName: degraded ? "exclamationmark.triangle.fill" : (isRules ? "text.badge.checkmark" : "brain"))
+                    .accessibilityHidden(true)
+                Text(label)
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .foregroundStyle(provider.isEmpty ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-            .accessibilityLabel(provider.isEmpty
-                ? "Polish degraded to regex fallback"
-                : (isRules ? "Polish served by local rules (chosen)" : "Polish served by \(provider)"))
-            .help(provider.isEmpty
-                  ? "No polish provider reachable — output uses the local rules pipeline"
+            .font(VF.captionFont)
+            .foregroundStyle(degraded ? AnyShapeStyle(VF.colorWarning) : AnyShapeStyle(.secondary))
+            .help(degraded
+                  ? "No cleanup provider is reachable, so the built-in local rules clean up the text"
                   : (isRules
-                     ? "Local rules only — polish never loads an LLM"
-                     : "Polish provider: \(provider) \(model)"))
+                     ? "Local rules only: cleanup never loads a language model"
+                     : label))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
         }
     }
 }

@@ -1,17 +1,38 @@
 import SwiftUI
 
-extension CommandPaletteView {
-    var recentDictationsPanel: some View {
+/// The Recent row's copy, moved here unchanged so the Last-dictation card
+/// can share it. It writes `NSPasteboard.general` directly, as it always
+/// has; routing it through `SystemClipboard.copy` is an open follow-up.
+/// Tests never call it.
+@MainActor
+enum PaletteRecentCopy {
+    static func copy(_ candidate: TranscriptCandidate, state: AppState) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(candidate.text(for: candidate.selectedMode), forType: .string)
+        state.statusLine = "Copied to clipboard"
+    }
+}
+
+/// The palette's Recent tab: this session's dictations, newest first, each
+/// with Insert (`insertRecentDictation`) and Copy, and Clear History behind
+/// a confirmation (`clearSessionHistory`).
+struct PaletteRecentList: View {
+    @ObservedObject var coordinator: AppCoordinator
+    @ObservedObject var state: AppState
+
+    @State private var showClearHistoryAlert = false
+
+    var body: some View {
         VStack(alignment: .leading, spacing: VF.spacingSmall) {
             if state.recentDictations.isEmpty {
-                Text("No recent dictations this session.")
-                    .font(VF.bodyFont)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 24)
+                VFEmptyState(
+                    title: "No recent dictations",
+                    symbol: "clock",
+                    message: "Dictations from this session appear here.")
+                    .frame(maxWidth: .infinity)
             } else {
                 ScrollView {
-                    VStack(spacing: 6) {
+                    VStack(spacing: VF.spacingXSmall + 2) {
                         ForEach(state.recentDictations) { candidate in
                             recentRow(candidate)
                         }
@@ -34,18 +55,21 @@ extension CommandPaletteView {
                 }
             }
         }
+        .padding(VF.spacingMedium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .vfSurface(.card, in: RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous))
     }
 
     private func recentRow(_ candidate: TranscriptCandidate) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: VF.spacingSmall) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(String(candidate.rawText.prefix(80)) + (candidate.rawText.count > 80 ? "..." : ""))
+                Text(String(candidate.rawText.prefix(80)) + (candidate.rawText.count > 80 ? "\u{2026}" : ""))
                     .font(VF.labelFont)
                     .lineLimit(2)
 
                 HStack(spacing: 6) {
                     Text(candidate.selectedMode.displayName)
-                        .font(VF.captionFont.weight(.medium))
+                        .font(VF.captionEmphasizedFont)
                         .foregroundStyle(.secondary)
                     if candidate.confidence > 0 {
                         ConfidenceBadge(confidence: candidate.confidence)
@@ -58,7 +82,7 @@ extension CommandPaletteView {
 
             Spacer()
 
-            VStack(spacing: 4) {
+            VStack(spacing: VF.spacingXSmall) {
                 Button("Insert") {
                     coordinator.insertRecentDictation(candidate)
                 }
@@ -66,16 +90,14 @@ extension CommandPaletteView {
                 .controlSize(.small)
 
                 Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(candidate.text(for: candidate.selectedMode), forType: .string)
-                    state.statusLine = "Copied to clipboard"
+                    PaletteRecentCopy.copy(candidate, state: state)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
         }
-        .padding(8)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: VF.cornerSmall))
+        .padding(VF.spacingSmall)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: VF.cornerSmall, style: .continuous))
     }
 
     private func relativeTime(_ date: Date) -> String {

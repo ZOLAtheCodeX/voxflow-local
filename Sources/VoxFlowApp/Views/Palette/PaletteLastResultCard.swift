@@ -59,54 +59,73 @@ enum PaletteLastResult {
     }
 }
 
-extension CommandPaletteView {
-    /// Persistent last-capture provenance row — the pipeline stage card
-    /// vanishes the instant an insert lands; this stays until the next
-    /// capture replaces it. Rejects render tinted with their reason.
-    @ViewBuilder var lastCaptureRow: some View {
-        if let receipt = receiptStore.latest {
-            let row = CaptureReceiptRowModel(receipt: receipt)
-            HStack(spacing: VF.spacingSmall) {
-                Image(systemName: row.isReject ? "xmark.circle" : "checkmark.circle")
-                    .font(VF.captionFont)
-                    .foregroundStyle(row.isReject ? VF.colorWarning : VF.colorSuccess)
-                Text(row.relativeTime)
-                    .font(VF.microFont)
-                    .foregroundStyle(.secondary)
-                ForEach(row.chips, id: \.self) { chip in
-                    Text(chip)
-                        .font(VF.microFont)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(VF.cardBackground, in: Capsule())
-                }
-                if let target = row.targetLabel {
-                    Text(target)
-                        .font(VF.microFont)
-                        .foregroundStyle(.secondary)
-                }
-                if !row.detail.isEmpty {
-                    Text(row.detail)
-                        .font(VF.microFont)
-                        .foregroundStyle(.secondary)
-                }
-                if let reason = row.rejectReason {
-                    Text(reason)
-                        .font(VF.microFont)
-                        .foregroundStyle(VF.colorWarning)
-                }
-                Text(row.snippet)
-                    .font(VF.microFont)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+/// The idle palette's main card: the outcome of the latest capture from its
+/// receipt (outcome, target, time, then the snippet or the reject reason).
+/// Insert Again and Copy appear only when `canReinsert`; Details opens the
+/// Dashboard, where retained audio can be revealed.
+struct PaletteLastResultCard: View {
+    let row: CaptureReceiptRowModel?
+    let canReinsert: Bool
+    let onInsertAgain: () -> Void
+    let onCopy: () -> Void
+    let onDetails: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            VFSectionHeader(title: "Last dictation")
+
+            if let row {
+                VFStatusBadge(status: PaletteLastResult.headline(for: row), detail: row.relativeTime)
                     .truncationMode(.tail)
-                Spacer(minLength: 0)
+
+                if row.isReject {
+                    Text(reasonLine(row))
+                        .font(VF.secondaryFont)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else if !row.snippet.isEmpty {
+                    Text("\u{201C}\(row.snippet)\u{201D}")
+                        .font(VF.bodyFont)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(row.snippet)
+                }
+            } else {
+                Text("Nothing dictated yet.")
+                    .font(VF.secondaryFont)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(row.isReject
-                ? "Last capture rejected: \(row.rejectReason ?? "unknown")"
-                : "Last capture inserted via \(row.chips.joined(separator: ", "))")
+
+            HStack(spacing: VF.spacingSmall) {
+                if row != nil && canReinsert {
+                    Button("Insert Again", action: onInsertAgain)
+                        .help("Insert the newest dictation again")
+                    Button("Copy", action: onCopy)
+                        .help("Copy the newest dictation")
+                }
+                Spacer(minLength: 0)
+                Button(action: onDetails) {
+                    HStack(spacing: VF.spacingXSmall) {
+                        Text("Details")
+                        Image(systemName: "chevron.right")
+                            .accessibilityHidden(true)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .help("Open the Dashboard")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .font(VF.captionEmphasizedFont)
         }
+        .padding(VF.spacingMedium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .vfSurface(.card, in: RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous))
+    }
+
+    private func reasonLine(_ row: CaptureReceiptRowModel) -> String {
+        let reason = PaletteLastResult.rejectReasonText(row.rejectReason)
+        return row.audioFileURL == nil ? reason : "\(reason) · Audio kept"
     }
 }

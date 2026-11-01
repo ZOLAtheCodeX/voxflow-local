@@ -1,49 +1,59 @@
 import SwiftUI
 
-extension CommandPaletteView {
-    var recordingStateCard: some View {
-        VStack(alignment: .center, spacing: VF.spacingMedium) {
-            TimelineView(.animation(minimumInterval: 0.08)) { context in
-                HStack(alignment: .bottom, spacing: 6) {
-                    ForEach(0..<5, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(VF.colorError.gradient)
-                            .frame(width: 8, height: waveformHeight(index: index, time: context.date.timeIntervalSinceReferenceDate))
-                    }
-                }
-                .frame(height: 54)
-            }
-            .accessibilityLabel("Live recording level")
+/// The palette while the microphone is open: the listening status with a
+/// live dot (static under Reduce Motion), the elapsed time, the target app
+/// and Cancel (esc). The dot is an honest "listening" signal, not a level
+/// meter, matching the pill.
+struct PaletteRecordingCard: View {
+    let duration: TimeInterval
+    let targetAppName: String?
+    let isVoiceControl: Bool
+    let onCancel: () -> Void
 
-            Text(String(format: "%.1f", state.recordingDuration))
+    private var status: VFStatus { isVoiceControl ? .voiceControl : .listening }
+
+    var body: some View {
+        VStack(spacing: VF.spacingMedium) {
+            HStack(spacing: VF.spacingSmall) {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: 8, height: 8)
+                    .vfLive(true)
+                Text(status.label)
+                    .font(VF.headingFont)
+                    .foregroundStyle(status.color)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(status.label), \(elapsed)")
+
+            Text(elapsed)
                 .font(VF.timerFont)
                 .foregroundStyle(.primary)
+                .accessibilityHidden(true)
 
-            Text("Release hotkey to transcribe")
+            Text("Release the hotkey to transcribe")
                 .font(VF.captionFont)
                 .foregroundStyle(.secondary)
 
-            if let appName = state.focusTarget.appName, !appName.isEmpty {
-                Label("Inserting into \(appName)", systemImage: "arrow.right.circle")
+            // A voice-control command acts on the app; it inserts nothing.
+            if !isVoiceControl, let targetAppName, !targetAppName.isEmpty {
+                Label("Inserting into \(targetAppName)", systemImage: "arrow.right.circle")
                     .font(VF.captionEmphasizedFont)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Target application: \(appName)")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityLabel("Target application: \(targetAppName)")
             }
 
-            Button("Cancel Capture") {
-                coordinator.cancelActiveCapture()
-            }
-            .buttonStyle(.bordered)
-            .keyboardShortcut(.escape, modifiers: [])
+            Button("Cancel", action: onCancel)
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.escape, modifiers: [])
+                .help("Cancel this capture (esc)")
         }
         .frame(maxWidth: .infinity)
-        .padding(18)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge))
+        .padding(VF.spacingLarge)
+        .vfSurface(.card, in: RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous))
     }
 
-    private func waveformHeight(index: Int, time: TimeInterval) -> CGFloat {
-        let phase = (time * 3.2) + (Double(index) * 0.9)
-        let value = abs(sin(phase))
-        return 12 + CGFloat(value * 36)
-    }
+    private var elapsed: String { RecordingPillView.elapsedText(duration) }
 }
