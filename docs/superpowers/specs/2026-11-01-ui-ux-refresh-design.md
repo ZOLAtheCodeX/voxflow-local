@@ -723,28 +723,42 @@ recorded ruling; together they override the sections above.
   coordinator appends lost-text warnings to it after an insert ("may be
   incomplete…", "limit reached"), and the approved design replaced it with the
   hotkey hint when ready. The hint now shows only before the first dictation.
-- **Insert Again.** Offered only when the newest dictation produced the latest
-  receipt's text, and it inserts or copies exactly that text (the matched
-  cleanup variant). Never after a reject or a cockpit, translation, meeting or
-  prompt insert.
+- **Insert Again.** Offered only when the latest receipt is a quick-dictation
+  insert (automatic, or from the palette's review card) of the newest
+  dictation's text, and it inserts or copies exactly that text (the matched
+  cleanup variant). When it cannot be offered but the receipt matches the
+  current text, the card offers Copy only. Never after a reject.
+- **Current result in idle.** Translate, meeting and prompt modes keep their
+  result card in idle with Copy and the mode's own copy and approval buttons,
+  but no Insert: an idle insert has no target and has failed on `master`
+  since early September.
 - **Idle shortcuts.** ⏎ and ⌘R act only in the review card. An invisible idle ⏎
   that re-inserted old text was removed.
-- **Options row.** Disabled while recording, transcribing or inserting (the
-  workflow-mode switch restarts the engine). The cleanup menu appears only with
-  the review card, labeled "Cleanup level"; the provider label keeps "Cleanup:".
+- **Options row.** While recording, transcribing or inserting, Mode, Provider,
+  the app profile, Setup, Tone and Cleanup level are disabled (the
+  workflow-mode switch restarts the engine). Skill profile and Voice actions
+  stay available, because changing them revokes pending actions and automatic
+  Enter. The cleanup menu appears only with the review card, labeled "Cleanup
+  level"; the provider label keeps "Cleanup:". Tone and Cleanup level are
+  bound pickers, so VoiceOver reads the selection.
 - **Pill outcomes.** An `.error` ending shows "Not inserted" with the status
   line. A press too short to count and a cancelled transcription pass through
   transcribing, so they show their status line neutrally. When the reason is
   written late (an empty-capture reject), the pill keeps its working row for up
   to 3 seconds and then shows the reason with a full window; it follows at
-  most one later change. VoiceOver can cancel from the pill. The pill's
+  most one later change. A status line written by a focus change is ignored
+  by this logic. The pill passes clicks through whenever it offers no cancel.
+  VoiceOver can cancel from the pill. The pill's
   "Inserted" does not yet reflect the coordinator's "incomplete" warning; that
   needs a coordinator signal (Someday) and is a live check before install.
 - **Provider labels.** Rows make no locality claim ("Ollama", not "Ollama
   (local)"); the backend decides locality from the URL and `:cloud` models.
 - **Setup.** No summary line; engine readiness comes from live state only, so
-  Start Engine shows whenever the engine is not ready. "Start Over" is "Reset
-  Setup", so it is not confused with the palette's Start Over.
+  Start Engine shows whenever the engine is not ready. The speech-engine line
+  says where audio goes (this Mac, or the configured OpenAI endpoint). "Start
+  Over" is "Reset Setup", so it is not confused with the palette's Start Over.
+- **Models.** The provider note says cleanup, not dictation, keeps working
+  offline.
 - **Images.** A rendering-only environment key makes the pill images use the
   material fallback, because Liquid Glass does not render offscreen.
 
