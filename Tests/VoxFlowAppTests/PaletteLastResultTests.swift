@@ -149,12 +149,18 @@ final class PaletteLastResultTests: XCTestCase {
         }
     }
 
-    func test_only_the_dictation_pipelines_insert_counts_as_quick_dictation() {
+    /// Quick dictation inserts its text by auto-insert ("Inserted (…)") or
+    /// from the palette's review card ("review (…)", or "review" when the
+    /// mode has no provenance; ruling R51). Nothing else counts.
+    func test_quick_dictation_inserts_are_the_pipelines_and_the_review_cards() {
         XCTAssertTrue(PaletteLastResult.isQuickDictationInsert(receipt(insert)))
         XCTAssertTrue(PaletteLastResult.isQuickDictationInsert(receipt(
             #"{"event":"insert","ts":"2026-10-31T12:00:00Z","text":"x","source":"Inserted (raw — Notes)"}"#)))
+        XCTAssertTrue(PaletteLastResult.isQuickDictationInsert(receipt(reviewInsert)))
+        XCTAssertTrue(PaletteLastResult.isQuickDictationInsert(receipt(
+            #"{"event":"insert","ts":"2026-10-31T12:00:00Z","text":"x","source":"review"}"#)))
         for source in ["cockpit", "Chain: Tidy", "Re-inserted — Notes", "Snippet 'sig' inserted — Mail",
-                       "Prompt inserted (Email — Mail)", "review (light · rules)", "review"] {
+                       "Prompt inserted (Email — Mail)", "reviewed", "Review"] {
             XCTAssertFalse(
                 PaletteLastResult.isQuickDictationInsert(receipt(
                     #"{"event":"insert","ts":"2026-10-31T12:00:00Z","text":"x","source":"\#(source)"}"#)),
@@ -181,15 +187,47 @@ final class PaletteLastResultTests: XCTestCase {
     /// insert is not the pipeline's auto-insert: the current result stays
     /// reachable through insertCurrentText and copyCurrentText when the
     /// latest insert's text is the current text.
+    /// Ruling R51 (Codex NB1): a review-card insert of the newest local
+    /// dictation (Mail and Outlook ship Always Review) takes the recent path,
+    /// so Insert Again goes to the app it was dictated into. The current
+    /// result's insert cannot work in idle (no captured target).
+    func test_review_card_insert_of_the_newest_dictation_takes_the_recent_path() throws {
+        var newest = autoLight
+        newest.targetProcessIdentifier = 4242
+        for review in [reviewInsert,
+                       #"{"event":"insert","ts":"2026-10-31T12:06:00Z","text":"Draft the update.","source":"review","target":"Mail"}"#] {
+            let action = try XCTUnwrap(PaletteLastResult.reinsertAction(
+                latest: receipt(review), newest: newest, displayText: "draft the update"))
+            guard case .recent(let candidate) = action else { return XCTFail("expected the recent dictation, got \(action)") }
+            XCTAssertEqual(candidate.id, newest.id)
+            XCTAssertEqual(candidate.selectedMode, .light)
+            XCTAssertEqual(candidate.targetProcessIdentifier, 4242)
+            XCTAssertTrue(action.offersInsertAgain)
+        }
+    }
+
+    /// A Private API dictation never enters the recent dictations: its review
+    /// insert falls back to the current result, which offers Copy only.
     func test_falls_back_to_the_current_result_when_the_text_matches() {
         XCTAssertEqual(
             PaletteLastResult.reinsertAction(
                 latest: receipt(reviewInsert), newest: nil, displayText: "Draft the update."),
             .current)
+        let older = dictation(raw: "an older note", light: "An older note.", polish: "An older note.")
         XCTAssertEqual(
             PaletteLastResult.reinsertAction(
-                latest: receipt(reviewInsert), newest: autoLight, displayText: "  Draft the update.\n"),
-            .current, "trimmed on both sides")
+                latest: receipt(reviewInsert), newest: older, displayText: "  Draft the update.\n"),
+            .current, "trimmed on both sides; the newest recent dictation is other text")
+    }
+
+    /// Ruling R51: `insertCurrentText()` has no target once the session is
+    /// idle, so the current-result fallback offers Copy and no Insert Again.
+    func test_the_current_result_offers_copy_only() {
+        XCTAssertFalse(PaletteLastResult.ReinsertAction.current.offersInsertAgain)
+        XCTAssertTrue(PaletteLastResult.ReinsertAction.current.offersCopy)
+        let recent = PaletteLastResult.ReinsertAction.recent(autoLight)
+        XCTAssertTrue(recent.offersInsertAgain)
+        XCTAssertTrue(recent.offersCopy)
     }
 
     func test_no_fallback_when_the_current_text_differs() {

@@ -187,19 +187,19 @@ struct CommandPaletteView: View {
         case .lastDictation:
             let latest = receiptStore.latest
             // The newest recent dictation (SessionMemoryStore.recent() lists
-            // newest first) as it was inserted, or else the current result,
-            // or nil when Insert Again must not be offered. Insert Again and
-            // Copy both act on it, so they act on the text the card shows.
+            // newest first) as it was inserted, or else the current result
+            // for Copy only, or nil. Insert Again and Copy act on it, so they
+            // act on the text the card shows.
             let reinsert = PaletteLastResult.reinsertAction(
                 latest: latest, newest: state.recentDictations.first, displayText: state.displayText)
             PaletteLastResultCard(
                 row: latest.map { CaptureReceiptRowModel(receipt: $0) },
-                canReinsert: reinsert != nil,
+                canInsertAgain: reinsert?.offersInsertAgain ?? false,
+                canCopy: reinsert?.offersCopy ?? false,
                 onInsertAgain: {
-                    switch reinsert {
-                    case .recent(let candidate): coordinator.insertRecentDictation(candidate)
-                    case .current: coordinator.insertCurrentText()
-                    case nil: break
+                    // Only the recent dictation offers Insert Again (R51).
+                    if case .recent(let candidate) = reinsert {
+                        coordinator.insertRecentDictation(candidate)
                     }
                 },
                 onCopy: {
