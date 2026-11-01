@@ -4,9 +4,13 @@ import SwiftUI
 /// leads with a warning and a warning outline), or the translation, meeting
 /// or dictation review, then Insert (return), Copy and Start Over (Cmd-R).
 /// Every button calls the coordinator method it called before the refresh.
+/// In idle it shows a translate, meeting or prompt result after its insert
+/// (ruling R36) with `bindsKeys` false: the same buttons, no return or Cmd-R
+/// (ruling R13), so no invisible shortcut re-inserts.
 struct PaletteReviewCard: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
+    var bindsKeys = true
 
     private let shape = RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous)
 
@@ -46,7 +50,7 @@ struct PaletteReviewCard: View {
                 coordinator.insertCurrentText()
             }
             .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.return, modifiers: [])
+            .keyboardShortcut(bindsKeys ? KeyboardShortcut(.return, modifiers: []) : nil)
             .disabled(insertDisabled)
 
             Button("Copy") {
@@ -59,8 +63,8 @@ struct PaletteReviewCard: View {
                 coordinator.retryLastCapture()
             }
             .buttonStyle(.bordered)
-            .keyboardShortcut("r", modifiers: [.command])
-            .help("Discard this text and start over (\u{2318}R)")
+            .keyboardShortcut(bindsKeys ? KeyboardShortcut("r", modifiers: [.command]) : nil)
+            .help(bindsKeys ? "Discard this text and start over (\u{2318}R)" : "Discard this text and start over")
 
             Spacer(minLength: 0)
 

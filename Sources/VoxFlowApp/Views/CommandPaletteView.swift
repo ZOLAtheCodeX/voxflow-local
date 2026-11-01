@@ -151,27 +151,62 @@ struct CommandPaletteView: View {
         sessionState == .review || sessionState == .error || hasPrivacyPreview
     }
 
+    /// The card the Dictate tab shows outside a capture.
+    enum DictateCardKind: Equatable {
+        /// The review card. Its return (Insert) and Cmd-R (Start Over) keys
+        /// are bound only in review, in an error and during a privacy
+        /// preview; never in idle (ruling R13).
+        case review(bindsKeys: Bool)
+        case lastDictation
+    }
+
+    /// Ruling R36: translate, meeting and prompt results never enter the
+    /// recent dictations, so in idle their current result keeps the review
+    /// card (Insert, Copy, Start Over), as in the old palette, with no keys
+    /// bound. Dictation keeps the Last-dictation card, whose Insert Again
+    /// falls back to the current result (`PaletteLastResult.reinsertAction`).
+    nonisolated static func dictateCardKind(
+        sessionState: SessionState, hasPrivacyPreview: Bool, workflowMode: WorkflowMode, displayText: String
+    ) -> DictateCardKind {
+        if showsReviewCard(sessionState: sessionState, hasPrivacyPreview: hasPrivacyPreview) {
+            return .review(bindsKeys: true)
+        }
+        if sessionState == .idle, workflowMode != .dictation, !displayText.isEmpty {
+            return .review(bindsKeys: false)
+        }
+        return .lastDictation
+    }
+
     @ViewBuilder private var dictateCard: some View {
-        if Self.showsReviewCard(sessionState: state.sessionState, hasPrivacyPreview: state.privacyPreview != nil) {
-            PaletteReviewCard(coordinator: coordinator, state: state)
-        } else {
+        switch Self.dictateCardKind(
+            sessionState: state.sessionState, hasPrivacyPreview: state.privacyPreview != nil,
+            workflowMode: state.workflowMode, displayText: state.displayText
+        ) {
+        case .review(let bindsKeys):
+            PaletteReviewCard(coordinator: coordinator, state: state, bindsKeys: bindsKeys)
+        case .lastDictation:
             let latest = receiptStore.latest
             // The newest recent dictation (SessionMemoryStore.recent() lists
-            // newest first) as it was inserted, or nil when Insert Again must
-            // not be offered. Insert Again and Copy both act on this copy, so
-            // they act on the text the card shows.
-            let reinsert = PaletteLastResult.reinsertCandidate(latest: latest, newest: state.recentDictations.first)
+            // newest first) as it was inserted, or else the current result,
+            // or nil when Insert Again must not be offered. Insert Again and
+            // Copy both act on it, so they act on the text the card shows.
+            let reinsert = PaletteLastResult.reinsertAction(
+                latest: latest, newest: state.recentDictations.first, displayText: state.displayText)
             PaletteLastResultCard(
                 row: latest.map { CaptureReceiptRowModel(receipt: $0) },
                 canReinsert: reinsert != nil,
                 onInsertAgain: {
-                    if let reinsert {
-                        coordinator.insertRecentDictation(reinsert)
+                    switch reinsert {
+                    case .recent(let candidate): coordinator.insertRecentDictation(candidate)
+                    case .current: coordinator.insertCurrentText()
+                    case nil: break
                     }
                 },
                 onCopy: {
-                    if let reinsert {
-                        PaletteRecentCopy.copy(reinsert, state: state)
+                    switch reinsert {
+                    case .recent(let candidate): PaletteRecentCopy.copy(candidate, state: state)
+                    case .current: coordinator.copyCurrentText()
+                    case nil: break
                     }
                 },
                 onDetails: onOpenDashboardWindow)

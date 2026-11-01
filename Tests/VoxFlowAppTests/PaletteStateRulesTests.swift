@@ -76,4 +76,52 @@ final class PaletteStateRulesTests: XCTestCase {
         XCTAssertEqual(PaletteProgressCard.stage(sessionState: .transcribing, elapsedSeconds: 3), .transcribing)
         XCTAssertEqual(PaletteProgressCard.stage(sessionState: .transcribing, elapsedSeconds: 4), .cleaning)
     }
+
+    // MARK: - Current result in idle (ruling R36)
+
+    /// Translate, meeting and prompt results never enter the recent
+    /// dictations, so after an insert their review card stays up in idle, as
+    /// in the old palette, but without the return and Cmd-R keys (R13).
+    func test_idle_non_dictation_result_keeps_its_review_card_without_keys() {
+        for mode: WorkflowMode in [.translateEnToDe, .meeting, .prompt] {
+            XCTAssertEqual(
+                CommandPaletteView.dictateCardKind(
+                    sessionState: .idle, hasPrivacyPreview: false, workflowMode: mode, displayText: "Ergebnis"),
+                .review(bindsKeys: false), mode.rawValue)
+            XCTAssertEqual(
+                CommandPaletteView.dictateCardKind(
+                    sessionState: .idle, hasPrivacyPreview: false, workflowMode: mode, displayText: ""),
+                .lastDictation, "\(mode.rawValue) with no result")
+        }
+    }
+
+    /// Dictation keeps the Last-dictation card in idle; its Insert Again
+    /// falls back to the current result instead.
+    func test_idle_dictation_shows_the_last_dictation_card() {
+        XCTAssertEqual(
+            CommandPaletteView.dictateCardKind(
+                sessionState: .idle, hasPrivacyPreview: false, workflowMode: .dictation, displayText: "Draft."),
+            .lastDictation)
+    }
+
+    func test_review_states_bind_the_keys() {
+        for mode in WorkflowMode.allCases {
+            XCTAssertEqual(
+                CommandPaletteView.dictateCardKind(
+                    sessionState: .review, hasPrivacyPreview: false, workflowMode: mode, displayText: "x"),
+                .review(bindsKeys: true))
+            XCTAssertEqual(
+                CommandPaletteView.dictateCardKind(
+                    sessionState: .error, hasPrivacyPreview: false, workflowMode: mode, displayText: ""),
+                .review(bindsKeys: true))
+            XCTAssertEqual(
+                CommandPaletteView.dictateCardKind(
+                    sessionState: .idle, hasPrivacyPreview: true, workflowMode: mode, displayText: "x"),
+                .review(bindsKeys: true))
+        }
+        XCTAssertEqual(
+            CommandPaletteView.dictateCardKind(
+                sessionState: .onboarding, hasPrivacyPreview: false, workflowMode: .meeting, displayText: "x"),
+            .lastDictation)
+    }
 }

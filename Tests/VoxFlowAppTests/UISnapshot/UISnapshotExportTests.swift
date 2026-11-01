@@ -124,6 +124,23 @@ final class UISnapshotExportTests: XCTestCase {
             name: "palette-incomplete-warning", size: paletteSize, fitHeight: true)
     }
 
+    /// Ruling R36: after a translation is inserted the session is idle, and
+    /// the result keeps its review card (no return or Cmd-R keys).
+    func testPaletteIdleTranslationResult() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.workflowMode = .translateEnToDe
+            $0.statusLine = "Inserted"
+            $0.translationCandidate = TranslationCandidate(
+                sourceEnglish: "Draft the quarterly update for the design team.",
+                targetGerman: "Entwirf das Quartalsupdate für das Designteam.",
+                approved: true)
+        }
+        try SnapshotRenderer.export(
+            palette(state, receipts: UISnapshotFixtures.sampleReceiptLines()),
+            name: "palette-idle-translation-result", size: paletteSize, fitHeight: true)
+    }
+
     /// First run: no receipt yet, so the hotkey hint is a third header line.
     func testPaletteFirstRun() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
