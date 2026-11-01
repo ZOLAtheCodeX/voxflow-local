@@ -62,6 +62,10 @@ enum PillOutcome: Equatable {
 @MainActor
 final class PillPresentation: ObservableObject {
     @Published var outcome: PillOutcome?
+    /// True while a finished capture waits for a late status line (ruling
+    /// R29): the session is already idle, but the pill keeps its working row
+    /// rather than report the line written at `.transcribing` entry.
+    @Published var awaitingLateStatus = false
 }
 
 /// R4.1 — the floating recording pill.
@@ -74,6 +78,15 @@ final class PillPresentation: ObservableObject {
 /// for `outcomeDuration`, what happened to the dictation, then hides. It
 /// never takes key focus, so typing/dictation focus in the target app is
 /// untouched, and during the outcome it lets clicks through.
+///
+/// Late status lines (ruling R29, which supersedes R5): an empty-capture
+/// reject turns the session idle, then awaits the backend's speech diagnosis
+/// before it writes its reason, so the classifier can still see the line
+/// written at `.transcribing` entry ("Transcribing..."). The pill then keeps
+/// its working row for up to `lateStatusHold` and shows the first new line
+/// with a full outcome window, or hides with no outcome if none comes. Any
+/// other neutral outcome follows at most one later status line, restarting
+/// its window. A new capture cancels all of it at once.
 @MainActor
 final class RecordingOverlayController {
 
@@ -84,10 +97,25 @@ final class RecordingOverlayController {
         override var canBecomeMain: Bool { false }
     }
 
+    /// Where the pill is once a capture has been classified.
+    private enum AfterCapture {
+        /// Live, or nothing on screen.
+        case none
+        /// The classifier saw `heldLine`, the line written at `.transcribing`
+        /// entry: the working row stays up while the pill waits for a new one.
+        case awaitingLateStatus(heldLine: String)
+        /// An outcome is up. `follows` is how many later status lines a
+        /// neutral outcome may still take: one after a direct classification,
+        /// none after a late line.
+        case showing(follows: Int)
+    }
+
     private let panel: PillPanel
     private let state: AppState
     private let presentation = PillPresentation()
     private let outcomeDuration: Duration
+    private let lateStatusHold: Duration
+    private let announce: @MainActor (String) -> Void
     private var cancellables: Set<AnyCancellable> = []
 
     /// True from `.recording` until the capture's outcome is classified, or
@@ -97,18 +125,39 @@ final class RecordingOverlayController {
     private var insertSucceeded: Bool?
     private var lastState: SessionState = .idle
     private var classificationPending = false
-    /// The deferred classification and then the outcome timer.
+    /// The deferred classification, then the hold or outcome timer.
     private var outcomeTask: Task<Void, Never>?
+    private var afterCapture: AfterCapture = .none
+    /// The status line current at `.transcribing` entry for this capture.
+    private var transcribingLine: String?
+    private var transcribingLineTask: Task<Void, Never>?
 
     var isVisible: Bool { panel.isVisible }
     var panelForTesting: NSPanel { panel }
     var currentOutcome: PillOutcome? { presentation.outcome }
+    var transcribingLineForTesting: String? { transcribingLine }
+
+    /// True while the pill waits for a late status line (no outcome yet).
+    var isHoldingForStatusLine: Bool {
+        if case .awaitingLateStatus = afterCapture { return true }
+        return false
+    }
 
     /// `outcomeDuration` is how long the outcome stays up; `.zero` turns the
     /// outcome state off, so the pill hides as soon as the capture ends.
-    init(state: AppState, outcomeDuration: Duration = .milliseconds(1500), onCancel: @escaping () -> Void) {
+    /// `lateStatusHold` is the longest the pill waits for a late status line.
+    /// `announce` speaks each outcome to VoiceOver; tests pass a recorder.
+    init(
+        state: AppState,
+        outcomeDuration: Duration = .milliseconds(1500),
+        lateStatusHold: Duration = .seconds(3),
+        onCancel: @escaping () -> Void,
+        announce: @escaping @MainActor (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
+    ) {
         self.state = state
         self.outcomeDuration = outcomeDuration
+        self.lateStatusHold = lateStatusHold
+        self.announce = announce
         let size = Self.pillSize(for: nil)
         let panel = PillPanel(
             contentRect: NSRect(origin: .zero, size: size),
@@ -175,6 +224,9 @@ final class RecordingOverlayController {
                 return
             }
             cancelPendingClassification()
+            if newState == .transcribing, previous == .recording {
+                recordTranscribingLine()
+            }
             showLive()
         case .idle, .review, .onboarding, .error:
             if classificationPending {
@@ -182,10 +234,13 @@ final class RecordingOverlayController {
                 return
             }
             if captureActive, previous == .transcribing || previous == .inserting, outcomeDuration > .zero {
+                // Every capture that reached `.transcribing`, including a
+                // press too short to count and a canceled transcription
+                // (ruling R10), is classified.
                 scheduleClassification()
             } else {
-                // A recording that ends without transcribing (a cancel, a
-                // press too short to count), or anything outside a capture.
+                // A recording canceled before it was transcribed, or
+                // anything outside a capture.
                 captureActive = false
                 hide()
             }
@@ -197,11 +252,29 @@ final class RecordingOverlayController {
     private func beginCapture() {
         outcomeTask?.cancel()
         outcomeTask = nil
+        transcribingLineTask?.cancel()
+        transcribingLineTask = nil
+        transcribingLine = nil
         classificationPending = false
+        afterCapture = .none
         presentation.outcome = nil
+        presentation.awaitingLateStatus = false
         captureActive = true
         insertSucceeded = nil
         showLive()
+    }
+
+    /// The coordinator publishes `.transcribing` before it writes the line
+    /// that goes with it ("Transcribing...") in the same step, so the line is
+    /// read once now and again on the next main-actor turn, while the session
+    /// is still transcribing.
+    private func recordTranscribingLine() {
+        transcribingLine = state.statusLine
+        transcribingLineTask?.cancel()
+        transcribingLineTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled, self.captureActive, self.lastState == .transcribing else { return }
+            self.transcribingLine = self.state.statusLine
+        }
     }
 
     private func insertResultChanged(_ result: InsertResult?) {
@@ -209,16 +282,26 @@ final class RecordingOverlayController {
         insertSucceeded = result.success
     }
 
-    /// A neutral outcome IS the status line, so it follows a status line
-    /// written after the session left `.transcribing` (an empty-capture
-    /// reject awaits the backend's speech diagnosis before writing its
-    /// reason). A failed insert keeps its own message.
+    /// A late status line corrects the pill at most once (ruling R29). While
+    /// the pill waits, the first different line becomes the outcome. After a
+    /// neutral outcome, one later line replaces it, since that outcome IS the
+    /// status line. Either way the window restarts and nothing follows after.
+    /// A failed insert keeps its own message.
     private func statusLineChanged(_ line: String) {
-        guard case .status(let shown) = presentation.outcome, line != shown,
-              !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let updated = PillOutcome.status(message: line)
-        presentation.outcome = updated
-        announce(updated)
+        guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        switch afterCapture {
+        case .none:
+            return
+        case .awaitingLateStatus(let heldLine):
+            guard line != heldLine,
+                  let outcome = PillOutcome.classify(
+                      finalState: lastState, insertSucceeded: insertSucceeded, statusLine: line)
+            else { return }
+            show(outcome, follows: 0)
+        case .showing(let follows):
+            guard follows > 0, case .status(let shown) = presentation.outcome, line != shown else { return }
+            show(.status(message: line), follows: 0)
+        }
     }
 
     private func cancelPendingClassification() {
@@ -237,35 +320,62 @@ final class RecordingOverlayController {
         outcomeTask = Task { @MainActor [weak self] in
             await Task.yield()
             guard let self, !Task.isCancelled else { return }
-            await self.presentOutcome()
+            self.classifyOutcome()
         }
     }
 
-    private func presentOutcome() async {
+    private func classifyOutcome() {
+        outcomeTask = nil
         classificationPending = false
         captureActive = false
+        transcribingLineTask?.cancel()
+        transcribingLineTask = nil
         guard let outcome = PillOutcome.classify(
             finalState: lastState, insertSucceeded: insertSucceeded, statusLine: state.statusLine
         ) else {
             hide()
             return
         }
+        if case .status(let message) = outcome, message == transcribingLine {
+            awaitLateStatus(heldLine: message)
+            return
+        }
+        show(outcome, follows: 1)
+    }
+
+    /// Keeps the working row and waits for a new status line; if none comes
+    /// within `lateStatusHold`, hides with no outcome.
+    private func awaitLateStatus(heldLine: String) {
+        afterCapture = .awaitingLateStatus(heldLine: heldLine)
+        presentation.outcome = nil
+        presentation.awaitingLateStatus = true
+        // The session is idle, so the row offers no cancel: nothing to click.
+        panel.ignoresMouseEvents = true
+        hide(after: lateStatusHold)
+    }
+
+    /// Shows `outcome`, announces it and starts its full window.
+    private func show(_ outcome: PillOutcome, follows: Int) {
+        afterCapture = .showing(follows: follows)
+        presentation.awaitingLateStatus = false
         presentation.outcome = outcome
-        announce(outcome)
+        announce(outcome.announcement)
         place(size: Self.pillSize(for: outcome))
         panel.ignoresMouseEvents = true
         if !panel.isVisible { panel.orderFrontRegardless() }
-
-        try? await Task.sleep(for: outcomeDuration)
-        // A new capture or a later state change cancels this task; only an
-        // outcome that ran its course hides here.
-        guard !Task.isCancelled else { return }
-        outcomeTask = nil
-        hide()
+        hide(after: outcomeDuration)
     }
 
-    private func announce(_ outcome: PillOutcome) {
-        AccessibilityNotification.Announcement(outcome.announcement).post()
+    /// Replaces any running timer. A new capture or a later state change
+    /// cancels it; only a timer that ran its course hides here.
+    private func hide(after duration: Duration) {
+        outcomeTask?.cancel()
+        outcomeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: duration)
+            guard let self, !Task.isCancelled else { return }
+            self.outcomeTask = nil
+            self.hide()
+        }
     }
 
     // MARK: - Panel
@@ -293,7 +403,9 @@ final class RecordingOverlayController {
         outcomeTask?.cancel()
         outcomeTask = nil
         classificationPending = false
+        afterCapture = .none
         presentation.outcome = nil
+        presentation.awaitingLateStatus = false
         guard panel.isVisible else { return }
         panel.orderOut(nil)
     }
