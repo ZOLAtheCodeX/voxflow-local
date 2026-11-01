@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// Reads one secret by Keychain account. Injected so snapshot and unit tests
+/// never touch the real Keychain.
+typealias SecretLoader = (String) -> String?
+
+/// The Settings tabs, in display order.
+enum SettingsTab: Hashable {
+    case general, models, tools, privacy, advanced, permissions
+}
+
 struct SettingsView: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject var coordinator: AppCoordinator
@@ -8,6 +17,8 @@ struct SettingsView: View {
     @ObservedObject var snippetStore: SnippetStore
     @ObservedObject var chainStore: ChainStore
     @ObservedObject var providerStore: ProviderConfigStore
+    private let secretLoader: SecretLoader
+    @State private var selection: SettingsTab
     @State private var newSnippetKeyword = ""
     @State private var newSnippetText = ""
     @State private var newSnippetScope: SnippetScope = .global
@@ -41,20 +52,46 @@ struct SettingsView: View {
     @State private var ollamaPullTargetModel: String = ""
     @State private var notionToken: String = ""
 
+    init(
+        coordinator: AppCoordinator,
+        state: AppState,
+        dictionary: DictionaryStore,
+        snippetStore: SnippetStore,
+        chainStore: ChainStore,
+        providerStore: ProviderConfigStore,
+        initialTab: SettingsTab = .general,
+        secretLoader: @escaping SecretLoader = { KeychainService.load(account: $0) }
+    ) {
+        self.coordinator = coordinator
+        self.state = state
+        self.dictionary = dictionary
+        self.snippetStore = snippetStore
+        self.chainStore = chainStore
+        self.providerStore = providerStore
+        self.secretLoader = secretLoader
+        _selection = State(initialValue: initialTab)
+    }
+
     var body: some View {
-        TabView {
+        TabView(selection: $selection) {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
             modelsTab
                 .tabItem { Label("Models", systemImage: "brain") }
+                .tag(SettingsTab.models)
             toolsTab
                 .tabItem { Label("Dictation Tools", systemImage: "text.badge.star") }
+                .tag(SettingsTab.tools)
             privacyTab
                 .tabItem { Label("Privacy", systemImage: "lock.shield") }
+                .tag(SettingsTab.privacy)
             advancedTab
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
+                .tag(SettingsTab.advanced)
             permissionsTab
                 .tabItem { Label("Permissions", systemImage: "checkmark.shield") }
+                .tag(SettingsTab.permissions)
         }
         .frame(minWidth: 620, idealWidth: 660, minHeight: 480, idealHeight: 560)
         .onDisappear {
@@ -65,12 +102,12 @@ struct SettingsView: View {
             refreshPermissions()
             privateAPIBaseURLDraft = state.privateAPIBaseURL
             privateAPIModelDraft = state.privateAPIModel
-            privateAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainPrivateAPIKeyAccount) ?? ""
+            privateAPIKeyDraft = secretLoader(SettingsCoordinator.keychainPrivateAPIKeyAccount) ?? ""
             openAIBaseURLDraft = state.openAIBaseURL
-            openAIAPIKeyDraft = KeychainService.load(account: SettingsCoordinator.keychainOpenAIAPIKeyAccount) ?? ""
+            openAIAPIKeyDraft = secretLoader(SettingsCoordinator.keychainOpenAIAPIKeyAccount) ?? ""
             openAISTTModelDraft = state.openAISTTModel
             localWhisperModelDraft = state.localWhisperModel
-            notionToken = KeychainService.load(account: NotionKeychain.account) ?? ""
+            notionToken = secretLoader(NotionKeychain.account) ?? ""
         }
     }
 
@@ -630,7 +667,7 @@ struct SettingsView: View {
                 Button("Save token") {
                     KeychainService.save(account: NotionKeychain.account, value: notionToken)
                 }
-                if KeychainService.load(account: NotionKeychain.account)?.isEmpty == false {
+                if secretLoader(NotionKeychain.account)?.isEmpty == false {
                     Label("Token stored in Keychain", systemImage: "checkmark.seal")
                         .font(VF.captionFont).foregroundStyle(.secondary)
                 }
