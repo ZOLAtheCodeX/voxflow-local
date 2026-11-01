@@ -21,6 +21,7 @@ struct ToolsSettingsPane: View {
     @State private var draftActionId: SmartActionId = .memo
     @State private var draftCaptureMode: CaptureMode = .quick
     @State private var notionToken: String = ""
+    @State private var draftsLoaded = false
 
     var body: some View {
         Form {
@@ -221,6 +222,8 @@ struct ToolsSettingsPane: View {
         }
         .formStyle(.grouped)
         .onAppear {
+            guard !draftsLoaded else { return }
+            draftsLoaded = true
             notionToken = secretLoader(NotionKeychain.account) ?? ""
         }
     }

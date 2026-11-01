@@ -16,6 +16,7 @@ struct ModelsSettingsPane: View {
     @State private var openAIAPIKeyDraft = ""
     @State private var openAISTTModelDraft = ""
     @State private var localWhisperModelDraft = ""
+    @State private var draftsLoaded = false
     @State private var ollamaStatus: OllamaModelsResponse?
     @State private var ollamaLoadError: String?
     @State private var ollamaPullProgress: String?
@@ -267,6 +268,8 @@ struct ModelsSettingsPane: View {
         }
         .formStyle(.grouped)
         .onAppear {
+            guard !draftsLoaded else { return }
+            draftsLoaded = true
             openAIBaseURLDraft = state.openAIBaseURL
             openAIAPIKeyDraft = secretLoader(SettingsCoordinator.keychainOpenAIAPIKeyAccount) ?? ""
             openAISTTModelDraft = state.openAISTTModel

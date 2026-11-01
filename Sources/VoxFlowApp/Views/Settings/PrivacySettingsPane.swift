@@ -8,6 +8,7 @@ struct PrivacySettingsPane: View {
     @State private var privateAPIBaseURLDraft = ""
     @State private var privateAPIModelDraft = ""
     @State private var privateAPIKeyDraft = ""
+    @State private var draftsLoaded = false
 
     var body: some View {
         Form {
@@ -54,6 +55,8 @@ struct PrivacySettingsPane: View {
         }
         .formStyle(.grouped)
         .onAppear {
+            guard !draftsLoaded else { return }
+            draftsLoaded = true
             privateAPIBaseURLDraft = state.privateAPIBaseURL
             privateAPIModelDraft = state.privateAPIModel
             privateAPIKeyDraft = secretLoader(SettingsCoordinator.keychainPrivateAPIKeyAccount) ?? ""
