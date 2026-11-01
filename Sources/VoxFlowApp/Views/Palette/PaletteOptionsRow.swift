@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// One options row (Cleanup, Tone, and a ••• menu for the rest) plus a chip
-/// for each setting that is not at its default, because those change what a
-/// dictation does. Every item calls the coordinator method the old controls
-/// called: `selectCleanupMode`, `selectToneStyle`, `updateAppProfile`,
-/// `selectVoiceActionMode`, `selectProviderMode`, `selectWorkflowMode`.
+/// One options row (Tone, the Cleanup level while the review card shows,
+/// and a ••• menu for the rest) plus a chip for each setting that is not at
+/// its default, because those change what a dictation does. Every item calls
+/// the coordinator method the old controls called: `selectCleanupMode`,
+/// `selectToneStyle`, `updateAppProfile`, `selectVoiceActionMode`,
+/// `selectProviderMode`, `selectWorkflowMode`.
 struct PaletteOptionsRow: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
@@ -12,11 +13,13 @@ struct PaletteOptionsRow: View {
 
     @State private var showProfilePopover = false
 
-    /// Whether the Cleanup, Tone and ••• menus accept input. Not while a
-    /// capture is in flight: the old palette never showed these controls
-    /// then, and the workflow Mode picker clears candidates and restarts the
-    /// backend. The chips stay visible. Exhaustive on purpose, so a new
-    /// session state needs a decision here.
+    /// Whether the row's menus accept input. Not while a capture is in
+    /// flight (ruling R18): the workflow Mode picker clears candidates and
+    /// restarts the backend. The old palette hid its Cleanup and Tone chips
+    /// then, but its Skill profile and Voice actions menus stayed reachable
+    /// mid-capture; they are disabled now with the rest of the row, and
+    /// Settings still changes them. The chips stay visible. Exhaustive on
+    /// purpose, so a new session state needs a decision here.
     nonisolated static func isInteractive(sessionState: SessionState) -> Bool {
         switch sessionState {
         case .recording, .transcribing, .inserting:
@@ -26,12 +29,33 @@ struct PaletteOptionsRow: View {
         }
     }
 
+    /// The Cleanup level menu sets `selectedMode`, which picks the variant
+    /// the review card shows and inserts; every capture overwrites it, and
+    /// auto-insert uses the insert behavior's level instead. So it appears
+    /// only with the review card (ruling R33); in idle it would be a dead
+    /// control showing a stale level.
+    nonisolated static func showsCleanupMenu(sessionState: SessionState, hasPrivacyPreview: Bool) -> Bool {
+        CommandPaletteView.showsReviewCard(sessionState: sessionState, hasPrivacyPreview: hasPrivacyPreview)
+    }
+
+    /// "Cleanup level", so it is not read as the footer's "Cleanup:" label,
+    /// which names what does the cleanup.
+    nonisolated static func cleanupMenuTitle(_ mode: CleanupMode) -> String {
+        "Cleanup level: \(mode.displayName)"
+    }
+
     private var isInteractive: Bool { Self.isInteractive(sessionState: state.sessionState) }
+
+    private var showsCleanupMenu: Bool {
+        Self.showsCleanupMenu(sessionState: state.sessionState, hasPrivacyPreview: state.privacyPreview != nil)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: VF.spacingSmall) {
             HStack(spacing: VF.spacingLarge) {
-                cleanupMenu
+                if showsCleanupMenu {
+                    cleanupMenu
+                }
                 toneMenu
                 Spacer(minLength: 0)
                 moreMenu
@@ -68,10 +92,11 @@ struct PaletteOptionsRow: View {
                 }
             }
         } label: {
-            Text("Cleanup: \(state.selectedMode.displayName)")
+            Text(Self.cleanupMenuTitle(state.selectedMode))
         }
         .fixedSize()
-        .accessibilityLabel("Cleanup: \(state.selectedMode.displayName)")
+        .help("The cleanup level of the text under review")
+        .accessibilityLabel(Self.cleanupMenuTitle(state.selectedMode))
     }
 
     private var toneMenu: some View {

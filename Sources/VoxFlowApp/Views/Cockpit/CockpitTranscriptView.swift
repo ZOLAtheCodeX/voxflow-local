@@ -15,15 +15,30 @@ struct CockpitTranscriptView: View {
     var body: some View {
         Group {
             if let session = sessionService.currentSession {
-                ScrollView {
+                if sessionService.state == .reviewing {
+                    // The editor scrolls itself, so it is not nested in a
+                    // ScrollView (which proposes no height and left it at its
+                    // minimum): it fills the pane, and a long transcript
+                    // shows as much as fits and scrolls inside (ruling R32).
                     VStack(alignment: .leading, spacing: VF.spacingSmall) {
                         crumbs(session)
                         page(session)
                     }
                     // A capped line length, centered when the window is wide.
-                    .frame(maxWidth: VF.readingMaxWidth)
+                    .frame(maxWidth: VF.readingMaxWidth, maxHeight: .infinity)
                     .frame(maxWidth: .infinity)
                     .padding(VF.spacingLarge)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+                            crumbs(session)
+                            page(session)
+                        }
+                        // A capped line length, centered when the window is wide.
+                        .frame(maxWidth: VF.readingMaxWidth)
+                        .frame(maxWidth: .infinity)
+                        .padding(VF.spacingLarge)
+                    }
                 }
             } else {
                 VFEmptyState(
@@ -53,7 +68,7 @@ struct CockpitTranscriptView: View {
                     .font(VF.readingFont)
                     .lineSpacing(VF.readingLineSpacing)
                     .scrollContentBackground(.hidden)
-                    .frame(minHeight: 200)
+                    .frame(minHeight: 200, maxHeight: .infinity)
                     .focused($editing)
                     .onChange(of: editing) { _, isEditing in
                         if isEditing { baseline = draft }

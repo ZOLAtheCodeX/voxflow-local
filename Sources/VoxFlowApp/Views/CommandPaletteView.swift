@@ -113,7 +113,7 @@ struct CommandPaletteView: View {
                 .padding(.horizontal, VF.spacingMedium)
                 .transition(.vfStateChange(reduceMotion: reduceMotion))
         case .transcribing, .inserting:
-            PaletteProgressCard()
+            PaletteProgressCard(sessionState: state.sessionState)
                 .padding(.horizontal, VF.spacingMedium)
                 .transition(.vfStateChange(reduceMotion: reduceMotion))
         default:
