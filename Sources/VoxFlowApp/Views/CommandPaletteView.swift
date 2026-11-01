@@ -143,23 +143,35 @@ struct CommandPaletteView: View {
         }
     }
 
+    /// The Dictate tab shows the review card (Insert, Copy, Start Over) in
+    /// review, in an error (as the old palette did, so Start Over stays
+    /// reachable) and during a privacy preview; otherwise the Last-dictation
+    /// card.
+    nonisolated static func showsReviewCard(sessionState: SessionState, hasPrivacyPreview: Bool) -> Bool {
+        sessionState == .review || sessionState == .error || hasPrivacyPreview
+    }
+
     @ViewBuilder private var dictateCard: some View {
-        if state.sessionState == .review || state.privacyPreview != nil {
+        if Self.showsReviewCard(sessionState: state.sessionState, hasPrivacyPreview: state.privacyPreview != nil) {
             PaletteReviewCard(coordinator: coordinator, state: state)
         } else {
             let latest = receiptStore.latest
+            // The newest recent dictation (SessionMemoryStore.recent() lists
+            // newest first) as it was inserted, or nil when Insert Again must
+            // not be offered. Insert Again and Copy both act on this copy, so
+            // they act on the text the card shows.
+            let reinsert = PaletteLastResult.reinsertCandidate(latest: latest, newest: state.recentDictations.first)
             PaletteLastResultCard(
                 row: latest.map { CaptureReceiptRowModel(receipt: $0) },
-                // SessionMemoryStore.recent() lists newest first.
-                canReinsert: PaletteLastResult.canReinsert(latest: latest, newest: state.recentDictations.first),
+                canReinsert: reinsert != nil,
                 onInsertAgain: {
-                    if let newest = state.recentDictations.first {
-                        coordinator.insertRecentDictation(newest)
+                    if let reinsert {
+                        coordinator.insertRecentDictation(reinsert)
                     }
                 },
                 onCopy: {
-                    if let newest = state.recentDictations.first {
-                        PaletteRecentCopy.copy(newest, state: state)
+                    if let reinsert {
+                        PaletteRecentCopy.copy(reinsert, state: state)
                     }
                 },
                 onDetails: onOpenDashboardWindow)

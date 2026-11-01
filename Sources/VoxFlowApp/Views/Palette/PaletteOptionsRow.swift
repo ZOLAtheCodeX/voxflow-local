@@ -12,6 +12,22 @@ struct PaletteOptionsRow: View {
 
     @State private var showProfilePopover = false
 
+    /// Whether the Cleanup, Tone and ••• menus accept input. Not while a
+    /// capture is in flight: the old palette never showed these controls
+    /// then, and the workflow Mode picker clears candidates and restarts the
+    /// backend. The chips stay visible. Exhaustive on purpose, so a new
+    /// session state needs a decision here.
+    nonisolated static func isInteractive(sessionState: SessionState) -> Bool {
+        switch sessionState {
+        case .recording, .transcribing, .inserting:
+            return false
+        case .idle, .review, .onboarding, .error:
+            return true
+        }
+    }
+
+    private var isInteractive: Bool { Self.isInteractive(sessionState: state.sessionState) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: VF.spacingSmall) {
             HStack(spacing: VF.spacingLarge) {
@@ -22,6 +38,12 @@ struct PaletteOptionsRow: View {
             }
             .menuStyle(.button)
             .buttonStyle(.borderless)
+            .disabled(!isInteractive)
+            .onChange(of: state.sessionState) { _, _ in
+                // A capture that starts while the app profile popover is
+                // open closes it, as the old palette did when its anchor left.
+                if !isInteractive { showProfilePopover = false }
+            }
 
             PaletteOptionChips(
                 state: state,

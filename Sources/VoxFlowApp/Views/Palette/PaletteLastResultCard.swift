@@ -3,7 +3,8 @@ import SwiftUI
 /// What the palette's Last-dictation card says and offers. Pure, so the
 /// rule that matters most (Review Focus 3) is unit-tested: Insert Again and
 /// Copy act on the newest recent dictation, so they are offered only when the
-/// latest receipt is an insertion. After a reject the card shows the reason
+/// latest receipt is an insertion of that very dictation, and they act on
+/// the text the receipt records. After a reject the card shows the reason
 /// and no insert action, so an older dictation is never offered as if it were
 /// the last one.
 enum PaletteLastResult {
@@ -14,37 +15,39 @@ enum PaletteLastResult {
         !receiptIsReject && hasRecentDictation && newestDictationMatchesReceipt
     }
 
-    /// Whether the receipt records an insertion of this very dictation. The
-    /// receipt's `text` is the full inserted text (the audit log writes it
-    /// verbatim under the default retention), so both sides are compared
-    /// whole after trimming whitespace and newlines. Empty text never
-    /// matches: when unsure, no Insert Again.
-    static func matches(receiptText: String, candidateTexts: [String]) -> Bool {
+    /// The cleanup mode whose text this receipt records as inserted, or nil.
+    /// The receipt's `text` is the full inserted text (the audit log writes
+    /// it verbatim under the default retention), so both sides are compared
+    /// whole after trimming whitespace and newlines. The candidate's selected
+    /// mode wins when several modes share the text. Empty text matches
+    /// nothing: when unsure, no Insert Again.
+    static func matchedMode(receiptText: String, candidate: TranscriptCandidate) -> CleanupMode? {
         let inserted = receiptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !inserted.isEmpty else { return false }
-        return candidateTexts.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == inserted }
+        guard !inserted.isEmpty else { return nil }
+        let order = [candidate.selectedMode] + CleanupMode.allCases.filter { $0 != candidate.selectedMode }
+        return order.first {
+            candidate.text(for: $0).trimmingCharacters(in: .whitespacesAndNewlines) == inserted
+        }
     }
 
-    /// The rule read from the latest receipt and the newest recent dictation.
-    /// Only an insertion of that dictation counts. No receipt, a reject, a
-    /// voice action, an insert of other text (a cockpit insert adds nothing
-    /// to the recent dictations), or a receipt without text (digest or none
-    /// retention) never offers Insert Again.
-    static func canReinsert(latest receipt: CaptureReceipt?, newest candidate: TranscriptCandidate?) -> Bool {
-        guard let receipt else { return false }
-        let matchesReceipt = candidate.map {
-            matches(receiptText: receipt.text ?? "", candidateTexts: candidateTexts(for: $0))
-        } ?? false
-        return canReinsert(
-            receiptIsReject: receipt.event != .insert,
-            hasRecentDictation: candidate != nil,
-            newestDictationMatchesReceipt: matchesReceipt)
-    }
-
-    /// Every text the dictation could have been inserted as: one per cleanup
-    /// mode, plus the raw transcript.
-    private static func candidateTexts(for candidate: TranscriptCandidate) -> [String] {
-        CleanupMode.allCases.map { candidate.text(for: $0) } + [candidate.rawText]
+    /// What Insert Again and Copy act on: a copy of the newest recent
+    /// dictation whose selected mode is the one the latest receipt inserted,
+    /// so both act on exactly the text the card shows. Auto-insert pushes a
+    /// candidate whose selected mode is raw while it inserts light or polish
+    /// text; the copy corrects that. Nil, so no Insert Again, when there is
+    /// no receipt, the receipt is a reject or a voice action, it records
+    /// other text (a cockpit insert adds nothing to the recent dictations),
+    /// or it carries no text (digest or none retention).
+    static func reinsertCandidate(latest receipt: CaptureReceipt?, newest candidate: TranscriptCandidate?) -> TranscriptCandidate? {
+        guard let receipt else { return nil }
+        let mode = candidate.flatMap { matchedMode(receiptText: receipt.text ?? "", candidate: $0) }
+        guard canReinsert(
+                receiptIsReject: receipt.event != .insert,
+                hasRecentDictation: candidate != nil,
+                newestDictationMatchesReceipt: mode != nil),
+              var reinsert = candidate, let mode else { return nil }
+        reinsert.selectedMode = mode
+        return reinsert
     }
 
     /// The first chip `CaptureReceiptRowModel` gives a computer-action
