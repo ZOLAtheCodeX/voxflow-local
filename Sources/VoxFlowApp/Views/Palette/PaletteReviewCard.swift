@@ -5,12 +5,17 @@ import SwiftUI
 /// or dictation review, then Insert (return), Copy and Start Over (Cmd-R).
 /// Every button calls the coordinator method it called before the refresh.
 /// In idle it shows a translate, meeting or prompt result after its insert
-/// (ruling R36) with `bindsKeys` false: the same buttons, no return or Cmd-R
-/// (ruling R13), so no invisible shortcut re-inserts.
+/// (ruling R36) with `bindsKeys` false: no return or Cmd-R (ruling R13), and
+/// no Insert at all (ruling R52), because the current result has no captured
+/// target in idle and its insert would always fail into a clipboard copy.
+/// Copy, Start Over and the mode's own copy and approval buttons stay.
 struct PaletteReviewCard: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
     var bindsKeys = true
+
+    /// Insert only where it can succeed: review, error and privacy preview.
+    nonisolated static func showsInsert(bindsKeys: Bool) -> Bool { bindsKeys }
 
     private let shape = RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous)
 
@@ -46,12 +51,14 @@ struct PaletteReviewCard: View {
 
     private var actions: some View {
         HStack(spacing: VF.spacingSmall) {
-            Button("Insert") {
-                coordinator.insertCurrentText()
+            if Self.showsInsert(bindsKeys: bindsKeys) {
+                Button("Insert") {
+                    coordinator.insertCurrentText()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: [])
+                .disabled(insertDisabled)
             }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(bindsKeys ? KeyboardShortcut(.return, modifiers: []) : nil)
-            .disabled(insertDisabled)
 
             Button("Copy") {
                 coordinator.copyCurrentText()

@@ -133,4 +133,21 @@ final class PaletteStateRulesTests: XCTestCase {
                 sessionState: .onboarding, hasPrivacyPreview: false, workflowMode: .meeting, displayText: "x"),
             .lastDictation)
     }
+
+    // MARK: - Idle review card (ruling R52)
+
+    /// In idle the current result has no captured target, so its Insert
+    /// would always fail into a clipboard copy: the idle card has no Insert.
+    /// Copy and the mode's own copy and approval buttons stay.
+    func test_idle_review_card_has_no_insert() {
+        XCTAssertFalse(PaletteReviewCard.showsInsert(bindsKeys: false))
+        XCTAssertTrue(PaletteReviewCard.showsInsert(bindsKeys: true))
+        for mode: WorkflowMode in [.translateEnToDe, .meeting, .prompt] {
+            guard case .review(let bindsKeys) = CommandPaletteView.dictateCardKind(
+                sessionState: .idle, hasPrivacyPreview: false, workflowMode: mode, displayText: "x") else {
+                return XCTFail("\(mode.rawValue): expected the review card")
+            }
+            XCTAssertFalse(PaletteReviewCard.showsInsert(bindsKeys: bindsKeys), mode.rawValue)
+        }
+    }
 }
