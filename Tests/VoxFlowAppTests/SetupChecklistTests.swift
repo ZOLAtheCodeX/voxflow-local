@@ -30,15 +30,29 @@ final class SetupChecklistTests: XCTestCase {
 
     // MARK: - Engine
 
-    func test_engine_is_ready_from_live_readiness_or_a_fresh_health_check() {
+    func test_engine_is_ready_only_from_live_readiness() {
         var readiness = BackendReadinessState()
-        XCTAssertFalse(SetupChecklist.engineReady(readiness: readiness, healthCheckReady: false))
-        XCTAssertTrue(SetupChecklist.engineReady(readiness: readiness, healthCheckReady: true))
+        XCTAssertFalse(SetupChecklist.engineReady(readiness: readiness))
         readiness.whisperKitReady = true
-        XCTAssertTrue(SetupChecklist.engineReady(readiness: readiness, healthCheckReady: false))
+        XCTAssertTrue(SetupChecklist.engineReady(readiness: readiness))
         readiness.whisperKitReady = false
         readiness.readyForDictation = true
-        XCTAssertTrue(SetupChecklist.engineReady(readiness: readiness, healthCheckReady: false))
+        XCTAssertTrue(SetupChecklist.engineReady(readiness: readiness))
+    }
+
+    /// A health-check snapshot taken while the engine was up is a diagnostic
+    /// only. After the engine dies, live readiness drops and the row must go
+    /// back to "Not ready" with Start Engine, whatever the old snapshot said.
+    func test_a_stale_health_snapshot_does_not_keep_the_engine_ready() {
+        let staleSnapshot = ["ready_for_dictation": "true", "model_loaded": "true"]
+        XCTAssertEqual(SetupChecklist.detailRows(staleSnapshot)[1].value, "Yes")
+        let live = BackendReadinessState(readyForDictation: false, processRunning: false, whisperKitReady: false)
+        XCTAssertFalse(SetupChecklist.engineReady(readiness: live))
+        let progress = SetupChecklist.progress(
+            microphone: true, accessibility: true,
+            engineReady: SetupChecklist.engineReady(readiness: live), onboardingPhase: .complete)
+        XCTAssertFalse(progress.engine)
+        XCTAssertEqual(progress.doneCount, 3)
     }
 
     // MARK: - Row statuses
@@ -60,17 +74,7 @@ final class SetupChecklistTests: XCTestCase {
         XCTAssertEqual(SetupChecklist.calibrationStatus(.notStarted), VFStatus(.inactive, "Not done"))
     }
 
-    // MARK: - Summary and try-it
-
-    func test_summary_names_the_required_steps_left() {
-        func summary(mic: Bool, ax: Bool) -> String {
-            SetupChecklist.summary(
-                SetupProgress(microphone: mic, accessibility: ax, engine: false, calibration: false))
-        }
-        XCTAssertEqual(summary(mic: true, ax: true), "Required steps are done.")
-        XCTAssertEqual(summary(mic: false, ax: true), "1 required step left.")
-        XCTAssertEqual(summary(mic: false, ax: false), "2 required steps left.")
-    }
+    // MARK: - Try it
 
     func test_try_it_waits_for_the_required_steps() {
         XCTAssertEqual(

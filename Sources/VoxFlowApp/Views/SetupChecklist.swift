@@ -22,18 +22,11 @@ enum SetupChecklist {
         )
     }
 
-    /// The speech engine is ready when the app's own readiness poll says so
-    /// (the same predicate as the Welcome badge) or the last health check did.
-    static func engineReady(readiness: BackendReadinessState, healthCheckReady: Bool) -> Bool {
-        readiness.whisperKitReady || readiness.readyForDictation || healthCheckReady
-    }
-
-    static func summary(_ progress: SetupProgress) -> String {
-        switch progress.remainingRequired {
-        case 0: return "Required steps are done."
-        case 1: return "1 required step left."
-        case let n: return "\(n) required steps left."
-        }
+    /// The speech engine is ready from live state only, the same predicate
+    /// as `VFStatus.speechModel`. A health-check snapshot never counts: it
+    /// goes stale when the engine dies, and Start Engine must show then.
+    static func engineReady(readiness: BackendReadinessState) -> Bool {
+        readiness.whisperKitReady || readiness.readyForDictation
     }
 
     // MARK: - Row statuses

@@ -21,9 +21,7 @@ struct SetupWizardView: View {
     }
 
     private var engineReady: Bool {
-        SetupChecklist.engineReady(
-            readiness: state.backendReadiness,
-            healthCheckReady: backendHealth["ready_for_dictation"] == "true")
+        SetupChecklist.engineReady(readiness: state.backendReadiness)
     }
 
     private var progress: SetupProgress {
@@ -61,14 +59,9 @@ struct SetupWizardView: View {
     private var header: some View {
         let progress = progress
         return HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: VF.spacingXSmall) {
-                Text("Set up VoxFlow")
-                    .font(VF.displayFont)
-                    .accessibilityAddTraits(.isHeader)
-                Text(SetupChecklist.summary(progress))
-                    .font(VF.secondaryFont)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Set up VoxFlow")
+                .font(VF.displayFont)
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             Text("\(progress.doneCount) of \(progress.total) done")
                 .font(VF.labelFont)
