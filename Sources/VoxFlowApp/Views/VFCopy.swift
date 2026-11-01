@@ -1,0 +1,59 @@
+import Foundation
+
+/// User-facing strings that more than one surface shows, kept in one place so
+/// the palette, Settings and the Dashboard say the same thing. Pure functions;
+/// no state, no side effects.
+enum VFCopy {
+
+    /// How long a smart action runs before the slow-run notice appears.
+    static let slowRunThresholdSeconds = 15
+
+    /// The one-line description of what cleans up dictated text.
+    /// An empty provider means the configured chain fell through to the
+    /// built-in rules (degraded); the `rules` sentinel is a deliberate choice.
+    static func cleanupProviderLabel(provider: String, model: String) -> String {
+        if provider.isEmpty {
+            return "Cleanup: local rules, fallback"
+        }
+        if provider == ProviderConfigStore.rulesSentinel {
+            return "Cleanup: local rules"
+        }
+        if model.isEmpty {
+            return "Cleanup: \(provider)"
+        }
+        return "Cleanup: \(provider) · \(model)"
+    }
+
+    /// True when cleanup fell back to the built-in rules without the user
+    /// having chosen them.
+    static func isCleanupDegraded(provider: String) -> Bool {
+        provider.isEmpty
+    }
+
+    static func hotkeyHint(dictation: DictationHotkeyPreset, voiceControl: CommandLaneHotkeyPreset) -> String {
+        "Hold \(dictation.displayName) to dictate · \(voiceControl.displayName) for voice control"
+    }
+
+    /// The palette's second line: the hotkey hint while ready, otherwise the
+    /// live status line.
+    static func paletteSecondLine(status: VFStatus, hint: String, statusLine: String) -> String {
+        status.kind == .ready ? hint : statusLine
+    }
+
+    /// Shown while a smart action is still running after the threshold.
+    static func slowRunNotice(elapsedSeconds: Int) -> String? {
+        guard elapsedSeconds >= slowRunThresholdSeconds else { return nil }
+        return "Still working. The first run after a pause can take up to a minute while the model loads."
+    }
+
+    /// Maps a raw "true" / "false" flag to words. Anything else is returned
+    /// unchanged; nil reads as unknown.
+    static func yesNo(_ raw: String?) -> String {
+        switch raw {
+        case "true": return "Yes"
+        case "false": return "No"
+        case nil: return "Unknown"
+        case let other?: return other
+        }
+    }
+}
