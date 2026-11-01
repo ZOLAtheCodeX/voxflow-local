@@ -506,6 +506,97 @@ final class RecordingOverlayControllerTests: XCTestCase {
         XCTAssertTrue(hidden, "the restarted window never ended")
     }
 
+    // MARK: - Focus-change status lines (ruling R35)
+
+    private func focus(_ appName: String) -> FocusTargetSnapshot {
+        FocusTargetSnapshot(
+            hasFocusedTextInput: true, hasInsertionCursor: true, appName: appName,
+            bundleID: "com.example.\(appName.lowercased())", role: "AXTextArea", processIdentifier: nil)
+    }
+
+    /// `AppCoordinator.startFocusMonitoring` publishes `focusTarget`, then
+    /// writes its "Ready in X" line in the same turn. That line neither ends
+    /// the hold nor becomes the outcome; the reject reason that follows on a
+    /// later turn does.
+    func test_focus_line_during_the_hold_does_not_end_it() async {
+        let state = AppState()
+        let recorder = AnnouncementRecorder()
+        let controller = makeController(state, outcomeDuration: holdDuration, recorder: recorder)
+        await enterTranscribing(controller, state)
+        controller.sessionStateChanged(.idle)
+        let holding = await waitUntil { controller.isHoldingForStatusLine }
+        XCTAssertTrue(holding)
+
+        state.focusTarget = focus("Mail")
+        state.statusLine = "Ready in Mail. Hold hotkey to talk"
+        XCTAssertTrue(controller.isHoldingForStatusLine, "a focus line ended the hold")
+        XCTAssertNil(controller.currentOutcome)
+
+        try? await Task.sleep(for: .milliseconds(20))
+        let reason = "Speech detected but too quiet (audio kept)"
+        state.statusLine = reason
+        XCTAssertEqual(controller.currentOutcome, .status(message: reason))
+        XCTAssertEqual(recorder.messages, [reason])
+        finish(controller)
+    }
+
+    /// After a shown outcome a focus line neither replaces it nor uses up the
+    /// one follow: a later capture line on a later turn still corrects it.
+    func test_focus_line_does_not_replace_or_consume_the_follow() async {
+        let state = AppState()
+        let recorder = AnnouncementRecorder()
+        let controller = makeController(state, outcomeDuration: holdDuration, recorder: recorder)
+        controller.sessionStateChanged(.recording)
+        controller.sessionStateChanged(.transcribing)
+        state.statusLine = "No speech detected"
+        controller.sessionStateChanged(.idle)
+        let shown = await waitUntil { controller.currentOutcome != nil }
+        XCTAssertTrue(shown)
+
+        state.focusTarget = focus("Mail")
+        state.statusLine = "Ready in Mail. Hold hotkey to talk"
+        XCTAssertEqual(controller.currentOutcome, .status(message: "No speech detected"))
+
+        try? await Task.sleep(for: .milliseconds(20))
+        state.statusLine = "Speech detected but not recognized (audio kept)"
+        XCTAssertEqual(controller.currentOutcome, .status(message: "Speech detected but not recognized (audio kept)"))
+        XCTAssertEqual(recorder.messages, ["No speech detected", "Speech detected but not recognized (audio kept)"])
+        finish(controller)
+    }
+
+    /// Only the turn of the focus change is ignored.
+    func test_a_focus_change_on_an_earlier_turn_does_not_mute_later_lines() async {
+        let state = AppState()
+        let controller = makeController(state, outcomeDuration: holdDuration)
+        await enterTranscribing(controller, state)
+        state.focusTarget = focus("Mail")
+        controller.sessionStateChanged(.idle)
+        let holding = await waitUntil { controller.isHoldingForStatusLine }
+        XCTAssertTrue(holding)
+
+        state.statusLine = "Background noise only (audio kept)"
+        XCTAssertEqual(controller.currentOutcome, .status(message: "Background noise only (audio kept)"))
+        finish(controller)
+    }
+
+    // MARK: - Click-through (ruling R45)
+
+    /// The pill takes clicks only while it offers cancel; while inserting it
+    /// offers none, so clicks pass through to the app underneath.
+    func test_pill_passes_clicks_through_while_inserting() {
+        let controller = makeController(outcomeDuration: .zero)
+        controller.sessionStateChanged(.recording)
+        XCTAssertFalse(controller.panelForTesting.ignoresMouseEvents)
+        controller.sessionStateChanged(.transcribing)
+        XCTAssertFalse(controller.panelForTesting.ignoresMouseEvents)
+        controller.sessionStateChanged(.inserting)
+        XCTAssertTrue(controller.isVisible)
+        XCTAssertTrue(controller.panelForTesting.ignoresMouseEvents, "no cancel while inserting: click-through")
+        controller.sessionStateChanged(.recording)
+        XCTAssertFalse(controller.panelForTesting.ignoresMouseEvents, "a new capture takes clicks again")
+        controller.sessionStateChanged(.idle)
+    }
+
     // MARK: - Timer copy
 
     func test_pill_timer_reads_minutes_and_seconds() {

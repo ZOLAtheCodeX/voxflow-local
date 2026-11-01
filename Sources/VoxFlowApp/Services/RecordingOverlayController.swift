@@ -86,7 +86,10 @@ final class PillPresentation: ObservableObject {
 /// its working row for up to `lateStatusHold` and shows the first new line
 /// with a full outcome window, or hides with no outcome if none comes. Any
 /// other neutral outcome follows at most one later status line, restarting
-/// its window. A new capture cancels all of it at once.
+/// its window. A new capture cancels all of it at once. A status line the
+/// focus monitor writes in the same turn as a focus change ("Ready in X",
+/// ruling R35) is not about the capture: it neither ends the hold nor uses
+/// the follow.
 @MainActor
 final class RecordingOverlayController {
 
@@ -131,6 +134,11 @@ final class RecordingOverlayController {
     /// The status line current at `.transcribing` entry for this capture.
     private var transcribingLine: String?
     private var transcribingLineTask: Task<Void, Never>?
+    /// True for the rest of the main-actor turn in which `focusTarget`
+    /// changed. `AppCoordinator.startFocusMonitoring` writes the focus target
+    /// and then, in the same closure, its own status line; that line is
+    /// recognised by this turn, never by its words.
+    private var focusChangedThisTurn = false
 
     var isVisible: Bool { panel.isVisible }
     var panelForTesting: NSPanel { panel }
@@ -191,6 +199,10 @@ final class RecordingOverlayController {
         state.$statusLine
             .dropFirst()
             .sink { [weak self] line in self?.statusLineChanged(line) }
+            .store(in: &cancellables)
+        state.$focusTarget
+            .dropFirst()
+            .sink { [weak self] _ in self?.focusTargetChanged() }
             .store(in: &cancellables)
     }
 
@@ -277,6 +289,14 @@ final class RecordingOverlayController {
         }
     }
 
+    /// Marks the current turn; the mark clears on the next one.
+    private func focusTargetChanged() {
+        focusChangedThisTurn = true
+        Task { @MainActor [weak self] in
+            self?.focusChangedThisTurn = false
+        }
+    }
+
     private func insertResultChanged(_ result: InsertResult?) {
         guard captureActive, let result else { return }
         insertSucceeded = result.success
@@ -286,9 +306,12 @@ final class RecordingOverlayController {
     /// the pill waits, the first different line becomes the outcome. After a
     /// neutral outcome, one later line replaces it, since that outcome IS the
     /// status line. Either way the window restarts and nothing follows after.
-    /// A failed insert keeps its own message.
+    /// A failed insert keeps its own message. A line written in the turn of a
+    /// focus change is ignored outright (ruling R35): it neither ends the hold
+    /// nor uses the follow.
     private func statusLineChanged(_ line: String) {
-        guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !focusChangedThisTurn,
+              !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         switch afterCapture {
         case .none:
             return
@@ -380,8 +403,11 @@ final class RecordingOverlayController {
 
     // MARK: - Panel
 
+    /// The live and working rows. The pill takes clicks only while it offers
+    /// cancel (ruling R45); while inserting it offers none, so clicks pass
+    /// through to the app underneath.
     private func showLive() {
-        panel.ignoresMouseEvents = false
+        panel.ignoresMouseEvents = !RecordingPillView.offersCancel(sessionState: lastState)
         let size = Self.pillSize(for: nil)
         if !panel.isVisible || panel.frame.size != size {
             place(size: size)

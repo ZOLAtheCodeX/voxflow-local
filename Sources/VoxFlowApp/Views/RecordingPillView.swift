@@ -13,7 +13,8 @@ import SwiftUI
 /// `onCancel` as before. The capsule itself does nothing on click, so a stray
 /// click no longer throws away a long dictation. VoiceOver reaches the same
 /// `onCancel` through a "Cancel dictation" action on the live and working
-/// rows, since the hidden button is not in the accessibility tree (R31).
+/// rows (R31); the button itself is hidden from accessibility (R43). The pill
+/// takes clicks only while it offers cancel (R45).
 struct RecordingPillView: View {
     @ObservedObject var state: AppState
     @ObservedObject var presentation: PillPresentation
@@ -104,7 +105,10 @@ struct RecordingPillView: View {
         }
         .buttonStyle(.plain)
         .help("Cancel (esc)")
-        .accessibilityLabel("Cancel dictation")
+        // VoiceOver cancels through the row's "Cancel dictation" action
+        // (ruling R31); hiding the button keeps it from being listed twice
+        // (ruling R43).
+        .accessibilityHidden(true)
         .opacity(isHovering ? 1 : 0)
         .allowsHitTesting(isHovering)
     }
