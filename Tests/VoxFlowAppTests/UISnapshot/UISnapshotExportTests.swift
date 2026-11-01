@@ -20,9 +20,16 @@ final class UISnapshotExportTests: XCTestCase {
 
     // MARK: - Recording pill
 
-    // The "before" pill is today's real size (156 x 30), not the 220 x 32 of
-    // the redesigned pill, so the old view is not stretched.
-    private let pillSize = CGSize(width: 156, height: 30)
+    // The pill at the size `RecordingOverlayController` gives it: 220 x 32
+    // live and for the short outcomes, 360 x 32 for an outcome that shows
+    // the status line. (The committed "before" images are today's 156 x 30.)
+    private func exportPill(_ state: AppState, outcome: PillOutcome? = nil, name: String) throws {
+        let presentation = PillPresentation()
+        presentation.outcome = outcome
+        try SnapshotRenderer.export(
+            RecordingPillView(state: state, presentation: presentation, onCancel: {}),
+            name: name, size: RecordingOverlayController.pillSize(for: outcome))
+    }
 
     func testPillListening() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
@@ -30,7 +37,7 @@ final class UISnapshotExportTests: XCTestCase {
             $0.sessionState = .recording
             $0.recordingDuration = 7
         }
-        try SnapshotRenderer.export(RecordingPillView(state: state, onCancel: {}), name: "pill-listening", size: pillSize)
+        try exportPill(state, name: "pill-listening")
     }
 
     func testPillVoiceControl() throws {
@@ -40,13 +47,39 @@ final class UISnapshotExportTests: XCTestCase {
             $0.recordingDuration = 3
             $0.isCommandLaneActive = true
         }
-        try SnapshotRenderer.export(RecordingPillView(state: state, onCancel: {}), name: "pill-voice-control", size: pillSize)
+        try exportPill(state, name: "pill-voice-control")
     }
 
     func testPillTranscribing() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
         let state = UISnapshotFixtures.state { $0.sessionState = .transcribing }
-        try SnapshotRenderer.export(RecordingPillView(state: state, onCancel: {}), name: "pill-transcribing", size: pillSize)
+        try exportPill(state, name: "pill-transcribing")
+    }
+
+    func testPillOutcomeInserted() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        try exportPill(UISnapshotFixtures.state(), outcome: .inserted, name: "pill-outcome-inserted")
+    }
+
+    func testPillOutcomeReview() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state { $0.sessionState = .review }
+        try exportPill(state, outcome: .readyToReview, name: "pill-outcome-review")
+    }
+
+    func testPillOutcomeNotInserted() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state { $0.sessionState = .review }
+        try exportPill(
+            state, outcome: .notInserted(message: "Insert failed. Copied to clipboard."),
+            name: "pill-outcome-not-inserted")
+    }
+
+    /// A neutral status long enough to truncate (Review Focus 5).
+    func testPillOutcomeStatus() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let message = "Speech detected but not recognized. Try speaking closer to the microphone (audio kept)"
+        try exportPill(UISnapshotFixtures.state(), outcome: .status(message: message), name: "pill-outcome-status")
     }
 
     // MARK: - Command palette

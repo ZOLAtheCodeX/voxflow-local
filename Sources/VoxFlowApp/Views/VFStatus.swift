@@ -17,6 +17,10 @@ struct VFStatus: Equatable {
         case attention
         case error
         case inactive
+        /// Neutral information: a capture that ended without inserting by
+        /// design (a voice action, a voice-control command) or a reject. It
+        /// makes no success or failure claim.
+        case info
     }
 
     let kind: Kind
@@ -40,6 +44,7 @@ struct VFStatus: Equatable {
         case .attention: return "exclamationmark.triangle.fill"
         case .error: return "xmark.octagon.fill"
         case .inactive: return "minus.circle"
+        case .info: return "info.circle"
         }
     }
 
@@ -54,6 +59,7 @@ struct VFStatus: Equatable {
         case .attention: return VF.colorWarning
         case .error: return VF.colorError
         case .inactive: return VF.colorNeutral
+        case .info: return VF.colorNeutral
         }
     }
 
