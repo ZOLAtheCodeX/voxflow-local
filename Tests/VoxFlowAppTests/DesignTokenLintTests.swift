@@ -14,6 +14,9 @@ final class DesignTokenLintTests: XCTestCase {
     static let pendingFiles: Set<String> = [
         "CommandPaletteView.swift", "DashboardWindowView.swift", "SettingsView.swift",
         "SetupWizardView.swift", "WelcomeView.swift", "StagedProgressView.swift",
+        // Task 6 mechanical move: literals inherited from CommandPaletteView,
+        // removed again by the palette rebuild.
+        "PaletteHeaderView.swift", "PaletteFooter.swift",
     ]
 
     private struct Rule {
