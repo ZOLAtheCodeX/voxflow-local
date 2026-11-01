@@ -11,9 +11,11 @@ final class SettingsRegroupTests: XCTestCase {
         XCTAssertEqual(PrivacySettingsPane.permissionStatus(granted: false), VFStatus(.attention, "Missing"))
     }
 
-    func test_settings_tabs_are_the_six_task_groups() {
-        let tabs: [SettingsTab] = [.general, .apps, .voice, .models, .privacy, .advanced]
-        XCTAssertEqual(Set(tabs).count, 6)
+    func test_settings_tabs_are_the_six_task_groups_in_toolbar_order() {
+        XCTAssertEqual(SettingsTab.allCases, [.general, .apps, .voice, .models, .privacy, .advanced])
+        XCTAssertEqual(SettingsTab.allCases.map(\.title), ["General", "Apps", "Voice", "Models", "Privacy", "Advanced"])
+        XCTAssertEqual(SettingsTab.allCases.map(\.symbol),
+                       ["gearshape", "app.badge", "waveform", "cpu", "lock.shield", "wrench.and.screwdriver"])
     }
 
     func test_settings_views_do_not_carry_retired_names_or_em_dashes() throws {

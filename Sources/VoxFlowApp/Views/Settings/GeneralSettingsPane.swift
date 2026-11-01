@@ -102,7 +102,7 @@ struct GeneralSettingsPane: View {
         case .anyApp:
             return "Dictation works in any app. When no text field is available, VoxFlow falls back to the clipboard."
         case .cursorAware:
-            return "Dictation is enabled when an insertion cursor is active in any text target."
+            return "Dictation is enabled when a text field is focused or an insertion cursor is active."
         case .textFieldOnly:
             return "Dictation is enabled only when a text input field is focused."
         }

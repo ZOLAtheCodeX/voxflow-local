@@ -5,8 +5,30 @@ import SwiftUI
 typealias SecretLoader = (String) -> String?
 
 /// The Settings tabs, in display order.
-enum SettingsTab: Hashable {
+enum SettingsTab: Hashable, CaseIterable {
     case general, apps, voice, models, privacy, advanced
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .apps: return "Apps"
+        case .voice: return "Voice"
+        case .models: return "Models"
+        case .privacy: return "Privacy"
+        case .advanced: return "Advanced"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape"
+        case .apps: return "app.badge"
+        case .voice: return "waveform"
+        case .models: return "cpu"
+        case .privacy: return "lock.shield"
+        case .advanced: return "wrench.and.screwdriver"
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -41,25 +63,30 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            GeneralSettingsPane(coordinator: coordinator, state: state)
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(SettingsTab.general)
-            AppsSettingsPane(coordinator: coordinator, state: state)
-                .tabItem { Label("Apps", systemImage: "app.badge") }
-                .tag(SettingsTab.apps)
-            VoiceSettingsPane(coordinator: coordinator, dictionary: dictionary, snippetStore: snippetStore, chainStore: chainStore)
-                .tabItem { Label("Voice", systemImage: "waveform") }
-                .tag(SettingsTab.voice)
-            ModelsSettingsPane(coordinator: coordinator, state: state, providerStore: providerStore, secretLoader: secretLoader)
-                .tabItem { Label("Models", systemImage: "cpu") }
-                .tag(SettingsTab.models)
-            PrivacySettingsPane(coordinator: coordinator, state: state, secretLoader: secretLoader)
-                .tabItem { Label("Privacy", systemImage: "lock.shield") }
-                .tag(SettingsTab.privacy)
-            AdvancedSettingsPane(coordinator: coordinator, state: state, secretLoader: secretLoader)
-                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
-                .tag(SettingsTab.advanced)
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
+                pane(for: tab)
+                    .tabItem { Label(tab.title, systemImage: tab.symbol) }
+                    .tag(tab)
+            }
         }
         .frame(minWidth: 620, idealWidth: 660, minHeight: 480, idealHeight: 560)
+    }
+
+    @ViewBuilder
+    private func pane(for tab: SettingsTab) -> some View {
+        switch tab {
+        case .general:
+            GeneralSettingsPane(coordinator: coordinator, state: state)
+        case .apps:
+            AppsSettingsPane(coordinator: coordinator, state: state)
+        case .voice:
+            VoiceSettingsPane(coordinator: coordinator, dictionary: dictionary, snippetStore: snippetStore, chainStore: chainStore)
+        case .models:
+            ModelsSettingsPane(coordinator: coordinator, state: state, providerStore: providerStore, secretLoader: secretLoader)
+        case .privacy:
+            PrivacySettingsPane(coordinator: coordinator, state: state, secretLoader: secretLoader)
+        case .advanced:
+            AdvancedSettingsPane(coordinator: coordinator, state: state, secretLoader: secretLoader)
+        }
     }
 }

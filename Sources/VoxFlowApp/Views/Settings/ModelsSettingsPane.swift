@@ -157,9 +157,6 @@ struct ModelsSettingsPane: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(spec.id).font(VF.captionEmphasizedFont)
-                            Text(Self.kindLabel(spec.kind))
-                                .font(VF.microFont)
-                                .foregroundStyle(.secondary)
                             if let model = spec.model, !model.isEmpty {
                                 Text(model).font(VF.monoCaptionFont).foregroundStyle(.secondary)
                             }
@@ -172,6 +169,9 @@ struct ModelsSettingsPane: View {
                                 } label: { Image(systemName: "trash") }
                             }
                         }
+                        Text(spec.kind.displayName)
+                            .font(VF.microFont)
+                            .foregroundStyle(.secondary)
                         if let result = providerTestResults[spec.id] {
                             Text(result).font(VF.microFont).foregroundStyle(.secondary)
                         }
@@ -306,15 +306,6 @@ struct ModelsSettingsPane: View {
             .font(VF.captionFont)
         }
         .font(VF.secondaryFont)
-    }
-
-    /// A short, plain label for where a provider runs.
-    private static func kindLabel(_ kind: ProviderKind) -> String {
-        switch kind {
-        case .ollama: return "Local"
-        case .openaiCompat: return "Local server"
-        case .openai, .anthropic: return "Cloud"
-        }
     }
 
     @MainActor
