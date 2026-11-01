@@ -11,9 +11,7 @@ import XCTest
 /// for as long as the moved literals remain.
 final class DesignTokenLintTests: XCTestCase {
 
-    static let pendingFiles: Set<String> = [
-        "SetupWizardView.swift", "WelcomeView.swift", "StagedProgressView.swift",
-    ]
+    static let pendingFiles: Set<String> = []
 
     private struct Rule {
         let name: String

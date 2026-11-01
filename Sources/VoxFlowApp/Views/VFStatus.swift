@@ -157,4 +157,12 @@ struct VFStatus: Equatable {
         }
         return VFStatus(.starting, "Speech model loading")
     }
+
+    /// What cleans up dictated text. Attention only when the configured chain
+    /// fell through to the built-in rules without the user choosing them.
+    static func cleanup(provider: String, model: String) -> VFStatus {
+        VFStatus(
+            VFCopy.isCleanupDegraded(provider: provider) ? .attention : .ready,
+            VFCopy.cleanupProviderLabel(provider: provider, model: model))
+    }
 }

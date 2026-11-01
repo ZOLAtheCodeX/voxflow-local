@@ -17,26 +17,25 @@ struct WelcomeView: View {
                     .frame(width: 96, height: 96)
                 Text("VoxFlow")
                     .font(VF.titleFont)
-                Text("Local-first dictation. Hold Fn to talk; ⌥⌘V for the cockpit.")
+                Text("Local-first dictation.")
                     .font(VF.captionFont)
                     .foregroundStyle(.secondary)
+                Text(VFCopy.hotkeyHint(
+                    dictation: state.dictationHotkeyPreset, voiceControl: state.commandLaneHotkeyPreset))
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
 
-            HStack(spacing: VF.spacingMedium) {
-                statusChip(
-                    label: state.backendReadiness.whisperKitReady || state.backendReadiness.readyForDictation ? "STT ready" : "STT loading",
-                    ok: state.backendReadiness.whisperKitReady || state.backendReadiness.readyForDictation
-                )
-                statusChip(
-                    label: state.backendReadiness.activePolishProvider.isEmpty
-                        ? "Polish: regex fallback"
-                        : "Polish: \(state.backendReadiness.activePolishProvider)",
-                    ok: !state.backendReadiness.activePolishProvider.isEmpty
-                )
+            // Side by side when they fit; stacked when a long cleanup model
+            // name would truncate.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: VF.spacingMedium) { statusChips }
+                VStack(spacing: VF.spacingSmall) { statusChips }
             }
 
             VStack(spacing: VF.spacingSmall) {
-                welcomeButton("Open Setup Wizard", symbol: "wand.and.stars", shortcut: "⌥⌘1") {
+                welcomeButton("Open Setup", symbol: "wand.and.stars", shortcut: "⌥⌘1") {
                     NotificationCenter.default.post(name: .voxflowOpenSetup, object: nil)
                 }
                 welcomeButton("Open Dashboard", symbol: "chart.bar.xaxis", shortcut: "⌥⌘2") {
@@ -50,7 +49,7 @@ struct WelcomeView: View {
                         Image(systemName: "gearshape")
                         Text("Settings")
                         Spacer()
-                        Text("⌘,").font(VF.monoCaptionFont).foregroundStyle(.secondary)
+                        VFKeycap(keys: "⌘,")
                     }
                     .frame(maxWidth: 280)
                 }
@@ -59,19 +58,21 @@ struct WelcomeView: View {
         }
         .padding(VF.spacingLarge * 2)
         .frame(minWidth: 420, minHeight: 480)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(VF.surfaceWindow)
     }
 
-    private func statusChip(label: String, ok: Bool) -> some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(ok ? VF.colorSuccess : VF.colorWarning)
-                .frame(width: 7, height: 7)
-            Text(label).font(VF.captionFont).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, VF.spacingSmall)
-        .padding(.vertical, 4)
-        .background(VF.cardBackground, in: Capsule())
+    @ViewBuilder private var statusChips: some View {
+        statusChip(VFStatus.speechModel(state.backendReadiness))
+        statusChip(VFStatus.cleanup(
+            provider: state.backendReadiness.activePolishProvider,
+            model: state.backendReadiness.activePolishModel))
+    }
+
+    private func statusChip(_ status: VFStatus) -> some View {
+        VFStatusBadge(status: status)
+            .padding(.horizontal, VF.spacingMedium)
+            .padding(.vertical, VF.spacingXSmall)
+            .vfSurface(.card, in: Capsule())
     }
 
     private func welcomeButton(_ title: String, symbol: String, shortcut: String, action: @escaping () -> Void) -> some View {
@@ -80,7 +81,7 @@ struct WelcomeView: View {
                 Image(systemName: symbol)
                 Text(title)
                 Spacer()
-                Text(shortcut).font(VF.monoCaptionFont).foregroundStyle(.secondary)
+                VFKeycap(keys: shortcut)
             }
             .frame(maxWidth: 280)
         }
@@ -98,7 +99,7 @@ struct WavelineMark: View {
             ZStack {
                 RoundedRectangle(cornerRadius: w * 0.225, style: .continuous)
                     .fill(LinearGradient(
-                        colors: [Color(red: 0.137, green: 0.149, blue: 0.18), Color(red: 0.078, green: 0.086, blue: 0.106)],
+                        colors: [VF.brandPlateTop, VF.brandPlateBottom],
                         startPoint: .top, endPoint: .bottom
                     ))
                 Path { path in
@@ -112,9 +113,9 @@ struct WavelineMark: View {
                     path.addQuadCurve(to: pt(52, 50), control: pt(47, 70))
                     path.addLine(to: pt(76, 50))
                 }
-                .stroke(Color(red: 0.957, green: 0.949, blue: 0.925), style: StrokeStyle(lineWidth: w * 0.065, lineCap: .round, lineJoin: .round))
+                .stroke(VF.brandStroke, style: StrokeStyle(lineWidth: w * 0.065, lineCap: .round, lineJoin: .round))
                 Circle()
-                    .fill(Color(red: 0.184, green: 0.831, blue: 0.773))
+                    .fill(VF.colorBrand)
                     .frame(width: w * 0.096, height: w * 0.096)
                     .position(x: 0.85 * w, y: 0.5 * h)
             }

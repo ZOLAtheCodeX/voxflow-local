@@ -164,4 +164,18 @@ final class VFStatusTests: XCTestCase {
         XCTAssertEqual(VFStatus.voiceControl.label, "Voice control")
         XCTAssertEqual(VFStatus.review.label, "Review")
     }
+
+    // MARK: - Cleanup
+
+    func test_cleanup_status_is_attention_only_when_the_chain_fell_through() {
+        XCTAssertEqual(
+            VFStatus.cleanup(provider: "", model: ""),
+            VFStatus(.attention, "Cleanup: local rules, fallback"))
+        XCTAssertEqual(
+            VFStatus.cleanup(provider: ProviderConfigStore.rulesSentinel, model: ""),
+            VFStatus(.ready, "Cleanup: local rules"))
+        XCTAssertEqual(
+            VFStatus.cleanup(provider: "ollama", model: "gemma4:e2b-mlx"),
+            VFStatus(.ready, "Cleanup: ollama · gemma4:e2b-mlx"))
+    }
 }

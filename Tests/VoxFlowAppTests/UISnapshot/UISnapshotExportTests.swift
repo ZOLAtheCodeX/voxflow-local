@@ -399,6 +399,43 @@ final class UISnapshotExportTests: XCTestCase {
             name: "setup", size: CGSize(width: 660, height: 720))
     }
 
+    /// The engine is down and no text field is focused: Start Engine shows,
+    /// the status reads "Not ready", and the try-it badge warns. (The two
+    /// permission rows follow this machine's real grants.)
+    func testSetupEngineDown() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.backendReadiness = BackendReadinessState()
+            $0.focusTarget = FocusTargetSnapshot(
+                hasFocusedTextInput: false, hasInsertionCursor: false, appName: nil,
+                bundleID: nil, role: nil, processIdentifier: nil)
+            $0.targetingMode = .textFieldOnly
+        }
+        try SnapshotRenderer.export(
+            SetupWizardView(coordinator: coordinator, state: state),
+            name: "setup-engine-down", size: CGSize(width: 660, height: 560))
+    }
+
+    /// Calibration in progress: the phrase card and its buttons sit under the row.
+    func testSetupCalibrating() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.onboardingPhase = .calibrating
+            $0.calibrationItems = [
+                CalibrationItem(
+                    expectedPhrase: "The quick brown fox jumps over the lazy dog",
+                    heardPhrase: "The quick brown fox", score: 0.81),
+                CalibrationItem(
+                    expectedPhrase: "Please schedule a review for Thursday afternoon",
+                    heardPhrase: nil, score: nil),
+            ]
+            $0.activeCalibrationIndex = 1
+        }
+        try SnapshotRenderer.export(
+            SetupWizardView(coordinator: coordinator, state: state),
+            name: "setup-calibrating", size: CGSize(width: 660, height: 760))
+    }
+
     func testWelcome() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
         try SnapshotRenderer.export(
