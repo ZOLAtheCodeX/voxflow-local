@@ -12,7 +12,7 @@ import XCTest
 final class DesignTokenLintTests: XCTestCase {
 
     static let pendingFiles: Set<String> = [
-        "DashboardWindowView.swift", "SettingsView.swift",
+        "DashboardWindowView.swift", "ModelsSettingsPane.swift", "PermissionsSettingsPane.swift",
         "SetupWizardView.swift", "WelcomeView.swift", "StagedProgressView.swift",
     ]
 
