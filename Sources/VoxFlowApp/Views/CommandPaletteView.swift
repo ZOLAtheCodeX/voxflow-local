@@ -55,7 +55,7 @@ struct CommandPaletteView: View {
                 status: status,
                 targetAppName: state.focusTarget.appName,
                 isVoiceControlActive: state.isCommandLaneActive,
-                secondLine: secondLine,
+                lines: headerLines,
                 errorMessage: state.errorMessage)
                 .padding(.horizontal, VF.spacingLarge)
 
@@ -193,11 +193,11 @@ struct CommandPaletteView: View {
             hasTextTarget: state.canStartCaptureForDictation)
     }
 
-    private var secondLine: String {
-        VFCopy.paletteSecondLine(
-            status: status,
+    private var headerLines: PaletteHeaderLines {
+        VFCopy.paletteHeaderLines(
+            statusLine: state.statusLine,
             hint: VFCopy.hotkeyHint(dictation: state.dictationHotkeyPreset, voiceControl: state.commandLaneHotkeyPreset),
-            statusLine: state.statusLine)
+            hasReceipt: receiptStore.latest != nil)
     }
 
     // MARK: - Setup

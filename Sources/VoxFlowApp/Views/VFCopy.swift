@@ -34,10 +34,16 @@ enum VFCopy {
         "Hold \(dictation.displayName) to dictate · \(voiceControl.displayName) for voice control"
     }
 
-    /// The palette's second line: the hotkey hint while ready, otherwise the
-    /// live status line.
-    static func paletteSecondLine(status: VFStatus, hint: String, statusLine: String) -> String {
-        status.kind == .ready ? hint : statusLine
+    /// The palette header's lines under the status badge (ruling R28).
+    ///
+    /// The status line shows in every state, ready included, as it did before
+    /// the UI refresh: after an insert the coordinator appends lost-text
+    /// warnings to it ("may be incomplete (last ~N s not transcribed)", a
+    /// capture length limit) that no receipt records, so the palette is the
+    /// only place they appear. The hotkey hint is a third line only until the
+    /// first capture is receipted (first run); after that it is not shown.
+    static func paletteHeaderLines(statusLine: String, hint: String, hasReceipt: Bool) -> PaletteHeaderLines {
+        PaletteHeaderLines(statusLine: statusLine, hint: hasReceipt ? nil : hint)
     }
 
     /// Shown while a smart action is still running after the threshold.
@@ -75,4 +81,11 @@ enum VFCopy {
         case let other?: return other
         }
     }
+}
+
+/// What `VFCopy.paletteHeaderLines` returns: the status line, always, and
+/// the hotkey hint while there is no receipt yet.
+struct PaletteHeaderLines: Equatable {
+    let statusLine: String
+    let hint: String?
 }

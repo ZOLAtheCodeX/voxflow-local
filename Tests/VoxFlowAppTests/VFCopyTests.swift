@@ -37,15 +37,33 @@ final class VFCopyTests: XCTestCase {
         )
     }
 
-    func test_second_line_ready_shows_hint() {
-        XCTAssertEqual(VFCopy.paletteSecondLine(status: .ready, hint: "H", statusLine: "Inserted"), "H")
+    // MARK: - Palette header (ruling R28)
+
+    /// Right after an insert the palette is in the ready state, and the
+    /// coordinator has appended its lost-text warning to the status line.
+    /// The header used to swap that line for the hotkey hint while ready, so
+    /// the warning appeared nowhere. It must be the header's second line.
+    func test_header_shows_a_may_be_incomplete_status_line_in_the_ready_state() {
+        let line = "Inserted in Notes — may be incomplete (last ~3 s not transcribed)"
+        let lines = VFCopy.paletteHeaderLines(statusLine: line, hint: "H", hasReceipt: true)
+        XCTAssertEqual(lines.statusLine, line)
+        XCTAssertNil(lines.hint, "after the first receipt the hint is not shown")
     }
 
-    func test_second_line_otherwise_shows_status_line() {
+    func test_header_shows_a_length_limit_warning() {
+        let line = "Inserted in Notes — 30 s limit reached; speech after the cutoff was not captured"
+        XCTAssertEqual(VFCopy.paletteHeaderLines(statusLine: line, hint: "H", hasReceipt: true).statusLine, line)
+    }
+
+    /// First run: no receipt yet, so the hint is a third line under the
+    /// status line, which is still shown.
+    func test_header_hint_only_before_the_first_receipt() {
         XCTAssertEqual(
-            VFCopy.paletteSecondLine(status: .starting, hint: "H", statusLine: "Backend starting"),
-            "Backend starting"
-        )
+            VFCopy.paletteHeaderLines(statusLine: "Hold hotkey to talk", hint: "H", hasReceipt: false),
+            PaletteHeaderLines(statusLine: "Hold hotkey to talk", hint: "H"))
+        XCTAssertEqual(
+            VFCopy.paletteHeaderLines(statusLine: "Backend starting", hint: "H", hasReceipt: true),
+            PaletteHeaderLines(statusLine: "Backend starting", hint: nil))
     }
 
     func test_slow_notice_threshold() {

@@ -109,6 +109,30 @@ final class UISnapshotExportTests: XCTestCase {
             name: "palette-idle", size: paletteSize, fitHeight: true)
     }
 
+    /// Ruling R28: right after an insert the palette is ready and the status
+    /// line carries the coordinator's lost-text warning; the header shows it.
+    func testPaletteIncompleteWarning() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state {
+            $0.statusLine = "Inserted in Notes — may be incomplete (last ~3 s not transcribed)"
+            $0.recentDictations = [
+                UISnapshotFixtures.candidate("Draft the quarterly update for the design team.", minutesAgo: 0),
+            ]
+        }
+        try SnapshotRenderer.export(
+            palette(state, receipts: UISnapshotFixtures.sampleReceiptLines()),
+            name: "palette-incomplete-warning", size: paletteSize, fitHeight: true)
+    }
+
+    /// First run: no receipt yet, so the hotkey hint is a third header line.
+    func testPaletteFirstRun() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
+        let state = UISnapshotFixtures.state { $0.statusLine = "Hold hotkey to talk" }
+        try SnapshotRenderer.export(
+            palette(state, receipts: []),
+            name: "palette-first-run", size: paletteSize, fitHeight: true)
+    }
+
     func testPaletteReview() throws {
         try XCTSkipIf(ProcessInfo.processInfo.environment["VOXFLOW_UI_SNAPSHOTS"] == nil)
         let text = "Draft the quarterly update for the design team."

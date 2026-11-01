@@ -1,14 +1,15 @@
 import SwiftUI
 
 /// The top of the palette: one status badge with the target app, a
-/// voice-control badge while that lane is active, a second line (the hotkey
-/// hint while ready, otherwise the live status line) and any error as a
+/// voice-control badge while that lane is active, the live status line in
+/// every state (it carries the coordinator's lost-text warnings, ruling
+/// R28), the hotkey hint as a third line on first run, and any error as a
 /// banner. Value-driven: it takes no coordinator.
 struct PaletteHeaderView: View {
     let status: VFStatus
     let targetAppName: String?
     let isVoiceControlActive: Bool
-    let secondLine: String
+    let lines: PaletteHeaderLines
     let errorMessage: String?
 
     var body: some View {
@@ -25,12 +26,21 @@ struct PaletteHeaderView: View {
                 }
             }
 
-            Text(secondLine)
+            Text(lines.statusLine)
                 .font(VF.secondaryFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .help(secondLine)
+                .help(lines.statusLine)
+
+            if let hint = lines.hint {
+                Text(hint)
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(hint)
+            }
 
             if let errorMessage, !errorMessage.isEmpty {
                 VFBanner(kind: .error, message: errorMessage)
