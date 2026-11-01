@@ -628,7 +628,7 @@ struct CommandPaletteView: View {
             .accessibilityLabel("Live recording level")
 
             Text(String(format: "%.1f", state.recordingDuration))
-                .font(VF.monoTimerFont)
+                .font(VF.timerFont)
                 .foregroundStyle(.primary)
 
             Text("Release hotkey to transcribe")
