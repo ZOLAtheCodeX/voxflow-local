@@ -151,6 +151,23 @@ final class RecordingOverlayControllerTests: XCTestCase {
         finish(controller)
     }
 
+    /// `handleCaptureError` sets `.error`, then the status line, in the same
+    /// turn. The pill reports a failure, not neutral information.
+    func test_error_ending_shows_not_inserted() async {
+        let state = AppState()
+        let controller = RecordingOverlayController(state: state, outcomeDuration: holdDuration, onCancel: {})
+        controller.sessionStateChanged(.recording)
+        controller.sessionStateChanged(.transcribing)
+        controller.sessionStateChanged(.error)
+        state.statusLine = "Error. Retry capture."
+
+        let shown = await waitUntil { controller.currentOutcome != nil }
+        XCTAssertTrue(shown)
+        XCTAssertEqual(controller.currentOutcome, .notInserted(message: "Error. Retry capture."))
+        XCTAssertEqual(controller.panelForTesting.frame.size, NSSize(width: 360, height: 32))
+        finish(controller)
+    }
+
     /// A cancel or a press too short to count ends the recording without
     /// transcribing: no outcome.
     func test_recording_straight_to_idle_shows_nothing() async {

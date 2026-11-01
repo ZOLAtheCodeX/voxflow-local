@@ -6,10 +6,11 @@ import SwiftUI
 /// the capture ends (spec decision D2 and amendment 1).
 ///
 /// The order matters and is pinned by `PillOutcomeTests`: an insert result
-/// recorded during the capture wins, then review, then the status line as
-/// neutral information. A capture that ends without inserting by design (a
-/// voice action, a voice-control command) or a reject is never labeled
-/// "Not inserted"; only an insert that actually failed is.
+/// recorded during the capture wins, then an `.error` ending (a failure),
+/// then review, then the status line as neutral information. A capture that
+/// ends without inserting by design (a voice action, a voice-control
+/// command) or a reject is never labeled "Not inserted"; only an insert that
+/// actually failed, or an error, is.
 enum PillOutcome: Equatable {
     case inserted
     case readyToReview
@@ -19,6 +20,8 @@ enum PillOutcome: Equatable {
     static func classify(finalState: SessionState, insertSucceeded: Bool?, statusLine: String) -> PillOutcome? {
         if insertSucceeded == false { return .notInserted(message: statusLine) }
         if insertSucceeded == true { return .inserted }
+        // Every path to `.error` ends with nothing inserted: a failure, not information.
+        if finalState == .error { return .notInserted(message: statusLine) }
         if finalState == .review { return .readyToReview }
         if statusLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
         return .status(message: statusLine)

@@ -34,6 +34,23 @@ final class PillOutcomeTests: XCTestCase {
         XCTAssertEqual(PillOutcome.classify(finalState: .review, insertSucceeded: true, statusLine: "Inserted"), .inserted)
     }
 
+    /// Every path to `.error` ends with nothing inserted, so it keeps the
+    /// warning styling rather than the neutral status.
+    func test_error_ending_is_not_inserted_with_the_status_line() {
+        XCTAssertEqual(
+            PillOutcome.classify(finalState: .error, insertSucceeded: nil, statusLine: "Error. Retry capture."),
+            .notInserted(message: "Error. Retry capture.")
+        )
+    }
+
+    func test_insert_result_wins_over_error() {
+        XCTAssertEqual(PillOutcome.classify(finalState: .error, insertSucceeded: true, statusLine: "x"), .inserted)
+        XCTAssertEqual(
+            PillOutcome.classify(finalState: .error, insertSucceeded: false, statusLine: "Insert failed"),
+            .notInserted(message: "Insert failed")
+        )
+    }
+
     func test_review_without_an_insert_is_ready_to_review() {
         XCTAssertEqual(PillOutcome.classify(finalState: .review, insertSucceeded: nil, statusLine: "Review ready"), .readyToReview)
     }
