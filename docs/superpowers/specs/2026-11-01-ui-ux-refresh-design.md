@@ -691,6 +691,28 @@ and glass; the PR labels the images accordingly.
 - **Opportunity cost.** This is a large diff during a freeze. Approach A is the
   smaller alternative if the maintainer wants less.
 
+## Amendments after approval (2026-10-31, during planning)
+
+The spec was approved as written. Planning against the code surfaced four
+refinements; the sections above keep their approved wording and these
+override them.
+
+1. **Pill outcome, case 4.** Rejects are not the only captures that end without
+   inserting: built-in voice actions and voice-control commands do too, by
+   design. Labeling them "Not inserted" would report a success as a failure.
+   Case 4 therefore shows `statusLine` verbatim with a neutral info symbol and
+   no "not inserted" claim; an empty status line shows no outcome. Case 1 (an
+   insert that failed) keeps the "Not inserted" warning styling.
+2. **An `inactive` status** ("Engine not needed", symbol `minus.circle`,
+   secondary color) joins the vocabulary, for the engine when no workflow
+   needs it. Today that state is a neutral dot.
+3. **No spinner in status badges.** The working status uses the symbol
+   `ellipsis.circle`, consistent with the pill and Apple's advice against
+   labeled spinners.
+4. **The cockpit says "Listening 1:23"**, not "Recording 1:23", so one word
+   names the state everywhere. The Setup heading is "Set up VoxFlow" (sentence
+   case, per the copy rules); its buttons stay title-style.
+
 ## Excluded, to the Someday list after review
 
 Each would need a signal from capture or a coordinator, or is a new feature:
