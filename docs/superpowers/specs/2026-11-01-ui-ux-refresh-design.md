@@ -713,6 +713,41 @@ override them.
    names the state everywhere. The Setup heading is "Set up VoxFlow" (sentence
    case, per the copy rules); its buttons stay title-style.
 
+## Changes made during execution (2026-11-01)
+
+Per-task and whole-branch reviews found places where the approved text, built
+literally, would have hidden or misreported something. Each change below was a
+recorded ruling; together they override the sections above.
+
+- **Palette status line.** The header shows `statusLine` in every state. The
+  coordinator appends lost-text warnings to it after an insert ("may be
+  incomplete…", "limit reached"), and the approved design replaced it with the
+  hotkey hint when ready. The hint now shows only before the first dictation.
+- **Insert Again.** Offered only when the newest dictation produced the latest
+  receipt's text, and it inserts or copies exactly that text (the matched
+  cleanup variant). Never after a reject or a cockpit, translation, meeting or
+  prompt insert.
+- **Idle shortcuts.** ⏎ and ⌘R act only in the review card. An invisible idle ⏎
+  that re-inserted old text was removed.
+- **Options row.** Disabled while recording, transcribing or inserting (the
+  workflow-mode switch restarts the engine). The cleanup menu appears only with
+  the review card, labeled "Cleanup level"; the provider label keeps "Cleanup:".
+- **Pill outcomes.** An `.error` ending shows "Not inserted" with the status
+  line. A press too short to count and a cancelled transcription pass through
+  transcribing, so they show their status line neutrally. When the reason is
+  written late (an empty-capture reject), the pill keeps its working row for up
+  to 3 seconds and then shows the reason with a full window; it follows at
+  most one later change. VoiceOver can cancel from the pill. The pill's
+  "Inserted" does not yet reflect the coordinator's "incomplete" warning; that
+  needs a coordinator signal (Someday) and is a live check before install.
+- **Provider labels.** Rows make no locality claim ("Ollama", not "Ollama
+  (local)"); the backend decides locality from the URL and `:cloud` models.
+- **Setup.** No summary line; engine readiness comes from live state only, so
+  Start Engine shows whenever the engine is not ready. "Start Over" is "Reset
+  Setup", so it is not confused with the palette's Start Over.
+- **Images.** A rendering-only environment key makes the pill images use the
+  material fallback, because Liquid Glass does not render offscreen.
+
 ## Excluded, to the Someday list after review
 
 Each would need a signal from capture or a coordinator, or is a new feature:
