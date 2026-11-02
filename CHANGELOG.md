@@ -6,6 +6,16 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.6] — 2026-11-01
+
+A privacy release for the clipboard and the cockpit's stored sessions. The
+paste fallback now restores everything that was on the clipboard, keeps the
+dictated text out of clipboard histories and other devices while it sits
+there, and a direct insert no longer touches the clipboard at all. Cockpit
+session files are deleted once used. Local smart actions get more time for
+a cold model load, and a stale cockpit edit can no longer replace the next
+recording, a bug this release's acceptance run found.
+
 ### Privacy
 - A temporary paste now restores everything that was on the clipboard:
   every item and every representation, and an empty clipboard stays empty.
