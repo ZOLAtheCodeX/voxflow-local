@@ -9,7 +9,7 @@ VoxFlow Local is a macOS-native dictation app: SwiftUI menu bar frontend + Pytho
 Decided by the maintainer on 2026-10-31. The app is feature-complete and the project is in a freeze that ends in maintenance, not in a backlog. It stays in force until the maintainer lifts it explicitly and records that here.
 
 **Done means all three:**
-1. **v0.1.6 is tagged.** It ships what master already holds (CHANGELOG `[Unreleased]`: PR #24 and PR #25) once the maintainer has run the six manual clipboard checks in the PR #25 description and one cockpit session in their own voice. No new code goes into it. A failed check gets a fix for that check only, then a re-check.
+1. **v0.1.6 is tagged.** It ships what master already holds (CHANGELOG `[Unreleased]`: PR #24 and PR #25, plus the fix for the cockpit check that failed on 2026-11-01, the stale-draft overwrite; maintainer: "Fix it first") once the maintainer has run the six manual clipboard checks in the PR #25 description and one cockpit session in their own voice. No new code goes into it. A failed check gets a fix for that check only, then a re-check.
 2. **A 14-day watch from the tag passes**, read from `~/Library/Logs/VoxFlow/insertions.jsonl`:
    - at least 150 quick-dictation inserts (fewer extends the watch; it does not pass it);
    - zero lost dictations: no reject where the user actually spoke, judged by listening to the receipt's retained `audio_file`. Silence and noise rejects don't count;
@@ -272,6 +272,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Skip `_RATE_LIMIT_LOCK` when touching `_rate_limit_timestamps` — short critical sections only.
 - Push smart actions onto the cockpit undo stack when they fail the guardrail or return the transcript unchanged — `SmartActionService` filters those before recording history.
 - Mutate `LongFormSession.transcript` from outside `LongFormSessionService` — `currentSession` is `@Published private(set)`. Use `setTranscript(_:)` so the auto-save Task sees the change.
+- Commit a transcript-editor edit through the unbound `setTranscript(_:)`, or keep the editor's draft keyed on `@FocusState` alone — editor writes go through `setTranscript(_:sessionID:)` (review state and matching session only), and the draft lives in `TranscriptDraft`, which re-seeds on any session or state change. A stale focus state (editor touched while the cockpit was not key) once let a discarded session's edit replace the next recording's transcript (2026-11-01).
 - Construct real system-touching services in tests — use the seams: `TextInserting` for insertion, `BackendProcessRunning` + `BackendProcessRunnerFake` for process/port/PID-file. Two shipped incidents came from exactly this (ghost "hello" AX insertions; test-spawned uvicorn squatters on port 8765).
 - Construct `TextInsertionCoordinator` in tests with `SystemClipboard.copy`; pass a `ClipboardRecorder` (the writer has no default, and a successful insert never writes the clipboard; a test that writes `NSPasteboard.general` overwrites the developer's real clipboard).
 - Attach window-open notification listeners to a view — `.voxflowOpenCockpit`/`Dashboard`/`Setup` route through `AppCoordinator.installWindowOpenHandler` (app-lifetime); a view-bound `.onReceive` dies with its window and silently kills the ⌥⌘V hotkey.

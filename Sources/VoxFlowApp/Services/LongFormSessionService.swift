@@ -146,6 +146,20 @@ final class LongFormSessionService: ObservableObject {
         save()
     }
 
+    /// Commit a transcript edit made in the review editor. Bound to the
+    /// session the edit was taken from, like `appendChunk`, so an edit from
+    /// an earlier session can never replace a later session's transcript.
+    /// Returns whether the edit was applied.
+    @discardableResult
+    func setTranscript(_ text: String, sessionID: UUID) -> Bool {
+        guard case .reviewing = state, currentSession?.id == sessionID else {
+            log.warning("editor commit for session \(sessionID.uuidString) ignored: not the session in review")
+            return false
+        }
+        setTranscript(text)
+        return true
+    }
+
     func recordAppliedAction(_ applied: AppliedAction) {
         currentSession?.appliedActions.append(applied)
         currentSession?.transcript = applied.afterText

@@ -306,6 +306,47 @@ final class LongFormSessionServiceTests: XCTestCase {
                        "discard must leave the latest transcript on disk")
     }
 
+    // MARK: - Session-bound editor commits (2026-11-01 stale-draft overwrite)
+
+    /// An edit taken from a discarded session must never replace the next
+    /// session's transcript, whatever state the editor's focus is in.
+    func test_editor_commit_for_a_discarded_session_leaves_the_next_session_untouched() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.appendTestChunk("first session")
+        service.stop()
+        let discardedID = service.currentSession!.id
+        service.discard()
+
+        service.start()
+        service.appendTestChunk("spoken words")
+        service.stop()
+
+        XCTAssertFalse(service.setTranscript("stale edit", sessionID: discardedID))
+        XCTAssertEqual(service.currentSession?.transcript, "spoken words")
+    }
+
+    func test_editor_commit_is_refused_while_recording() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.appendTestChunk("spoken words")
+        let id = service.currentSession!.id
+
+        XCTAssertFalse(service.setTranscript("stale edit", sessionID: id))
+        XCTAssertEqual(service.currentSession?.transcript, "spoken words")
+    }
+
+    func test_editor_commit_applies_to_its_own_session_in_review() {
+        let service = LongFormSessionService(autoSaveDirectory: tempDir())
+        service.start()
+        service.appendTestChunk("spoken words")
+        service.stop()
+        let id = service.currentSession!.id
+
+        XCTAssertTrue(service.setTranscript("spoken words, edited", sessionID: id))
+        XCTAssertEqual(service.currentSession?.transcript, "spoken words, edited")
+    }
+
     func test_discarded_session_file_is_swept_after_seven_days() {
         let dir = tempDir()
         let service = LongFormSessionService(autoSaveDirectory: dir)
