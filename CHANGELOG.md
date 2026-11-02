@@ -33,6 +33,13 @@ All notable changes to VoxFlow Local are documented here. The format follows
   at least 90 seconds (the stuck-runner breaker trips at 72 s), and the app
   gives a smart-action request 180 seconds instead of the shared 120, so a
   stuck local model plus a cloud fallback still fits.
+- An unsaved edit from a discarded cockpit session can no longer replace
+  the next session's transcript. The v0.1.6 acceptance run hit it: the
+  transcript editor was edited and Discard pressed while the cockpit was
+  not the active window, and the stale edit overwrote the next recording's
+  spoken text as it entered review. The editor's draft is now bound to the
+  session it came from and refreshed whenever the session changes, and an
+  editor commit is applied only to that session while it is in review.
 
 ## [0.1.5] — 2026-10-30
 

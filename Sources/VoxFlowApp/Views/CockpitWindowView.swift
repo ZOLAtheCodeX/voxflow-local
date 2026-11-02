@@ -257,8 +257,9 @@ struct CockpitWindowView: View {
     /// no-op-or-duplicate write of the same text.
     private func commitTranscriptDraft() {
         if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
-           textView.isEditable, !textView.isFieldEditor {
-            sessionService.setTranscript(textView.string)
+           textView.isEditable, !textView.isFieldEditor,
+           let sessionID = sessionService.currentSession?.id {
+            sessionService.setTranscript(textView.string, sessionID: sessionID)
         }
         NSApp.keyWindow?.makeFirstResponder(nil)
     }
