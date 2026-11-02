@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Cockpit side panel — Target, Notion, Dictionary, Assistant, and Recent cards.
+/// Cockpit side panel: Target, Notion, Dictionary, Assistant and Recent
+/// sections, each a sentence-case header over plain rows with separators.
 ///
 /// Omits only the ambient-buffer status (Layer 2). Per-layer content per the
 /// cockpit design spec.
@@ -38,34 +39,34 @@ struct CockpitSidePanelView: View {
     }
 
     private var targetSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("Target")
+        VStack(alignment: .leading, spacing: VF.spacingXSmall) {
+            VFSectionHeader(title: "Target")
             HStack(spacing: VF.spacingSmall) {
                 Image(systemName: "arrow.right.circle.fill")
                     .foregroundStyle(VF.colorInfo)
+                    .accessibilityHidden(true)
                 if let name = targetName {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(name).font(VF.labelFont)
+                            .lineLimit(1)
                         Text("append at cursor")
                             .font(VF.captionFont)
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("focused app")
+                    Text("Focused app")
                         .font(VF.captionFont)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            .padding(VF.spacingSmall)
-            .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
         }
     }
 
     @ViewBuilder private var assistantSection: some View {
         if state.assistantHandoffEnabled {
-            VStack(alignment: .leading, spacing: 6) {
-                sectionTitle("Assistant")
+            VStack(alignment: .leading, spacing: VF.spacingSmall) {
+                VFSectionHeader(title: "Assistant")
                 Button {
                     coordinator.requestAssistantHandoff()
                 } label: {
@@ -81,9 +82,9 @@ struct CockpitSidePanelView: View {
     }
 
     private var notionSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: VF.spacingXSmall) {
             HStack {
-                sectionTitle("Notion")
+                VFSectionHeader(title: "Notion")
                 if coordinator.notionTarget != nil {
                     Spacer()
                     Button {
@@ -96,14 +97,16 @@ struct CockpitSidePanelView: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Clear Notion target")
+                    .accessibilityLabel("Clear Notion target")
                 }
             }
 
             if let selected = coordinator.notionTarget {
-                // Selected state — show current target
+                // Selected state: show the current target.
                 HStack(spacing: VF.spacingSmall) {
                     Image(systemName: "doc.text.fill")
                         .foregroundStyle(VF.colorExternal)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Notion · \(selected.title)")
                             .font(VF.labelFont)
@@ -114,16 +117,16 @@ struct CockpitSidePanelView: View {
                     }
                     Spacer()
                 }
-                .padding(VF.spacingSmall)
-                .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
             } else {
                 // Search field
                 HStack(spacing: VF.spacingSmall) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                         .font(VF.captionFont)
+                        .accessibilityHidden(true)
                     TextField("Search pages…", text: $notionQuery)
                         .font(VF.captionFont)
+                        .textFieldStyle(.plain)
                         .onSubmit {
                             runSearch()
                         }
@@ -133,11 +136,12 @@ struct CockpitSidePanelView: View {
                     }
                 }
                 .padding(VF.spacingSmall)
-                .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
+                .vfSurface(.card, in: RoundedRectangle(cornerRadius: VF.cornerSmall, style: .continuous))
 
                 if !notionResults.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(notionResults) { result in
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(notionResults.enumerated()), id: \.element.id) { index, result in
+                            if index > 0 { Divider() }
                             Button {
                                 coordinator.selectNotionTarget(result)
                                 notionResults = []
@@ -147,14 +151,15 @@ struct CockpitSidePanelView: View {
                                     Image(systemName: "doc.text")
                                         .foregroundStyle(VF.colorExternal)
                                         .font(VF.captionFont)
+                                        .accessibilityHidden(true)
                                     Text(result.title)
                                         .font(VF.captionFont)
                                         .lineLimit(1)
                                     Spacer()
                                 }
-                                .padding(VF.spacingSmall)
+                                .padding(.vertical, VF.spacingSmall)
+                                .contentShape(Rectangle())
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
                             }
                             .buttonStyle(.plain)
                         }
@@ -167,7 +172,7 @@ struct CockpitSidePanelView: View {
                         .foregroundStyle(VF.colorExternal)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if notionQuery.isEmpty {
-                    Text("Type to search your Notion pages. Token required — set in Settings.")
+                    Text("Type to search your Notion pages. Add a Notion token in Settings first.")
                         .font(VF.microFont)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -190,56 +195,54 @@ struct CockpitSidePanelView: View {
     }
 
     private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("Recent")
+        VStack(alignment: .leading, spacing: VF.spacingXSmall) {
+            VFSectionHeader(title: "Recent")
             if state.recentDictations.isEmpty {
                 Text("No captures yet")
                     .font(VF.captionFont)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(state.recentDictations.prefix(3), id: \.id) { entry in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String(entry.rawText.prefix(80)) + (entry.rawText.count > 80 ? "…" : ""))
-                            .font(VF.captionFont)
-                            .lineLimit(2)
-                        Text(entry.timestamp, style: .relative)
-                            .font(VF.microFont)
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(state.recentDictations.prefix(3).enumerated()), id: \.element.id) { index, entry in
+                        if index > 0 { Divider() }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(entry.rawText.prefix(80)) + (entry.rawText.count > 80 ? "…" : ""))
+                                .font(VF.captionFont)
+                                .lineLimit(2)
+                            Text(entry.timestamp, style: .relative)
+                                .font(VF.microFont)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, VF.spacingSmall)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(VF.spacingSmall)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
                 }
             }
         }
     }
 
     private var dictionarySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("Dictionary")
+        VStack(alignment: .leading, spacing: VF.spacingXSmall) {
+            VFSectionHeader(title: "Dictionary")
             let recent = Array(dictionary.entries.suffix(3).reversed())
             if recent.isEmpty {
                 Text("No learned terms").font(VF.captionFont).foregroundStyle(.secondary)
             } else {
-                ForEach(recent) { entry in
-                    HStack(spacing: VF.spacingSmall) {
-                        Text(entry.wrong).font(VF.microFont).foregroundStyle(.secondary)
-                        Image(systemName: "arrow.right").font(VF.microFont).foregroundStyle(.tertiary)
-                        Text(entry.right).font(VF.captionFont)
-                        Spacer()
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(recent.enumerated()), id: \.element.id) { index, entry in
+                        if index > 0 { Divider() }
+                        HStack(spacing: VF.spacingSmall) {
+                            Text(entry.wrong).font(VF.microFont).foregroundStyle(.secondary)
+                            Image(systemName: "arrow.right").font(VF.microFont).foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                            Text(entry.right).font(VF.captionFont)
+                            Spacer()
+                        }
+                        .padding(.vertical, VF.spacingSmall)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(VF.spacingSmall)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(VF.cardBackground, in: RoundedRectangle(cornerRadius: VF.cornerSmall))
                 }
             }
         }
-    }
-
-    private func sectionTitle(_ s: String) -> some View {
-        Text(s.uppercased())
-            .font(VF.captionEmphasizedFont)
-            .tracking(1)
-            .foregroundStyle(.secondary)
     }
 }

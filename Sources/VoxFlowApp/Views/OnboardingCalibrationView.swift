@@ -5,10 +5,7 @@ struct OnboardingCalibrationView: View {
     @ObservedObject var state: AppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Voice Calibration")
-                .font(VF.largeFont)
-
+        VStack(alignment: .leading, spacing: VF.spacingMedium) {
             Text("Say each phrase using the hold-to-talk hotkey so the app can calibrate your voice profile.")
                 .font(VF.bodyFont)
                 .foregroundStyle(.secondary)
@@ -20,19 +17,18 @@ struct OnboardingCalibrationView: View {
 
                 Text("\"\(phrase)\"")
                     .font(VF.headingFont)
-                    .padding(12)
+                    .padding(VF.spacingMedium)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(VF.elevatedBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: VF.cornerMedium))
+                    .vfSurface(.elevated, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
             }
 
             if state.sessionState == .recording {
-                Text("Recording... release hotkey to process this phrase")
+                Text("Listening. Release the hotkey to process this phrase.")
                     .font(VF.labelFont)
                     .foregroundStyle(VF.colorWarning)
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: VF.spacingSmall) {
                 Button(state.sessionState == .recording ? "Stop" : "Record Phrase") {
                     if state.sessionState == .recording {
                         Task { await coordinator.finishCaptureAndTranscribe() }
@@ -51,14 +47,14 @@ struct OnboardingCalibrationView: View {
                     coordinator.completeOnboardingManually()
                 }
                 .buttonStyle(.bordered)
-                .help("Skip the voice profile setup. You can rerun calibration any time from the Setup Wizard.")
+                .help("Skip the voice profile setup. You can run calibration any time from Setup.")
 
                 Spacer()
             }
 
             if !state.calibrationItems.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: VF.spacingXSmall) {
                     ForEach(Array(state.calibrationItems.enumerated()), id: \.element.id) { index, item in
                         HStack {
                             Text("\(index + 1).")
@@ -77,6 +73,6 @@ struct OnboardingCalibrationView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(.vertical, VF.spacingSmall)
     }
 }

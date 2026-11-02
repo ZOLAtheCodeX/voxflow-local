@@ -37,7 +37,9 @@ enum PipelineStage: Int, CaseIterable, Identifiable {
 /// Replaces the plain `ProgressView()` + elapsed-time counter in
 /// `CommandPaletteView.transcribingStateCard`. Stages strictly before
 /// the active one render as completed (checkmark, success color); the
-/// active stage gets a pulsing accent fill; later stages stay muted.
+/// active stage shows its own symbol in the brand color; later stages stay
+/// muted with an empty circle. Nothing animates: the stage is told apart by
+/// symbol and color, so Reduce Motion needs no special case.
 ///
 /// VoiceOver: collapses to a single element announcing the active stage
 /// (e.g. "Transcribing, step 2 of 4"), so screen-reader users don't have
@@ -46,7 +48,7 @@ struct StagedProgressView: View {
     let activeStage: PipelineStage
 
     var body: some View {
-        HStack(spacing: VF.spacingSmall) {
+        HStack(spacing: VF.spacingXSmall) {
             ForEach(PipelineStage.allCases) { stage in
                 pill(for: stage)
                 if stage != PipelineStage.allCases.last {
@@ -60,20 +62,17 @@ struct StagedProgressView: View {
 
     private func pill(for stage: PipelineStage) -> some View {
         let status = state(for: stage)
-        return HStack(spacing: 4) {
-            Image(systemName: status == .done ? "checkmark.circle.fill" : stage.systemImage)
+        return HStack(spacing: 3) {
+            Image(systemName: status.symbol(for: stage))
                 .imageScale(.small)
                 .foregroundStyle(status.foreground)
-                .symbolEffect(
-                    .pulse,
-                    options: .repeating,
-                    isActive: status == .active
-                )
             Text(stage.label)
                 .font(VF.captionEmphasizedFont)
                 .foregroundStyle(status.foreground)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, VF.spacingSmall)
+        .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(status.background, in: Capsule())
     }
@@ -81,8 +80,8 @@ struct StagedProgressView: View {
     private func connector(after stage: PipelineStage) -> some View {
         Rectangle()
             .frame(height: 1)
-            .frame(maxWidth: 16)
-            .foregroundStyle(state(for: stage) == .done ? VF.colorSuccess : .secondary.opacity(0.3))
+            .frame(minWidth: 3, maxWidth: 12)
+            .foregroundStyle(state(for: stage) == .done ? VF.colorSuccess : VF.hairline)
     }
 
     private func state(for stage: PipelineStage) -> StageState {
@@ -105,10 +104,18 @@ struct StagedProgressView: View {
         case active
         case done
 
+        func symbol(for stage: PipelineStage) -> String {
+            switch self {
+            case .pending: return "circle"
+            case .active:  return stage.systemImage
+            case .done:    return "checkmark.circle.fill"
+            }
+        }
+
         var foreground: Color {
             switch self {
-            case .pending: return .secondary
-            case .active:  return .primary
+            case .pending: return VF.colorNeutral
+            case .active:  return VF.colorBrandInk
             case .done:    return VF.colorSuccess
             }
         }
@@ -116,7 +123,7 @@ struct StagedProgressView: View {
         var background: AnyShapeStyle {
             switch self {
             case .pending: return AnyShapeStyle(VF.cardBackground)
-            case .active:  return AnyShapeStyle(.tint.opacity(0.15))
+            case .active:  return AnyShapeStyle(VF.tintedBackground(VF.colorBrandInk))
             case .done:    return AnyShapeStyle(VF.tintedBackground(VF.colorSuccess, opacity: 0.12))
             }
         }

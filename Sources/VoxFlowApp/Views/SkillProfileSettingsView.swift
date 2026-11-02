@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 struct SkillProfileMenu: View {
     @ObservedObject var store: SkillProfileStore
     var body: some View {
-        Menu("Skills: \(store.activeProfile?.name ?? "Off")") {
+        Menu("Skill profile: \(store.activeProfile?.name ?? "Off")") {
             Button { store.activate(nil) } label: {
                 if store.activeProfileID == nil { Label("Off", systemImage: "checkmark") } else { Text("Off") }
             }
@@ -15,7 +15,7 @@ struct SkillProfileMenu: View {
                     else { Text(profile.name) }
                 }
             }
-            if store.profiles.isEmpty { Text("Add profiles in Settings → Dictation Tools") }
+            if store.profiles.isEmpty { Text("Add profiles in Settings → Voice") }
         }
         .accessibilityLabel("Active skill profile: \(store.activeProfile?.name ?? "Off")")
     }
@@ -38,7 +38,7 @@ struct SkillProfileSettingsSection: View {
     }
 
     var body: some View {
-        Section("Voice Action Prompts") {
+        Section("Skill profiles") {
             HStack {
                 SkillProfileMenu(store: store)
                 Spacer()

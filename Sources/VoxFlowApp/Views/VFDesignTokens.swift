@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Centralised design tokens.
@@ -35,10 +36,16 @@ enum VF {
     static let monoCaptionFont = Font.system(size: 11, design: .monospaced)
     static let monoMicroFont = Font.system(size: 10, design: .monospaced)
     static let microFont = Font.system(size: 10)
-    // Monospaced timer readout — used for the recording-duration counter
-    // in the push-to-talk command palette where the digits jitter without
-    // a fixed-width design and a bigger weight.
-    static let monoTimerFont = Font.system(size: 30, weight: .semibold, design: .monospaced)
+    /// Recording-duration readout in the push-to-talk palette. Proportional
+    /// digits made fixed-width with `monospacedDigit()` so the counter does
+    /// not jitter.
+    static let timerFont = Font.system(size: 30, weight: .semibold).monospacedDigit()
+
+    // Reading text (transcripts, last-dictation card). Wider line spacing and
+    // a capped measure keep long passages comfortable to read.
+    static let readingFont = Font.system(size: 15)
+    static let readingLineSpacing: CGFloat = 4
+    static let readingMaxWidth: CGFloat = 640
 
     // MARK: - Semantic colors
     //
@@ -61,6 +68,39 @@ enum VF {
         color.opacity(opacity)
     }
 
+    // MARK: - Brand
+    //
+    // `colorBrand` is the Waveline teal (#2FD4C5). It is a fill and accent
+    // color, not a text color on light surfaces: use `colorBrandInk` for
+    // text and glyphs that must stay legible in both appearances.
+    static let colorBrand = Color(red: 0.184, green: 0.831, blue: 0.773)
+
+    /// Brand teal tuned per appearance: the bright brand teal on dark, a
+    /// darker teal (#0A6F68, about 5.1:1 on #ECECEC) on light so it clears
+    /// WCAG AA 4.5:1 as text. Pinned by `BrandInkContrastTests`.
+    static let brandInkNSColor = NSColor(name: "VoxFlowBrandInk") { appearance in
+        if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+            return NSColor(srgbRed: 0x2F / 255.0, green: 0xD4 / 255.0, blue: 0xC5 / 255.0, alpha: 1)
+        }
+        return NSColor(srgbRed: 0x0A / 255.0, green: 0x6F / 255.0, blue: 0x68 / 255.0, alpha: 1)
+    }
+    static let colorBrandInk = Color(nsColor: brandInkNSColor)
+    /// The "listening" state reads as brand ink.
+    static let colorListening: Color = colorBrandInk
+    /// Voice-control (spoken command) state.
+    static let colorVoiceControl: Color = .indigo
+
+    // The three `WavelineMark` colors: plate gradient top and bottom, and the
+    // wave stroke.
+    static let brandPlateTop = Color(red: 0.137, green: 0.149, blue: 0.18)
+    static let brandPlateBottom = Color(red: 0.078, green: 0.086, blue: 0.106)
+    static let brandStroke = Color(red: 0.957, green: 0.949, blue: 0.925)
+
+    // MARK: - Surfaces
+    static let surfaceWindow = Color(nsColor: .windowBackgroundColor)
+    static let surfaceText = Color(nsColor: .textBackgroundColor)
+    static let hairline = Color(nsColor: .separatorColor)
+
     // MARK: - Motion
     static let animationStandard: Animation = .smooth(duration: 0.25)
     /// Pulsing animation for live indicators (recording state, waveform).
@@ -72,9 +112,11 @@ enum VF {
     static let cornerLarge: CGFloat = 12
 
     // MARK: - Spacing
+    static let spacingXSmall: CGFloat = 4
     static let spacingSmall: CGFloat = 8
     static let spacingMedium: CGFloat = 12
     static let spacingLarge: CGFloat = 16
+    static let spacingXLarge: CGFloat = 24
 
     // MARK: - Background materials
     //

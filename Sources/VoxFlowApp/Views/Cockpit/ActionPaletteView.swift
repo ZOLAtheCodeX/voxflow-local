@@ -60,7 +60,6 @@ struct ActionPaletteView: View {
             TextField("Type an action…", text: $query)
                 .textFieldStyle(.plain)
                 .padding(VF.spacingMedium)
-                .background(.thinMaterial)
                 .focused($queryFocused)
                 .onKeyPress(.downArrow) { selection.move(1); return .handled }
                 .onKeyPress(.upArrow) { selection.move(-1); return .handled }
@@ -94,8 +93,7 @@ struct ActionPaletteView: View {
             }
         }
         .frame(width: 440, height: 320)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous).strokeBorder(.white.opacity(0.08)))
+        .vfSurface(.hud, in: RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
         .onAppear { queryFocused = true }
         .onChange(of: query) { _, _ in selection.updateCount(items.count) }

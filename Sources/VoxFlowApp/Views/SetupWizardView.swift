@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// First-run setup as one checklist page: Microphone, Accessibility, Speech
+/// engine, and optional Voice calibration, then a "Try it" line. The decisions
+/// (which rows are done, the badge words, the health detail rows) live in
+/// `SetupChecklist`; this view lays them out and keeps every action's call.
 struct SetupWizardView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var state: AppState
@@ -7,22 +11,38 @@ struct SetupWizardView: View {
     @State private var permissions = PermissionSnapshot(microphoneAuthorized: false, accessibilityAuthorized: false)
     @State private var backendHealth: [String: String] = [:]
     @State private var isCheckingHealth = false
-    @State private var healthStatusLine = "Not checked yet"
+    @State private var healthMessage: String?
     @State private var didRunHealthCheck = false
+    @State private var detailsExpanded = false
     @State private var permissionPollTimer: Timer?
+
+    private var cardShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: VF.cornerLarge, style: .continuous)
+    }
+
+    private var engineReady: Bool {
+        SetupChecklist.engineReady(readiness: state.backendReadiness)
+    }
+
+    private var progress: SetupProgress {
+        SetupChecklist.progress(
+            microphone: permissions.microphoneAuthorized,
+            accessibility: permissions.accessibilityAuthorized,
+            engineReady: engineReady,
+            onboardingPhase: state.onboardingPhase)
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                headerCard
-                permissionsCard
-                backendCard
-                calibrationCard
-                validationCard
+            VStack(alignment: .leading, spacing: VF.spacingLarge) {
+                header
+                checklist
+                tryIt
+                footer
             }
-            .padding(18)
+            .padding(VF.spacingXLarge)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(VF.surfaceWindow)
         .onAppear {
             refreshPermissions()
             startPermissionPolling()
@@ -34,230 +54,214 @@ struct SetupWizardView: View {
         }
     }
 
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Setup Wizard")
-                .font(VF.displayFont)
-            Text("Complete permissions, backend readiness, and calibration before first use.")
-                .font(VF.secondaryFont)
-                .foregroundStyle(.secondary)
+    // MARK: - Header
 
-            HStack(spacing: 8) {
-                statusPill(
-                    title: "Permissions",
-                    ok: permissions.microphoneAuthorized && permissions.accessibilityAuthorized
-                )
-                statusPill(
-                    title: "Backend",
-                    ok: backendHealth["service_status"] == "ok" && backendHealth["model_loaded"] == "true"
-                )
-                statusPill(
-                    title: "Calibration",
-                    ok: state.onboardingPhase == .complete
-                )
-            }
+    private var header: some View {
+        let progress = progress
+        return HStack(alignment: .firstTextBaseline) {
+            Text("Set up VoxFlow")
+                .font(VF.displayFont)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            Text("\(progress.doneCount) of \(progress.total) done")
+                .font(VF.labelFont)
+                .foregroundStyle(.secondary)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
-    private var permissionsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("1. Permissions")
-                .font(VF.titleFont)
+    // MARK: - Checklist
 
-            HStack {
-                Text("Microphone")
-                Spacer()
-                Text(permissions.microphoneAuthorized ? "Granted" : "Missing")
-                    .foregroundStyle(permissions.microphoneAuthorized ? VF.colorSuccess : VF.colorWarning)
-            }
+    private var checklist: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            microphoneRow
+            Divider()
+            accessibilityRow
+            Divider()
+            engineRow
+            Divider()
+            calibrationRow
+        }
+        .padding(.horizontal, VF.spacingMedium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .vfSurface(.card, in: cardShape)
+    }
 
-            HStack {
-                Text("Accessibility")
-                Spacer()
-                Text(permissions.accessibilityAuthorized ? "Granted" : "Missing")
-                    .foregroundStyle(permissions.accessibilityAuthorized ? VF.colorSuccess : VF.colorWarning)
-            }
-
-            if !permissions.accessibilityAuthorized {
-                Text("If already granted: remove VoxFlow from System Settings → Privacy → Accessibility, then re-add it. Rebuilding the app invalidates the prior grant.")
-                    .font(VF.captionFont)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 8) {
-                Button("Request Microphone") {
+    private var microphoneRow: some View {
+        SetupRow(
+            symbol: "mic.fill",
+            title: "Microphone",
+            purpose: "Lets VoxFlow hear you.",
+            status: SetupChecklist.permissionStatus(permissions.microphoneAuthorized)
+        ) {
+            if !permissions.microphoneAuthorized {
+                Button("Grant Access") {
                     coordinator.requestMicrophonePermission()
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Grant microphone access")
+            }
+        }
+    }
 
-                Button("Request Accessibility") {
+    private var accessibilityRow: some View {
+        SetupRow(
+            symbol: "hand.tap.fill",
+            title: "Accessibility",
+            purpose: "Lets VoxFlow type into other apps.",
+            status: SetupChecklist.permissionStatus(permissions.accessibilityAuthorized)
+        ) {
+            if !permissions.accessibilityAuthorized {
+                Button("Grant Access") {
                     coordinator.requestAccessibilityPermission()
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Grant accessibility access")
+            }
+        } footer: {
+            if !permissions.accessibilityAuthorized {
+                Text("If you rebuild VoxFlow yourself, macOS may forget the Accessibility grant. Remove VoxFlow in System Settings → Privacy & Security → Accessibility and add it again.")
+                    .font(VF.captionFont)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
     }
 
-    private var backendCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("2. Local Backend Readiness")
-                .font(VF.titleFont)
-
-            Text("STT backend: \(state.sttBackend.displayName)")
-                .font(VF.secondaryFont)
-                .foregroundStyle(.secondary)
-
-            Text(healthStatusLine)
-                .font(VF.labelFont)
-                .foregroundStyle(backendHealth["model_loaded"] == "true" ? .green : .orange)
-
-            if didRunHealthCheck {
-                VStack(alignment: .leading, spacing: 4) {
-                    healthLine("Service", backendHealth["service_status"] ?? "unknown")
-                    healthLine("Ready for dictation", backendHealth["ready_for_dictation"] ?? "unknown")
-                    healthLine("Model loaded", backendHealth["model_loaded"] ?? "unknown")
-                    healthLine("Backend", backendHealth["stt_backend"] ?? "unknown")
-                    healthLine("Active model", backendHealth["active_stt_model"] ?? "unknown")
-                    healthLine("Fallback active", backendHealth["stt_fallback_active"] ?? "unknown")
-                    healthLine("Offline mode", backendHealth["offline_mode"] ?? "unknown")
-                    if let issues = backendHealth["issues"], !issues.isEmpty {
-                        healthLine("Issues", issues)
-                    }
-                }
-                .font(VF.captionFont)
-                .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 8) {
-                Button("Start Backend") {
+    private var engineRow: some View {
+        SetupRow(
+            symbol: "cpu",
+            title: "Speech engine",
+            purpose: SetupChecklist.speechEnginePurpose(state.sttBackend),
+            status: SetupChecklist.engineStatus(
+                ready: engineReady, starting: state.backendReadiness.warmupInProgress)
+        ) {
+            if !engineReady {
+                Button("Start Engine") {
                     coordinator.startBackend()
                     Task { await runHealthCheckAfterDelay() }
                 }
                 .buttonStyle(.borderedProminent)
+            }
+        } footer: {
+            engineDetails
+        }
+    }
+
+    private var engineDetails: some View {
+        DisclosureGroup("Details", isExpanded: $detailsExpanded) {
+            VStack(alignment: .leading, spacing: VF.spacingSmall) {
+                Text(healthMessage ?? "Not checked yet")
+                    .font(VF.secondaryFont)
+                    .foregroundStyle(.secondary)
+
+                if didRunHealthCheck {
+                    VStack(alignment: .leading, spacing: VF.spacingXSmall) {
+                        ForEach(SetupChecklist.detailRows(backendHealth), id: \.label) { row in
+                            LabeledContent(row.label) {
+                                Text(row.value)
+                                    .lineLimit(2)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    .font(VF.captionFont)
+                }
 
                 Button {
                     Task { await runHealthCheck() }
                 } label: {
-                    HStack {
+                    HStack(spacing: VF.spacingSmall) {
                         if isCheckingHealth {
                             ProgressView()
                                 .controlSize(.small)
                         }
-                        Text(isCheckingHealth ? "Checking..." : "Run Health Check")
+                        Text(isCheckingHealth ? "Checking" : "Check Again")
                     }
                 }
                 .buttonStyle(.bordered)
                 .disabled(isCheckingHealth)
             }
+            .padding(.top, VF.spacingXSmall)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
+        .font(VF.secondaryFont)
     }
 
-    private var calibrationCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("3. Voice Calibration")
-                    .font(VF.titleFont)
-                Spacer()
-                Text(state.onboardingPhase == .complete ? "Complete" : "Required")
-                    .font(VF.captionEmphasizedFont)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(VF.tintedBackground(state.onboardingPhase == .complete ? VF.colorSuccess : VF.colorWarning))
-                    .foregroundStyle(state.onboardingPhase == .complete ? VF.colorSuccess : VF.colorWarning)
-                    .clipShape(Capsule())
+    private var calibrationRow: some View {
+        let phase = state.onboardingPhase
+        return SetupRow(
+            symbol: "waveform.badge.mic",
+            title: "Voice calibration",
+            purpose: "Optional. Can improve accuracy.",
+            status: SetupChecklist.calibrationStatus(phase)
+        ) {
+            if phase != .calibrating {
+                if phase == .complete {
+                    Button("Recalibrate") {
+                        coordinator.restartOnboardingCalibration()
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button("Calibrate") {
+                        coordinator.restartOnboardingCalibration()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
-
-            if state.onboardingPhase == .calibrating {
+        } footer: {
+            if phase == .calibrating {
                 OnboardingCalibrationView(coordinator: coordinator, state: state)
-                    .padding(.top, 4)
-            } else {
-                Text("Calibration is complete. You can rerun it if dictation quality is poor.")
+            }
+        }
+    }
+
+    // MARK: - Try it
+
+    private var tryIt: some View {
+        let status = SetupChecklist.tryIt(
+            remainingRequired: progress.remainingRequired,
+            canStartCapture: state.canStartCaptureForDictation,
+            appName: state.focusTarget.appName)
+        return HStack(alignment: .firstTextBaseline, spacing: VF.spacingMedium) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Try it: click into any text field.")
+                    .font(VF.bodyEmphasizedFont)
+                Text(VFCopy.hotkeyHint(
+                    dictation: state.dictationHotkeyPreset, voiceControl: state.commandLaneHotkeyPreset))
                     .font(VF.secondaryFont)
                     .foregroundStyle(.secondary)
             }
+            Spacer(minLength: VF.spacingSmall)
+            VFStatusBadge(status: status)
+        }
+        .padding(VF.spacingMedium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .vfSurface(.card, in: cardShape)
+    }
 
-            HStack(spacing: 8) {
-                Button("Start / Restart Calibration") {
-                    coordinator.restartOnboardingCalibration()
-                }
-                .buttonStyle(.borderedProminent)
+    // MARK: - Footer
 
-                Button("Mark Complete") {
+    private var footer: some View {
+        HStack(spacing: VF.spacingSmall) {
+            if state.onboardingPhase == .notStarted {
+                Button("Skip Calibration") {
                     coordinator.completeOnboardingManually()
                 }
                 .buttonStyle(.bordered)
+                .help("Skip the voice profile setup. You can run calibration later from Setup.")
             }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
-    }
-
-    private var validationCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("4. Functional Check")
-                .font(VF.titleFont)
-
-            Text("Focus any text field (Notes, browser input, chat app), then hold `\(state.dictationHotkeyPreset.displayName)` to dictate and release to insert.")
-                .font(VF.secondaryFont)
-                .foregroundStyle(.secondary)
-
-            if state.canStartCaptureForDictation {
-                Text("Target ready in \(state.focusTarget.appName ?? "active app").")
-                    .font(VF.labelFont)
-                    .foregroundStyle(VF.colorSuccess)
-            } else {
-                Text("No active text cursor/field detected yet.")
-                    .font(VF.labelFont)
-                    .foregroundStyle(VF.colorWarning)
-            }
-
-            Button("Run Full Setup Reset") {
+            Spacer()
+            Button("Reset Setup") {
                 coordinator.restartOnboardingCalibration()
                 coordinator.startBackend()
                 refreshPermissions()
                 Task { await runHealthCheckAfterDelay() }
             }
             .buttonStyle(.bordered)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VF.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: VF.cornerLarge))
-    }
-
-    private func statusPill(title: String, ok: Bool) -> some View {
-        let tint = ok ? VF.colorSuccess : VF.colorWarning
-        return Text("\(title): \(ok ? "OK" : "Pending")")
-            .font(VF.captionEmphasizedFont)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(VF.tintedBackground(tint, opacity: 0.18))
-            .foregroundStyle(tint)
-            .clipShape(Capsule())
-    }
-
-    private func healthLine(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("\(title):")
-                .fontWeight(.semibold)
-            Text(value)
-                .lineLimit(2)
+            .help("Restart calibration, restart the engine and check permissions again.")
         }
     }
+
+    // MARK: - Permissions and health
 
     private func refreshPermissions() {
         permissions = coordinator.permissionSnapshot()
@@ -303,16 +307,79 @@ struct SetupWizardView: View {
                 "issues": readiness.issues.joined(separator: "; "),
             ]
             didRunHealthCheck = true
-            if readiness.readyForDictation {
-                healthStatusLine = "Backend ready: model loaded and healthy."
-            } else {
-                let issue = readiness.issues.first ?? "active STT model is not loaded"
-                healthStatusLine = "Backend reachable, not ready: \(issue)"
-            }
+            healthMessage = SetupChecklist.healthMessage(
+                reachable: true, ready: readiness.readyForDictation, firstIssue: readiness.issues.first)
         } catch {
             backendHealth = [:]
             didRunHealthCheck = true
-            healthStatusLine = "Backend unreachable. Start backend and retry."
+            healthMessage = SetupChecklist.healthMessage(reachable: false, ready: false, firstIssue: nil)
         }
+    }
+}
+
+/// One checklist row: identity symbol, title and purpose on the left; the
+/// row's action and its status badge on the right; optional detail below.
+private struct SetupRow<Actions: View, Footer: View>: View {
+    let symbol: String
+    let title: String
+    let purpose: String
+    let status: VFStatus
+    @ViewBuilder var actions: Actions
+    @ViewBuilder var footer: Footer
+
+    init(
+        symbol: String,
+        title: String,
+        purpose: String,
+        status: VFStatus,
+        @ViewBuilder actions: () -> Actions,
+        @ViewBuilder footer: () -> Footer
+    ) {
+        self.symbol = symbol
+        self.title = title
+        self.purpose = purpose
+        self.status = status
+        self.actions = actions()
+        self.footer = footer()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+            HStack(spacing: VF.spacingMedium) {
+                Image(systemName: symbol)
+                    .font(VF.titleFont)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(VF.bodyEmphasizedFont)
+                    Text(purpose)
+                        .font(VF.secondaryFont)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: VF.spacingSmall)
+                actions
+                VFStatusBadge(status: status)
+                    .frame(minWidth: 84, alignment: .trailing)
+            }
+            footer
+                .padding(.leading, 24 + VF.spacingMedium)
+        }
+        .padding(.vertical, VF.spacingMedium)
+    }
+}
+
+extension SetupRow where Footer == EmptyView {
+    init(
+        symbol: String,
+        title: String,
+        purpose: String,
+        status: VFStatus,
+        @ViewBuilder actions: () -> Actions
+    ) {
+        self.init(
+            symbol: symbol, title: title, purpose: purpose, status: status,
+            actions: actions, footer: { EmptyView() })
     }
 }

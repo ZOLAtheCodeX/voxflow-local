@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Cockpit transcript pane — editable when the session is in `.reviewing` state;
+/// Cockpit transcript pane: editable when the session is in `.reviewing` state;
 /// read-only during recording and idle. Focus-loss commits the edit via
 /// `LongFormSessionService.setTranscript(_:sessionID:)`, bound to the session
 /// the edit was taken from (``TranscriptDraft``), and fires `onEditCommit` for
@@ -13,33 +13,46 @@ struct CockpitTranscriptView: View {
     @FocusState private var editing: Bool
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: VF.spacingSmall) {
-                if let session = sessionService.currentSession {
-                    crumbs(session)
-                    if sessionService.state == .reviewing {
-                        TextEditor(text: Binding(get: { draft.text }, set: { draft.edit($0) }))
-                            .font(VF.bodyFont)
-                            .frame(minHeight: 200)
-                            .focused($editing)
-                            .onChange(of: editing) { _, isEditing in
-                                if isEditing { draft.beginEditing() }
-                                else { commitEdit() }
-                            }
-                    } else {
-                        Text(session.transcript.isEmpty ? placeholder : session.transcript)
-                            .font(VF.bodyFont)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+        Group {
+            if let session = sessionService.currentSession {
+                if sessionService.state == .reviewing {
+                    // The editor scrolls itself, so it is not nested in a
+                    // ScrollView (which proposes no height and left it at its
+                    // minimum): it fills the pane, and a long transcript
+                    // shows as much as fits and scrolls inside (ruling R32).
+                    VStack(alignment: .leading, spacing: VF.spacingSmall) {
+                        crumbs(session)
+                        page(session)
                     }
+                    // A capped line length, centered when the window is wide.
+                    .frame(maxWidth: VF.readingMaxWidth, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity)
+                    .padding(VF.spacingLarge)
                 } else {
-                    Text("Press ⌘R to start a long-form capture.")
-                        .font(VF.bodyFont)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: VF.spacingSmall) {
+                            crumbs(session)
+                            page(session)
+                        }
+                        // A capped line length, centered when the window is wide.
+                        .frame(maxWidth: VF.readingMaxWidth)
+                        .frame(maxWidth: .infinity)
+                        .padding(VF.spacingLarge)
+                    }
                 }
+            } else {
+                VFEmptyState(
+                    title: "No capture yet",
+                    symbol: "waveform",
+                    message: "Press ⌘R to start a long-form capture.",
+                    shortcuts: [
+                        VFShortcutHint(keys: "⌘R", label: "Record"),
+                        VFShortcutHint(keys: "⌘.", label: "Stop"),
+                        VFShortcutHint(keys: "⌘↩", label: "Insert"),
+                        VFShortcutHint(keys: "⌘K", label: "Actions"),
+                    ])
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(VF.spacingLarge)
         }
         .onChange(of: sessionService.currentSession?.transcript) { _, _ in syncDraft() }
         .onChange(of: sessionService.currentSession?.id) { _, _ in syncDraft() }
@@ -54,6 +67,33 @@ struct CockpitTranscriptView: View {
             reviewing: sessionService.state == .reviewing,
             editing: editing
         )
+    }
+
+    /// The writing surface: an opaque text background in reading type.
+    private func page(_ session: LongFormSession) -> some View {
+        Group {
+            if sessionService.state == .reviewing {
+                TextEditor(text: Binding(get: { draft.text }, set: { draft.edit($0) }))
+                    .font(VF.readingFont)
+                    .lineSpacing(VF.readingLineSpacing)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 200, maxHeight: .infinity)
+                    .focused($editing)
+                    .onChange(of: editing) { _, isEditing in
+                        if isEditing { draft.beginEditing() }
+                        else { commitEdit() }
+                    }
+            } else {
+                Text(session.transcript.isEmpty ? placeholder : session.transcript)
+                    .font(VF.readingFont)
+                    .lineSpacing(VF.readingLineSpacing)
+                    .foregroundStyle(session.transcript.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(VF.spacingMedium)
+        .vfSurface(.content, in: RoundedRectangle(cornerRadius: VF.cornerMedium, style: .continuous))
     }
 
     private func commitEdit() {

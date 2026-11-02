@@ -52,6 +52,7 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
     SessionMemoryStore.swift            Ring buffer for recent dictations
     InsertionReceiptStore.swift         Read-only insertions.jsonl tail reader — palette last-capture row + Dashboard Recent Captures (CaptureReceipt/RowModel)
     MenuBarPanelController.swift        Non-activating NSPanel + NSStatusItem
+    RecordingOverlayController.swift    Floating recording pill panel (never key); `PillOutcome` classifies how a capture ended, `PillPresentation` publishes it (and the late-status-line hold) to `RecordingPillView`
     FocusContextMonitor.swift           Focused-target poller; frozen during capture
     CockpitCoordinator.swift            @MainActor cockpit orchestration — chip MRU + voice routing + insert/copy/undo + Notion target/search + assistant handoff + protocol/chain dispatch
     CockpitCaptureCoordinator.swift     Cockpit capture loop: periodic chunk cuts, single-flight drain on stop, session-bound appends, device-change salvage
@@ -66,6 +67,14 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
   Views/                        SwiftUI views — VFDesignTokens.swift is the single source of truth for typography / colors / motion / materials
     Cockpit/                    Cockpit views (TopBar, Transcript, ChipRow, SidePanel [Target/Notion/Dictionary/Assistant/Recent], Palette, VoicePromptStrip, KeyEventBridge)
     CockpitWindowView.swift     Top-level cockpit window — wires shortcuts ⌘R/⌘./⌘Z/⌘↩/⌘C/⌘\/⌘W/esc
+    Components/                 Shared view primitives (VFBanner, VFChip, VFEmptyState, VFKeycap, VFSectionHeader, VFStatusBadge)
+    Palette/                    Command palette cards (header, recording, progress, review, last result, recent list, options row, footer)
+    Settings/                   Settings panes (General, Apps, Voice, Models, Privacy, Advanced); SettingsView.swift is the thin tab shell
+    RecordingPillView.swift     Floating pill content (RecordingOverlayController owns the panel); live, working and outcome states, drawn from `PillPresentation` and `PillOutcome.badgeStatus`
+    VFStatus.swift              One status vocabulary (symbol + word + color) and the pure mappings every surface uses
+    VFModifiers.swift           Reduce Motion aware motion (`vfLive`) and surface wrappers; the only view file allowed repeating animation
+    VFCopy.swift                Shared user-facing strings (cleanup label, hotkey hint, reject reasons), as pure functions
+    SetupProgress.swift         Pure first-run progress (required: microphone + Accessibility; optional: engine, calibration)
 
 backend/app/                    FastAPI server, decomposed in Phase 2
   server.py                     Composition root: app instance, middleware, route mounting, runtime singletons
@@ -220,7 +229,10 @@ VOXFLOW_WHISPERKIT_GOLDEN=1 swift test --filter WhisperKitShortCaptureIntegratio
 VOXFLOW_WHISPERKIT_GOLDEN=1 swift test --filter CockpitDecodeRegressionTests  # real-model speech-then-quiet + room-noise clips
 VOXFLOW_DICTIONARY_BENCHMARK=1 swift test --filter DictionaryPerformanceTests
 VOXFLOW_STT_BENCHMARK=1 swift test --filter WhisperKitPerformanceTests
+VOXFLOW_UI_SNAPSHOTS=<absolute dir> swift test --filter UISnapshotExportTests  # renders views to PNG from fixture data; skipped when unset
 ```
+
+`DesignTokenLintTests` enforces the Views token rule: no `Color` literals, system color names or `.system(size:)` outside `VFDesignTokens.swift`, and no repeating animation outside `VFDesignTokens.swift` and `VFModifiers.swift` (which is exempt from the motion rules only). Its baseline of exempt files must stay empty.
 
 Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish golden set: `backend/tests/golden_polish_set.json`.
 
@@ -256,7 +268,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - `Thread.sleep` in the insertion stack — use cooperative `Task.sleep`.
 - Launch raw Mach-O for AX features — always `open ~/Applications/VoxFlow.app` so TCC sees a stable identity.
 - `codesign --sign -` (ad-hoc) for installed builds *silently* — use the auto-detected Apple Development cert. Ad-hoc is allowed only as an explicit, loud opt-in (`VOXFLOW_ALLOW_ADHOC=1`) for forkers without an Apple ID; it does not persist the Accessibility grant across rebuilds.
-- Reintroduce raw `.font(.system(size:))` literals in views or `Color.gray.opacity(...)` anywhere in `Sources/VoxFlowApp/Views/` — go through `VFDesignTokens.swift`.
+- Reintroduce raw `.font(.system(size:))` literals in views or `Color.gray.opacity(...)` anywhere in `Sources/VoxFlowApp/Views/` — go through `VFDesignTokens.swift`. `DesignTokenLintTests` fails the build on it.
 - Skip `_RATE_LIMIT_LOCK` when touching `_rate_limit_timestamps` — short critical sections only.
 - Push smart actions onto the cockpit undo stack when they fail the guardrail or return the transcript unchanged — `SmartActionService` filters those before recording history.
 - Mutate `LongFormSession.transcript` from outside `LongFormSessionService` — `currentSession` is `@Published private(set)`. Use `setTranscript(_:)` so the auto-save Task sees the change.
