@@ -2,14 +2,14 @@ import SwiftUI
 
 /// Cockpit transcript pane — editable when the session is in `.reviewing` state;
 /// read-only during recording and idle. Focus-loss commits the edit via
-/// `LongFormSessionService.setTranscript(_:)` and fires `onEditCommit` for
+/// `LongFormSessionService.setTranscript(_:sessionID:)`, bound to the session
+/// the edit was taken from (``TranscriptDraft``), and fires `onEditCommit` for
 /// downstream consumers (e.g. dictionary learning).
 struct CockpitTranscriptView: View {
     @ObservedObject var sessionService: LongFormSessionService
     var onEditCommit: ((_ before: String, _ after: String) -> Void)? = nil
 
-    @State private var draft: String = ""
-    @State private var baseline: String = ""
+    @State private var draft = TranscriptDraft()
     @FocusState private var editing: Bool
 
     var body: some View {
@@ -18,12 +18,12 @@ struct CockpitTranscriptView: View {
                 if let session = sessionService.currentSession {
                     crumbs(session)
                     if sessionService.state == .reviewing {
-                        TextEditor(text: $draft)
+                        TextEditor(text: Binding(get: { draft.text }, set: { draft.edit($0) }))
                             .font(VF.bodyFont)
                             .frame(minHeight: 200)
                             .focused($editing)
                             .onChange(of: editing) { _, isEditing in
-                                if isEditing { baseline = draft }
+                                if isEditing { draft.beginEditing() }
                                 else { commitEdit() }
                             }
                     } else {
@@ -41,17 +41,25 @@ struct CockpitTranscriptView: View {
             }
             .padding(VF.spacingLarge)
         }
-        .onChange(of: sessionService.currentSession?.transcript) { _, new in
-            if !editing { draft = new ?? "" }
-        }
-        .onAppear { draft = sessionService.currentSession?.transcript ?? "" }
+        .onChange(of: sessionService.currentSession?.transcript) { _, _ in syncDraft() }
+        .onChange(of: sessionService.currentSession?.id) { _, _ in syncDraft() }
+        .onChange(of: sessionService.state) { _, _ in syncDraft() }
+        .onAppear { syncDraft() }
+    }
+
+    private func syncDraft() {
+        draft.observe(
+            transcript: sessionService.currentSession?.transcript,
+            sessionID: sessionService.currentSession?.id,
+            reviewing: sessionService.state == .reviewing,
+            editing: editing
+        )
     }
 
     private func commitEdit() {
-        let after = draft
-        guard after != baseline else { return }
-        sessionService.setTranscript(after)
-        onEditCommit?(baseline, after)
+        guard let commit = draft.pendingCommit,
+              sessionService.setTranscript(commit.after, sessionID: commit.sessionID) else { return }
+        onEditCommit?(commit.before, commit.after)
     }
 
     private var placeholder: String {
