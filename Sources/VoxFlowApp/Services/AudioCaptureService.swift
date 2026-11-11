@@ -2,6 +2,7 @@ import Accelerate
 @preconcurrency import AVFoundation
 import Foundation
 import os
+import VoxFlowObjCSupport
 
 struct CapturedAudio {
     let pcm: Data
@@ -98,11 +99,14 @@ struct CapturedAudio {
     }
 }
 
-enum AudioCaptureError: Error {
+enum AudioCaptureError: Error, Equatable {
     case noInputNode
     case captureNotRunning
     case converterSetupFailed
     case deviceChanged
+    /// AVAudioEngine raised an Objective-C exception from `call` (its
+    /// "required condition is false" family), caught by `guardingEngineCall`.
+    case engineException(call: String, name: String, reason: String)
 }
 
 final class AudioCaptureService: AudioCapturing {
@@ -207,6 +211,36 @@ final class AudioCaptureService: AudioCapturing {
         return state.generation
     }
 
+    /// Runs one AVAudioEngine call that can raise an Objective-C exception and
+    /// turns the exception into `AudioCaptureError.engineException`. Swift
+    /// cannot catch NSException: on 2026-11-06 one unwound through a
+    /// main-actor Task (most likely the hotkey's), AppKit swallowed it, and
+    /// the next isolation check crashed on a stale executor record. On the
+    /// start path keep each guarded block to a single engine call, so `call`
+    /// names it; never guard inside the tap's hot path.
+    static func guardingEngineCall<T>(_ call: String, _ body: () throws -> T) throws -> T {
+        var outcome: Result<T, any Error>?
+        let exception = VFCatchObjCException {
+            do { outcome = .success(try body()) } catch { outcome = .failure(error) }
+        }
+        if let exception {
+            throw AudioCaptureError.engineException(
+                call: call, name: exception.name.rawValue, reason: exception.reason ?? "")
+        }
+        guard let outcome else { preconditionFailure("guarded engine call \(call) neither returned nor raised") }
+        return try outcome.get()
+    }
+
+    /// Teardown-side engine call: an exception is logged and dropped, so a
+    /// stop never loses the buffered audio to it.
+    private func bestEffortEngineCall(_ call: String, _ body: () -> Void) {
+        do {
+            try Self.guardingEngineCall(call, body)
+        } catch {
+            logger.error("AVAudioEngine \(call, privacy: .public) failed during teardown: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     private var isCapturing = false
     private var deviceChangedDuringCapture = false
     private var configurationObserver: NSObjectProtocol?
@@ -279,8 +313,8 @@ final class AudioCaptureService: AudioCapturing {
     /// reset its state machine; startCapture() clears the flag.
     func handleConfigurationChange() {
         guard isCapturing else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        bestEffortEngineCall("removeTap") { engine.inputNode.removeTap(onBus: 0) }
+        bestEffortEngineCall("stop") { engine.stop() }
         isCapturing = false
         deviceChangedDuringCapture = true
         state.withLock { Self.invalidate(state: &$0) }
@@ -333,9 +367,34 @@ final class AudioCaptureService: AudioCapturing {
         let captureGeneration: UInt64 = state.withLock {
             Self.resetForCapture(state: &$0, onCaptureLive: onCaptureLive)
         }
+        do {
+            try armEngine(captureGeneration: captureGeneration)
+        } catch {
+            abandonFailedStart(error)
+            throw error
+        }
+        isCapturing = true
+    }
 
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
+    /// A start that threw, through a raised engine exception or otherwise,
+    /// ends like a stop: no tap, engine stopped, generation retired, no live
+    /// cue left behind.
+    private func abandonFailedStart(_ error: Error) {
+        bestEffortEngineCall("removeTap") { engine.inputNode.removeTap(onBus: 0) }
+        bestEffortEngineCall("stop") { engine.stop() }
+        isCapturing = false
+        state.withLock { state in
+            state.generation &+= 1
+            state.onCaptureLive = nil
+        }
+        logger.error("startCapture failed: \(String(describing: error), privacy: .public)")
+    }
+
+    /// The engine half of `startCapture`. Each engine call that can raise goes
+    /// through `guardingEngineCall`; the tap block is built outside the guard.
+    private func armEngine(captureGeneration: UInt64) throws {
+        let inputNode = try Self.guardingEngineCall("inputNode") { engine.inputNode }
+        let inputFormat = try Self.guardingEngineCall("outputFormat") { inputNode.outputFormat(forBus: 0) }
         guard inputFormat.sampleRate > 0 else {
             throw AudioCaptureError.converterSetupFailed
         }
@@ -367,8 +426,8 @@ final class AudioCaptureService: AudioCapturing {
             throw AudioCaptureError.converterSetupFailed
         }
 
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        try Self.guardingEngineCall("removeTap") { inputNode.removeTap(onBus: 0) }
+        let tap: AVAudioNodeTapBlock = { [weak self] buffer, _ in
             guard let self else { return }
 
             guard buffer.frameLength > 0 else { return }
@@ -432,16 +491,13 @@ final class AudioCaptureService: AudioCapturing {
             }
             liveCallback?()
         }
-
-        engine.prepare()
-        state.withLock { $0.captureStartedAt = ContinuousClock.now }
-        do {
-            try engine.start()
-        } catch {
-            inputNode.removeTap(onBus: 0)
-            throw error
+        try Self.guardingEngineCall("installTap") {
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat, block: tap)
         }
-        isCapturing = true
+
+        try Self.guardingEngineCall("prepare") { engine.prepare() }
+        state.withLock { $0.captureStartedAt = ContinuousClock.now }
+        try Self.guardingEngineCall("start") { try engine.start() }
     }
 
     func stopCapture() throws -> CapturedAudio {
@@ -451,8 +507,8 @@ final class AudioCaptureService: AudioCapturing {
         }
         guard isCapturing else { throw AudioCaptureError.captureNotRunning }
 
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        bestEffortEngineCall("removeTap") { engine.inputNode.removeTap(onBus: 0) }
+        bestEffortEngineCall("stop") { engine.stop() }
         isCapturing = false
 
         // Bump the generation so any tap block still executing is dropped by

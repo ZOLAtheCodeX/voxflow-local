@@ -15,6 +15,7 @@ Decided by the maintainer on 2026-10-31. The app is feature-complete and the pro
    - zero lost dictations: no reject where the user actually spoke, judged by listening to the receipt's retained `audio_file`. Silence and noise rejects don't count;
    - no crash and no backend restart loop.
    The raw reject rate is a reason to look, not the test.
+   **The v0.1.6 watch failed** on a crash on 2026-11-06 (an AVAudioEngine exception, most likely at capture start; 122 of 150 quick-dictation inserts by then). Maintainer, 2026-11-11: "Fix it, restart watch". The fix ships as v0.1.7 and a new 14-day watch, with the same criteria, starts from that tag.
 3. **Then the project is in maintenance.**
 
 **What justifies code, during the watch and in maintenance:**
@@ -31,7 +32,7 @@ Decided by the maintainer on 2026-10-31. The app is feature-complete and the pro
 **Exception: one UI and UX track (decided by the maintainer on 2026-10-31).** The freeze is lifted for a single, bounded UI pass that runs alongside the watch, and for nothing else:
 - It lives on its own branch and worktree and ends in one design spec under `docs/superpowers/specs/` and one PR. The spec is reviewed by the maintainer before any code, and the PR is reviewed with Codex (`codex`) and with Gemini through Antigravity (`agy`).
 - It changes views, `VFDesignTokens.swift`, copy and layout only. It does not touch capture, STT, insertion, the clipboard, session storage, settings persistence or the backend, so the watch keeps measuring the same pipeline.
-- It is not merged into `master` or installed until the watch has passed. The installed app stays v0.1.6 for the whole watch, and maintenance fixes during the watch ship from `master` without it.
+- It is not merged into `master` or installed until the watch has passed. The installed app stays v0.1.6 (v0.1.7 for the restarted watch, 2026-11-11) for the whole watch, and maintenance fixes during the watch ship from `master` without it.
 - Whatever it turns up beyond that one PR goes to the Someday list.
 
 ## Architecture
@@ -66,6 +67,7 @@ Sources/VoxFlowApp/             Swift frontend (SwiftUI, MenuBarExtra)
   Views/                        SwiftUI views — VFDesignTokens.swift is the single source of truth for typography / colors / motion / materials
     Cockpit/                    Cockpit views (TopBar, Transcript, ChipRow, SidePanel [Target/Notion/Dictionary/Assistant/Recent], Palette, VoicePromptStrip, KeyEventBridge)
     CockpitWindowView.swift     Top-level cockpit window — wires shortcuts ⌘R/⌘./⌘Z/⌘↩/⌘C/⌘\/⌘W/esc
+Sources/VoxFlowObjCSupport/     Objective-C shim: `VFCatchObjCException`, so AVAudioEngine calls that raise fail as Swift errors
 
 backend/app/                    FastAPI server, decomposed in Phase 2
   server.py                     Composition root: app instance, middleware, route mounting, runtime singletons
@@ -275,6 +277,7 @@ Backend golden clip fixtures: `backend/tests/fixtures/golden_clips/`. Polish gol
 - Classify `openai_compat` locality from the raw `base_url` — use the resolved URL (`spec.base_url or _OPENAI_COMPAT_DEFAULT_URL`); a no-`base_url` provider is LOCAL (matches the localhost server the backend actually calls), so it isn't mislabeled cloud and over-redacted.
 - Guard `AudioGain.normalize` at the *speech* floor (0.02) — valid weak speech occurs below it (live empties at rms ~0.016); only skip boosting below `silenceFloor` (0.003). The boost applies to the decoder's float copy only; the stored PCM / audit RMS stay the TRUE input level.
 - Treat AX cursor-at-position-0 as unreadable — `SmartSpacing.AXPrecedingRead.fieldStart` is an authoritative "no preceding character"; ONLY `.unreadable` may consult the prior-insertion fallback. The record must stay invalidation-bound: cleared by real user key/mouse events (VoxFlow's own synthetic events are source-tagged and ignored), by `triggerUndo()`, by the 60 s age bound, and never recorded after a paste under secure event input.
+- Call an AVAudioEngine or input-node method outside `AudioCaptureService.guardingEngineCall` (or `bestEffortEngineCall` on teardown paths). The engine reports failures by raising an Objective-C exception, Swift cannot catch it, and on 2026-11-06 one unwound through a main-actor Task and crashed the app about 30 ms later. On the start path keep one engine call per guarded block so the receipt names it (teardown blocks may reach `inputNode` first), and never guard inside the tap callback.
 - Bypass the capture generation guard in the audio tap — `AudioCaptureService.ingest` drops stale-generation callbacks wholesale (no append, no latency record, no live cue); every stop/config-change path must bump the generation AND clear `onCaptureLive`. The start cue is gated on the first delivered buffer in BOTH capture surfaces (palette and cockpit ⌘R); cockpit flush restarts deliberately pass no callback.
 - Write `NSPasteboard.general` for a temporary paste outside `TemporaryPasteboard` and its `PasteboardAccess` seam (`SystemPasteboard`); go through `TemporaryPasteboard.place`/`release`.
 - Send an Ollama `/api/chat` request without `think` — Gemma 4 reasons by default and polish latency goes from ~0.3 s to ~6 s; `OllamaBackend.polish` sets `think: ollama_think_enabled()`.

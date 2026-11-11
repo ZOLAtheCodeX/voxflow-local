@@ -278,6 +278,28 @@ final class InsertionAuditLogTests: XCTestCase {
         XCTAssertEqual(AuditTextRetention.fromDefaults(defaults), .digest)
     }
 
+    /// 2026-11-06: an AVAudioEngine exception at capture start crashed the
+    /// app. It now throws instead, and the watch reads only this file, so a
+    /// capture that failed to start leaves a reject receipt that names the
+    /// engine call and the exception's reason (os_log did not keep them).
+    func testCaptureStartFailureLeavesAReceiptWithTheEngineDetail() throws {
+        let log = InsertionAuditLog(fileURL: tempURL, retention: .none)
+        log.recordCaptureStartFailure(AudioCaptureError.engineException(
+            call: "installTap",
+            name: "com.apple.coreaudio.avfaudio",
+            reason: "required condition is false: nullptr == Tap()"))
+
+        let obj = try firstEntry()
+        XCTAssertEqual(obj["event"] as? String, "reject")
+        XCTAssertEqual(obj["reason"] as? String, "capture_failed")
+        XCTAssertEqual(obj["source"] as? String, "capture_start")
+        XCTAssertEqual(obj["chars"] as? Int, 0)
+        let detail = try XCTUnwrap(obj["detail"] as? String, "detail is not dictated text, so every retention keeps it")
+        XCTAssertTrue(detail.contains("installTap"), detail)
+        XCTAssertTrue(detail.contains("com.apple.coreaudio.avfaudio"), detail)
+        XCTAssertTrue(detail.contains("required condition is false: nullptr == Tap()"), detail)
+    }
+
     private func firstEntry() throws -> [String: Any] {
         let line = try String(contentsOf: tempURL, encoding: .utf8).split(separator: "\n")[0]
         return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])

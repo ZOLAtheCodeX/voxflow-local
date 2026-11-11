@@ -17,9 +17,16 @@ let package = Package(
         .executableTarget(
             name: "VoxFlowApp",
             dependencies: [
+                "VoxFlowObjCSupport",
                 .product(name: "WhisperKit", package: "WhisperKit"),
             ],
             path: "Sources/VoxFlowApp"
+        ),
+        // Objective-C only because Swift cannot catch NSException: it wraps
+        // AVAudioEngine calls that raise (see VFCatchObjCException).
+        .target(
+            name: "VoxFlowObjCSupport",
+            path: "Sources/VoxFlowObjCSupport"
         ),
         .testTarget(
             name: "VoxFlowAppTests",

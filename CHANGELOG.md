@@ -6,6 +6,23 @@ All notable changes to VoxFlow Local are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- An audio-engine failure no longer crashes the app. AVAudioEngine reports
+  some failures (its "required condition is false" checks) by raising an
+  Objective-C exception, which Swift cannot catch; on 2026-11-06 one,
+  most likely raised while a dictation was starting, unwound through a
+  main-actor task, and the menu bar palette crashed about 30 ms later.
+  Every engine call in the capture service
+  now runs through a small Objective-C catcher and fails as an ordinary
+  error: a failed start stops the engine, and a failed stop still returns
+  the audio already recorded. Whether the next capture then works depends
+  on the device; this fix stops the crash and records it, it does not
+  repair the device.
+- A quick dictation that fails to start now leaves a `capture_failed`
+  receipt in `insertions.jsonl`, with the engine call and the exception's
+  reason in a new `detail` field. Before, the failure was visible only as
+  an error in the palette, and the system log did not keep its cause.
+
 ## [0.1.6] — 2026-11-01
 
 A privacy release for the clipboard and the cockpit's stored sessions. The

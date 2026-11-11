@@ -866,6 +866,7 @@ final class AppCoordinator: ObservableObject {
                 }
             }
         } catch {
+            insertionAudit.recordCaptureStartFailure(error)
             state.sessionState = .error
             state.errorMessage = "Microphone access failed: \(error.localizedDescription)"
             state.isCommandLaneActive = false
