@@ -162,7 +162,8 @@ final class InsertionAuditLog {
         segmentCount: Int? = nil,
         peakAmplitude: Double? = nil,
         audioFile: String? = nil,
-        expectedAudioSeconds: Double? = nil
+        expectedAudioSeconds: Double? = nil,
+        detail: String? = nil
     ) {
         var entry: [String: Any] = [
             "event": "reject",
@@ -199,7 +200,25 @@ final class InsertionAuditLog {
         // Wall-clock span the PCM should cover — audio_seconds well below it
         // means the device dropped buffers mid-capture (coverage shortfall).
         if let expectedAudioSeconds { entry["expected_audio_seconds"] = expectedAudioSeconds }
+        // A failure description, never dictated text, so every retention
+        // level keeps it.
+        if let detail { entry["detail"] = detail }
         append(entry)
+    }
+
+    /// A quick-dictation capture that failed to start. Nothing was recorded,
+    /// so nothing was lost, but the watch reads only this file: without a
+    /// receipt the failure would be invisible. os_log did not keep the
+    /// 2026-11-06 crash's details, so the receipt carries them.
+    func recordCaptureStartFailure(_ error: Error) {
+        recordRejection(
+            text: "",
+            reason: "capture_failed",
+            confidence: 0,
+            durationSeconds: 0,
+            source: "capture_start",
+            detail: String(describing: error)
+        )
     }
 
     /// Replace any non-finite Double (NaN/±Inf) with a marker string. JSON has
